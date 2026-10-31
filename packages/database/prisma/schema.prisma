@@ -1,0 +1,1034 @@
+// ============================================================================
+// Gymify RPG — Complete Database Schema (MVP + Future Ironman Extensibility)
+// ============================================================================
+// Scope Note:
+// - MVP uses a 100% Honesty System (manual workout logging, instant location travel).
+// - Schema includes non-intrusive `GameMode` and `VerificationSource` hooks so a
+//   hardware-verified "Ironman Mode" can be bolted on later without breaking migrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum GameMode {
+  STANDARD          // MVP 100% Honesty System (manual logging)
+  IRONMAN_VERIFIED  // Reserved for future biometric/wearable-verified realm
+}
+
+enum VerificationSource {
+  MANUAL_HONESTY        // MVP default
+  APPLE_HEALTHKIT       // Reserved for future Ironman mode
+  GOOGLE_HEALTH_CONNECT // Reserved for future Ironman mode
+  WEARABLE_TELEMETRY    // Reserved for future Ironman mode
+}
+
+enum StatType {
+  STRENGTH  // Resistance / Weightlifting -> Melee power, equip reqs, mitigation
+  ENDURANCE // HR Zones 1-3 Cardio -> Stamina pool, dungeon sustain, hazard resist
+  AGILITY   // HR Zones 4-5 Cardio -> Attack speed, dodge, crit, cooldown haste
+  DEXTERITY
+  CONSTITUTION
+  WISDOM
+  SPIRIT
+}
+
+enum ActivityType {
+  CALISTHENICS
+  ROCK_CLIMBING
+  SLEEP
+  STEPS
+  YOGA
+  PILATES
+  MEDITATION
+  BREATHWORK
+  SAUNA
+  COLD_PLUNGE
+}
+
+enum WorkoutModality {
+  CALISTHENICS
+  ROCK_CLIMBING
+  SLEEP
+  STEPS
+  YOGA
+  PILATES
+  MEDITATION
+  BREATHWORK
+  SAUNA
+  COLD_PLUNGE
+}
+
+enum AdventurerRank {
+  COPPER
+  IRON
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+  MYTHIC
+}
+
+enum GameLocation {
+  TAVERN
+  GUILD_HALL
+  DUNGEON
+  GATHERING_NODE
+  RAID_SANCTUM
+}
+
+enum CharacterActivityState {
+  IDLE
+  RESTING_TAVERN
+  GATHERING
+  IN_DUNGEON
+}
+
+enum ExerciseCategory {
+  RESISTANCE
+  CARDIO
+  RECOVERY_MOBILITY
+}
+
+enum WorkoutType {
+  RESISTANCE
+  CARDIO_LOW_MOD
+  CARDIO_HIGH_INTENSITY
+  HYBRID
+  ACTIVE_RECOVERY
+}
+
+// Workout Category Gateway step (Gym / Cardio / Sport / Active Recovery)
+enum WorkoutCategory {
+  GYM
+  CARDIO
+  SPORT
+  RECOVERY
+}
+
+// Advanced set structure tags ([N] / [W] / [D] / [F])
+enum SetType {
+  NORMAL
+  WARMUP
+  DROP_SET
+  FAILURE
+  AMRAP
+}
+
+enum TalentNodeType {
+  PASSIVE_MODIFIER
+  ACTIVE_SKILL
+  KEYSTONE
+}
+
+enum ProfessionType {
+  MINING
+  FORAGING
+  SMELTING
+  ALCHEMY
+}
+
+enum GatheringTaskStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ItemType {
+  WEAPON
+  OFFHAND
+  HEAD
+  CHEST
+  LEGS
+  BOOTS
+  ACCESSORY
+  CRAFTING_MATERIAL
+  CONSUMABLE
+}
+
+enum WeaponHandedness {
+  ONE_HANDED
+  TWO_HANDED
+}
+
+enum ItemRarity {
+  COMMON
+  UNCOMMON
+  RARE
+  EPIC
+  LEGENDARY
+  MYTHIC
+}
+
+enum DungeonRunStatus {
+  RECRUITING
+  ACTIVE_WINDOW // 24-hour real-time expedition window accepting live workout buffs
+  SIMULATING
+  COMPLETED
+  FAILED
+  ABANDONED
+}
+
+enum CombatOutcome {
+  VICTORY
+  WIPE
+  TIMEOUT
+}
+
+enum GuildRole {
+  LEADER
+  OFFICER
+  VETERAN
+  MEMBER
+}
+
+enum RaidAccessType {
+  PUBLIC_WORLD
+  GUILD_ONLY
+}
+
+enum RaidStatus {
+  SCHEDULED
+  ACTIVE
+  DEFEATED
+  EXPIRED_UNDEFEATED
+  REWARDS_DISTRIBUTED
+}
+
+enum HybridSessionPhase {
+  IDLE
+  DUNGEON_ACTIVE
+  RESTING
+  DUNGEON_COMPLETE
+  LOOT_REVIEW
+}
+
+enum SessionArrivalTrigger {
+  GEOFENCE_GYM
+  MANUAL_OPEN_WORLD
+}
+
+enum LootChestTier {
+  COMMON
+  RARE
+  EPIC
+}
+
+// ============================================================================
+// 1. USERS, CHARACTERS, CORE STATS, & REST / FATIGUE STATE
+// ============================================================================
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  username     String    @unique
+  passwordHash String
+  timezone     String    @default("UTC")
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  characters      Character[]
+  workoutLogs     WorkoutLog[]
+  workoutSessions WorkoutSession[]
+  registeredGyms  RegisteredGymGuild[]
+  exercisePRs     UserExercisePR[]
+  workoutPresets  WorkoutPreset[]
+}
+
+model Character {
+  id                   String                 @id @default(cuid())
+  userId               String
+  name                 String                 @unique
+  avatarSpriteId       String                 @default("adventurer_default")
+  gameMode             GameMode               @default(STANDARD)
+  adventurerRank       AdventurerRank         @default(COPPER)
+  adventurerReputation Int                    @default(0)
+  gold                 Int                    @default(100)
+  overallLevel         Int                    @default(1)
+
+  // 7-Stat Progression System
+  dexLevel             Int                    @default(1)
+  dexXp                Int                    @default(0)
+  conLevel             Int                    @default(1)
+  conXp                Int                    @default(0)
+  wisLevel             Int                    @default(1)
+  wisXp                Int                    @default(0)
+  sprLevel             Int                    @default(1)
+  sprXp                Int                    @default(0)
+  currentLocation      GameLocation           @default(TAVERN)
+  activityState        CharacterActivityState @default(IDLE)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  user                  User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stats                 CharacterStats?
+  fatigueState          FatigueAndRestState?
+  workoutLogs           WorkoutLog[]
+  workoutSessions       WorkoutSession[]
+  rewardPayloads        RewardPayload[]
+  exercisePRs           UserExercisePR[]
+  talentUnlocks         CharacterTalentUnlock[]
+  gatheringTasks        ActiveGatheringTask[]
+  inventoryItems        InventoryItem[]
+  equipmentLoadout      EquipmentLoadout?
+  ledDungeonRuns        DungeonRun[]                  @relation("DungeonRunLeader")
+  dungeonParticipations DungeonRunParticipant[]
+  ledGuilds             Guild[]                       @relation("GuildLeader")
+  guildMembership       GuildMember?
+  bountyCompletions     CharacterBountyCompletion[]
+  raidContributions     RaidParticipantContribution[]
+
+  @@unique([userId, gameMode])
+  @@index([adventurerRank])
+}
+
+model CharacterStats {
+  id          String @id @default(cuid())
+  characterId String @unique
+
+  // Strength (STR) — Weightlifting / Resistance
+  strengthLevel                 Int @default(1)
+  strengthXp                    Int @default(0)
+  strengthTalentPointsAvailable Int @default(0)
+  strengthTalentPointsSpent     Int @default(0)
+
+  // Endurance (END) — Zones 1-3 Cardio
+  enduranceLevel                 Int @default(1)
+  enduranceXp                    Int @default(0)
+  enduranceTalentPointsAvailable Int @default(0)
+  enduranceTalentPointsSpent     Int @default(0)
+
+  // Agility / Stamina (AGI/STA) — Zones 4-5 Cardio
+  agilityLevel                 Int @default(1)
+  agilityXp                    Int @default(0)
+  agilityTalentPointsAvailable Int @default(0)
+  agilityTalentPointsSpent     Int @default(0)
+
+  // Baseline derived combat attributes (recomputed on level-up / gear change)
+  baseMaxHp        Int   @default(250)
+  baseMaxStamina   Int   @default(100)
+  baseMeleePower   Int   @default(20)
+  baseArmorRating  Int   @default(10)
+  baseAttackSpeed  Float @default(1.0)
+  baseDodgeRating  Float @default(0.05)
+  baseCritChance   Float @default(0.05)
+
+  updatedAt DateTime @updatedAt
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+}
+
+model FatigueAndRestState {
+  id          String @id @default(cuid())
+  characterId String @unique
+
+  // Automatic Tavern Rest Detection (24h+ without heavy lifting or Zone 3-5 cardio)
+  isRestingInTavern      Boolean   @default(true)
+  tavernEnteredAt        DateTime? @default(now())
+  lastStrenuousWorkoutAt DateTime?
+  lastWorkoutAt          DateTime?
+
+  // Systemic Fatigue Tracking (5-6+ consecutive high-intensity days without rest/recovery)
+  consecutiveHighIntensityDays Int       @default(0)
+  lastHighIntensityDayKey      String?   // YYYY-MM-DD key used for consecutive day evaluation
+  systemicFatigueStacks        Int       @default(0)
+  fatigueScore                 Float     @default(0.0)
+
+  // XP Multiplier Buffs for next strenuous workout
+  wellRestedMultiplier     Float     @default(1.0) // Scales above 1.0 after 24h+ in Tavern State
+  activeRecoveryBuffActive Boolean   @default(false) // +25% XP multiplier from dedicated Recovery Session
+  activeRecoveryGrantedAt  DateTime?
+
+  // Hybrid Reward Protocol Consistency & Anti-Streak Collapse Tracking
+  consistencyStreakSessions Int      @default(0)
+  resilienceShieldsEarned   Int      @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// 2. EXERCISE CATALOG, PERSONAL RECORDS (PRs), & WORKOUT LOGS
+// ============================================================================
+
+model ExerciseCatalog {
+  id            String           @id @default(cuid())
+  slug          String           @unique
+  name          String
+  category      ExerciseCategory
+  primaryStat   StatType
+  workoutCategory WorkoutCategory @default(GYM) // Gateway category this exercise appears under
+  muscleGroup   String?          // e.g., CHEST, BACK, LEGS, SHOULDERS, POSTERIOR_CHAIN, AEROBIC
+  equipmentType String?          // e.g., BARBELL, DUMBBELL, CABLE, BODYWEIGHT, ERGOMETER
+  activityType  String?          // Cardio/Sport modality key (outdoor_cycling, badminton, boxing, brisk_walk)
+  isCompound    Boolean          @default(false)
+  baseXpFactor  Float            @default(1.0)
+  description   String?
+  createdAt     DateTime         @default(now())
+
+  userPRs     UserExercisePR[]
+  workoutSets WorkoutSet[]
+  setLogs     SetLog[]
+
+  @@index([category, primaryStat])
+}
+
+model UserExercisePR {
+  id          String @id @default(cuid())
+  userId      String
+  characterId String
+  exerciseId  String
+
+  // Resistance PR metrics (Epley e1RM = Weight * (1 + Reps / 30))
+  bestE1RM            Float @default(0)
+  bestSingleSetVolume Float @default(0)
+  bestSessionVolume   Float @default(0)
+  maxWeightLiftedKg   Float @default(0)
+  maxRepsByWeight     Json  @default("{}") // Map<weightBracketKg, maxReps>
+
+  // Cardio PR metrics
+  bestCardioDurationSec       Int  @default(0)
+  bestCardioDurationSecByZone Json @default("{}") // Map<hrZone_1_to_5, maxDurationSeconds>
+
+  achievedAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  character Character       @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  exercise  ExerciseCatalog @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, exerciseId])
+  @@index([userId, exerciseId])
+}
+
+model WorkoutLog {
+  id          String      @id @default(cuid())
+  userId      String
+  characterId String
+  workoutType WorkoutType
+  workoutCategory WorkoutCategory?
+  performedAt DateTime    @default(now())
+  sourcePresetId String?   // Optional WorkoutPreset this session was loaded from
+  sessionRpe     Float?    // Session RPE for cardio / sport segments
+
+  // Cardio / Session-wide inputs
+  durationSeconds    Int     @default(0)
+  averageHrZone      Int?    // Self-reported HR Zone 1-5
+  cardioActivityType String? // e.g., running, cycling, rowing, jump_rope, yoga
+  notes              String?
+
+  // MVP Honesty Default + Future Ironman Hardware Verification Hooks
+  verificationSource   VerificationSource @default(MANUAL_HONESTY)
+  isHardwareVerified   Boolean            @default(false)
+  externalTelemetryRef String?
+  telemetryMetadata    Json?
+
+  // Computed RPG Stat XP & Multipliers
+  strengthXpAwarded   Int   @default(0)
+  enduranceXpAwarded  Int   @default(0)
+  agilityXpAwarded    Int   @default(0)
+  xpMultiplierApplied Float @default(1.0)
+
+  // Progressive Overload Crit ("Critical Training Bonus")
+  triggeredPrCrit Boolean @default(false)
+  prCritCount     Int     @default(0)
+  prCritBonusXp   Int     @default(0)
+  prCritLootDrop  Json?   // Guaranteed loot/material drop rolled on PR crit
+
+  // Optional live expedition / raid linkages
+  injectedDungeonRunId    String?
+  channeledRaidInstanceId String?
+
+  createdAt DateTime @default(now())
+
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  character             Character         @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  sets                  WorkoutSet[]
+  workoutSession        WorkoutSession?
+  rewardPayload         RewardPayload?
+  injectedDungeonRun    DungeonRun?       @relation("DungeonInjectedWorkouts", fields: [injectedDungeonRunId], references: [id], onDelete: SetNull)
+  channeledRaidInstance RaidBossInstance? @relation("RaidChanneledWorkouts", fields: [channeledRaidInstanceId], references: [id], onDelete: SetNull)
+
+  @@index([characterId, performedAt])
+  @@index([injectedDungeonRunId])
+  @@index([channeledRaidInstanceId])
+}
+
+model WorkoutSet {
+  id           String @id @default(cuid())
+  workoutLogId String
+  exerciseId   String
+  setNumber    Int
+
+  // Resistance Set Fields
+  reps              Int?
+  weightKg          Float?
+  rpe               Float?
+  isWarmup          Boolean @default(false)
+  setType           SetType @default(NORMAL)
+  supersetGroupId   String? // Shared id across A1 / A2 superset members
+  calculatedE1RM    Float?
+  relativeIntensity Float?  // Working Weight / Historical Exercise e1RM
+
+  // Cardio / Interval Set Fields
+  durationSeconds Int?
+  hrZone          Int?
+  distanceMeters  Float?
+
+  // PR Tracking per Set
+  isPersonalRecord Boolean @default(false)
+  prTypesBroken    Json?   // e.g., ["E1RM", "REPS_AT_WEIGHT"]
+
+  workoutLog WorkoutLog      @relation(fields: [workoutLogId], references: [id], onDelete: Cascade)
+  exercise   ExerciseCatalog @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@index([workoutLogId])
+  @@index([exerciseId])
+}
+
+// ============================================================================
+// 2A. WORKOUT PRESETS (Local-First Templates with Supersets & Set Types)
+// ============================================================================
+
+model WorkoutPreset {
+  id           String          @id @default(cuid())
+  userId       String?         // Null for global system starter presets
+  slug         String?         @unique
+  name         String
+  category     WorkoutCategory
+  notes        String?
+  isSystemSeed Boolean         @default(false)
+  // Ordered exercise blocks (supersetGroupId, set templates [W/N/D/F], target reps/weight/RPE)
+  // plus cardio / sport segments (duration & HR zone targets). Mirrors `WorkoutPresetBlocksPayload`.
+  blocks       Json            @default("{\"exerciseBlocks\":[],\"cardioSegments\":[]}")
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, category])
+}
+
+// ============================================================================
+// 2B. HYBRID REWARD PROTOCOL: GYM GEOFENCES, LIVE SESSIONS, SET LOGS & REWARDS
+// ============================================================================
+
+model RegisteredGymGuild {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  latitude     Float
+  longitude    Float
+  radiusMeters Int      @default(120)
+  createdAt    DateTime @default(now())
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workoutSessions WorkoutSession[]
+
+  @@index([userId])
+}
+
+model WorkoutSession {
+  id                    String                @id @default(cuid())
+  userId                String
+  characterId           String
+  gymGuildId            String?
+  gymName               String?
+  workoutLogId          String?               @unique
+  phase                 HybridSessionPhase    @default(DUNGEON_ACTIVE)
+  workoutType           WorkoutType           @default(RESISTANCE)
+  arrivalTrigger        SessionArrivalTrigger @default(MANUAL_OPEN_WORLD)
+  arrivalBoonMultiplier Float                 @default(1.25)
+  lowEnergyMode         Boolean               @default(false)
+  restTimerConfigSec    Int                   @default(120)
+  restEndsAt            DateTime?
+  encounterBossName     String                @default("Obsidian Iron-Construct")
+  encounterBossMaxHp    Int                   @default(1200)
+  encounterBossHp       Int                   @default(1200)
+  accumulatedMicroXp    Int                   @default(0)
+  accumulatedMicroGold  Int                   @default(0)
+  focusLockActive       Boolean               @default(true)
+  focusOverrideCount    Int                   @default(0)
+  startedAt             DateTime              @default(now())
+  completedAt           DateTime?
+  reviewedAt            DateTime?
+  updatedAt             DateTime              @updatedAt
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  character     Character           @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  gymGuild      RegisteredGymGuild? @relation(fields: [gymGuildId], references: [id], onDelete: SetNull)
+  workoutLog    WorkoutLog?         @relation(fields: [workoutLogId], references: [id], onDelete: SetNull)
+  setLogs       SetLog[]
+  rewardPayload RewardPayload?
+
+  @@index([characterId, phase])
+  @@index([userId, startedAt])
+}
+
+model SetLog {
+  id               String   @id @default(cuid())
+  workoutSessionId String
+  exerciseId       String
+  setNumber        Int
+  reps             Int
+  weightKg         Float
+  rpe              Float?
+  isWarmup         Boolean  @default(false)
+  setType          SetType  @default(NORMAL)
+  supersetGroupId  String?
+  calculatedE1RM   Float    @default(0)
+  relativeIntensity Float   @default(0)
+  isLivePrPace     Boolean  @default(false)
+  microXpTick      Int      @default(0)
+  microGoldTick    Int      @default(0)
+  bossHpDamage     Int      @default(0)
+  plannedRestSec   Int      @default(120)
+  loggedAt         DateTime @default(now())
+
+  workoutSession WorkoutSession  @relation(fields: [workoutSessionId], references: [id], onDelete: Cascade)
+  exercise       ExerciseCatalog @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@index([workoutSessionId, setNumber])
+  @@index([exerciseId])
+}
+
+model RewardPayload {
+  id                       String        @id @default(cuid())
+  workoutSessionId         String        @unique
+  workoutLogId             String?       @unique
+  characterId              String
+  totalTonnageKg           Float         @default(0)
+  totalReps                Int           @default(0)
+  workingSetCount          Int           @default(0)
+  averageRpe               Float?
+  arrivalBoonApplied       Float         @default(1.25)
+  fatigueMultiplierApplied Float         @default(1.0)
+  resilienceTriggered      Boolean       @default(false)
+  resilienceReason         String?
+  resilienceBonusXp        Int           @default(0)
+  resilienceBonusGold      Int           @default(0)
+  effectiveTotalMultiplier Float         @default(1.25)
+  strengthXpAwarded        Int           @default(0)
+  enduranceXpAwarded       Int           @default(0)
+  agilityXpAwarded         Int           @default(0)
+  totalGoldAwarded         Int           @default(0)
+  chestTier                LootChestTier @default(COMMON)
+  effortQualityScore       Float         @default(0)
+  chestOpened              Boolean       @default(false)
+  lootDrops                Json          @default("[]")
+  characterProgression     Json          @default("{}") // Post-workout StatLevelProgression & earned Talent Points
+  createdAt                DateTime      @default(now())
+
+  workoutSession WorkoutSession @relation(fields: [workoutSessionId], references: [id], onDelete: Cascade)
+  workoutLog     WorkoutLog?    @relation(fields: [workoutLogId], references: [id], onDelete: SetNull)
+  character      Character      @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, createdAt])
+}
+
+// ============================================================================
+// 3. STAT-BOUND MULTI-CLASS TALENT TREES
+// ============================================================================
+
+model TalentTree {
+  id            String   @id @default(cuid())
+  slug          String   @unique // juggernaut, vanguard, warden, outrider, berserker, assassin
+  name          String
+  governingStat StatType
+  archetypeRole String
+  description   String
+  createdAt     DateTime @default(now())
+
+  nodes TalentNode[]
+
+  @@index([governingStat])
+}
+
+model TalentNode {
+  id                      String         @id @default(cuid())
+  talentTreeId            String
+  slug                    String         @unique
+  name                    String
+  description             String
+  tier                    Int            @default(1) // Depth row in tree (1..4)
+  maxRank                 Int            @default(1)
+  pointCostPerRank        Int            @default(1)
+  requiredTreePointsSpent Int            @default(0)
+  prerequisiteNodeId      String?
+  nodeType                TalentNodeType @default(PASSIVE_MODIFIER)
+  effectConfig            Json           // Structured passive modifiers or active combat skill definition
+
+  talentTree       TalentTree              @relation(fields: [talentTreeId], references: [id], onDelete: Cascade)
+  prerequisiteNode TalentNode?             @relation("TalentNodePrerequisites", fields: [prerequisiteNodeId], references: [id], onDelete: SetNull)
+  dependentNodes   TalentNode[]            @relation("TalentNodePrerequisites")
+  characterUnlocks CharacterTalentUnlock[]
+
+  @@index([talentTreeId, tier])
+}
+
+model CharacterTalentUnlock {
+  id           String   @id @default(cuid())
+  characterId  String
+  talentNodeId String
+  currentRank  Int      @default(1)
+  pointsSpent  Int      @default(1)
+  unlockedAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  character  Character  @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  talentNode TalentNode @relation(fields: [talentNodeId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, talentNodeId])
+  @@index([characterId])
+}
+
+// ============================================================================
+// 4. 2-HOUR IDLE GATHERING & CRAFTING PROFESSIONS
+// ============================================================================
+
+model GatheringNode {
+  id                String         @id @default(cuid())
+  slug              String         @unique
+  name              String
+  professionType    ProfessionType
+  description       String
+  durationSeconds   Int            @default(7200) // Up to 2 hours (7,200 seconds)
+  requiredStatType  StatType?
+  requiredStatLevel Int            @default(1)
+  inputMaterials    Json?          // Required input items for crafting nodes (Smelting/Alchemy)
+  lootTable         Json           // Guaranteed + weighted bonus yields upon completion
+  createdAt         DateTime       @default(now())
+
+  activeTasks ActiveGatheringTask[]
+}
+
+model ActiveGatheringTask {
+  id                  String              @id @default(cuid())
+  characterId         String
+  gatheringNodeId     String
+  status              GatheringTaskStatus @default(IN_PROGRESS)
+  startedAt           DateTime            @default(now())
+  completesAt         DateTime            // startedAt + custom duration (up to max 2 hours)
+  completedAt         DateTime?
+  targetDurationMs    Int?                // User's custom duration goal in milliseconds
+  targetYieldAmount   Int?                // User's custom resource count goal
+  lastTickProcessedAt DateTime            @default(now()) // Timestamp of the most recently processed tick for retroactive sync
+  notifyOnCompletion  Boolean             @default(false) // Flag indicating if user scheduled a target push notification
+  accumulatedTicks    Int                 @default(0)     // Total ticks rewarded so far
+  bullMqJobId         String?             // Tracks scheduled Redis/BullMQ completion worker job
+  yieldedLoot         Json?               // Deposited resources/items when transitioning back to IDLE
+
+  character     Character     @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  gatheringNode GatheringNode @relation(fields: [gatheringNodeId], references: [id], onDelete: Restrict)
+
+  @@index([characterId, status])
+  @@index([status, completesAt])
+}
+
+// ============================================================================
+// 5. ITEMS, INVENTORY, & EQUIPMENT LOADOUT
+// ============================================================================
+
+model Item {
+  id               String            @id @default(cuid())
+  slug             String            @unique
+  name             String
+  description      String
+  itemType         ItemType
+  rarity           ItemRarity        @default(COMMON)
+  weaponHandedness WeaponHandedness?
+
+  // Stat Equip Requirements
+  requiredStrength  Int @default(0)
+  requiredEndurance Int @default(0)
+  requiredAgility   Int @default(0)
+
+  // Combat & Utility Modifiers
+  statBonuses Json    @default("{}") // { meleePower, armorRating, maxHp, maxStamina, attackSpeedPct, dodgeRating, critChance }
+  stackable   Boolean @default(true)
+  maxStack    Int     @default(999)
+  goldValue   Int     @default(10)
+  createdAt   DateTime @default(now())
+
+  inventoryEntries InventoryItem[]
+}
+
+model InventoryItem {
+  id           String   @id @default(cuid())
+  characterId  String
+  itemId       String
+  quantity     Int      @default(1)
+  isLocked     Boolean  @default(false)
+  itemMetadata Json?    // Optional roll affixes or durability metadata
+  acquiredAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  equippedMainHand   EquipmentLoadout? @relation("EquippedMainHand")
+  equippedOffHand    EquipmentLoadout? @relation("EquippedOffHand")
+  equippedHead       EquipmentLoadout? @relation("EquippedHead")
+  equippedChest      EquipmentLoadout? @relation("EquippedChest")
+  equippedLegs       EquipmentLoadout? @relation("EquippedLegs")
+  equippedBoots      EquipmentLoadout? @relation("EquippedBoots")
+  equippedAccessory1 EquipmentLoadout? @relation("EquippedAccessory1")
+  equippedAccessory2 EquipmentLoadout? @relation("EquippedAccessory2")
+
+  @@index([characterId, itemId])
+}
+
+model EquipmentLoadout {
+  id               String   @id @default(cuid())
+  characterId      String   @unique
+  mainHandItemId   String?  @unique
+  offHandItemId    String?  @unique
+  headItemId       String?  @unique
+  chestItemId      String?  @unique
+  legsItemId       String?  @unique
+  bootsItemId      String?  @unique
+  accessory1ItemId String?  @unique
+  accessory2ItemId String?  @unique
+  updatedAt        DateTime @updatedAt
+
+  character  Character      @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  mainHand   InventoryItem? @relation("EquippedMainHand", fields: [mainHandItemId], references: [id], onDelete: SetNull)
+  offHand    InventoryItem? @relation("EquippedOffHand", fields: [offHandItemId], references: [id], onDelete: SetNull)
+  head       InventoryItem? @relation("EquippedHead", fields: [headItemId], references: [id], onDelete: SetNull)
+  chest      InventoryItem? @relation("EquippedChest", fields: [chestItemId], references: [id], onDelete: SetNull)
+  legs       InventoryItem? @relation("EquippedLegs", fields: [legsItemId], references: [id], onDelete: SetNull)
+  boots      InventoryItem? @relation("EquippedBoots", fields: [bootsItemId], references: [id], onDelete: SetNull)
+  accessory1 InventoryItem? @relation("EquippedAccessory1", fields: [accessory1ItemId], references: [id], onDelete: SetNull)
+  accessory2 InventoryItem? @relation("EquippedAccessory2", fields: [accessory2ItemId], references: [id], onDelete: SetNull)
+}
+
+// ============================================================================
+// 6. 24-HOUR DUNGEONS & DETERMINISTIC AUTO-BATTLER COMBAT REPLAY
+// ============================================================================
+
+model Dungeon {
+  id                     String         @id @default(cuid())
+  slug                   String         @unique
+  name                   String
+  description            String
+  minPlayers             Int            @default(1)
+  maxPlayers             Int            @default(5)
+  recommendedPower       Int            @default(100)
+  requiredAdventurerRank AdventurerRank @default(COPPER)
+  durationHours          Int            @default(24) // 24-hour real-time expedition window
+  roomsConfig            Json           // Ordered room encounters (mobs, hazards, chests, final boss)
+  lootTable              Json
+  createdAt              DateTime       @default(now())
+
+  runs DungeonRun[]
+}
+
+model DungeonRun {
+  id                   String           @id @default(cuid())
+  dungeonId            String
+  leaderCharacterId    String
+  guildId              String?
+  status               DungeonRunStatus @default(RECRUITING)
+  requiresVerifiedMode Boolean          @default(false)
+
+  // 24-Hour Expedition Window Timers
+  startedAt   DateTime?
+  resolvesAt  DateTime? // startedAt + 24 hours
+  completedAt DateTime?
+  bullMqJobId String?
+
+  // Deterministic Auto-Battler State
+  randomSeed            String
+  partyBaselineSnapshot Json     @default("[]") // Snapshotted gear, stats, fatigue, & talents of 1-5 party members
+  activeWorkoutBuffs    Json     @default("[]") // Live Workout Injection Buffs earned mid-window (e.g., Titanic Force, Tailwind Haste)
+  wasSuccessful         Boolean?
+  roomsCleared          Int      @default(0)
+  rewardsDistributed    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dungeon          Dungeon                 @relation(fields: [dungeonId], references: [id], onDelete: Restrict)
+  leaderCharacter  Character               @relation("DungeonRunLeader", fields: [leaderCharacterId], references: [id], onDelete: Restrict)
+  guild            Guild?                  @relation(fields: [guildId], references: [id], onDelete: SetNull)
+  participants     DungeonRunParticipant[]
+  injectedWorkouts WorkoutLog[]            @relation("DungeonInjectedWorkouts")
+  combatReplay     DungeonCombatReplay?
+
+  @@index([status, resolvesAt])
+  @@index([guildId])
+}
+
+model DungeonRunParticipant {
+  id                String   @id @default(cuid())
+  dungeonRunId      String
+  characterId       String
+  partySlot         Int      // 1..5
+  characterSnapshot Json     // Individual baseline snapshot at lock-in
+  lootAwarded       Json?
+  joinedAt          DateTime @default(now())
+
+  dungeonRun DungeonRun @relation(fields: [dungeonRunId], references: [id], onDelete: Cascade)
+  character  Character  @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([dungeonRunId, characterId])
+  @@unique([dungeonRunId, partySlot])
+  @@index([characterId])
+}
+
+model DungeonCombatReplay {
+  id              String        @id @default(cuid())
+  dungeonRunId    String        @unique
+  engineVersion   String        @default("1.0.0")
+  seed            String
+  totalDurationMs Int
+  tickIntervalMs  Int           @default(250)
+  outcome         CombatOutcome
+  summaryMetrics  Json          // Damage dealt, healing, mitigation, crits, and drops per character
+  eventLog        Json          // Structured tick-by-tick Combat Event Log (t=0s to t=end) for client animation
+  createdAt       DateTime      @default(now())
+
+  dungeonRun DungeonRun @relation(fields: [dungeonRunId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// 7. ADVENTURERS' GUILDS, RANK TRIALS, & 7-DAY BOSS RAIDS
+// ============================================================================
+
+model Guild {
+  id                   String   @id @default(cuid())
+  name                 String   @unique
+  tag                  String   @unique
+  description          String?
+  emblemIcon           String   @default("shield_crest")
+  leaderCharacterId    String
+  guildLevel           Int      @default(1)
+  guildReputation      Int      @default(0)
+  maxMembers           Int      @default(50)
+  requiresVerifiedMode Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  leaderCharacter Character          @relation("GuildLeader", fields: [leaderCharacterId], references: [id], onDelete: Restrict)
+  members         GuildMember[]
+  raidInstances   RaidBossInstance[]
+  dungeonRuns     DungeonRun[]
+}
+
+model GuildMember {
+  id                    String    @id @default(cuid())
+  guildId               String
+  characterId           String    @unique
+  role                  GuildRole @default(MEMBER)
+  contributedReputation Int       @default(0)
+  joinedAt              DateTime  @default(now())
+
+  guild     Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([guildId])
+}
+
+model GuildBounty {
+  id               String          @id @default(cuid())
+  slug             String          @unique
+  title            String
+  description      String
+  isRankUpTrial    Boolean         @default(false)
+  requiredRank     AdventurerRank  @default(COPPER)
+  unlocksRank      AdventurerRank? // Populated for Rank-Up Trials (Copper -> Iron -> ... -> Mythic)
+  requirements     Json            // Workout consistency + dungeon clear requirements
+  reputationReward Int             @default(100)
+  goldReward       Int             @default(250)
+  createdAt        DateTime        @default(now())
+
+  completions CharacterBountyCompletion[]
+}
+
+model CharacterBountyCompletion {
+  id          String   @id @default(cuid())
+  characterId String
+  bountyId    String
+  completedAt DateTime @default(now())
+
+  character Character   @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  bounty    GuildBounty @relation(fields: [bountyId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, bountyId])
+}
+
+model RaidBossInstance {
+  id                   String         @id @default(cuid())
+  bossSlug             String
+  bossName             String
+  bossTier             Int            @default(1)
+  accessType           RaidAccessType @default(PUBLIC_WORLD)
+  guildId              String?        // Null for PUBLIC_WORLD; set for GUILD_ONLY private raids
+  requiresVerifiedMode Boolean        @default(false)
+
+  // Boss Health & Configuration
+  maxHp               BigInt
+  currentHp           BigInt
+  bossMechanicsConfig Json
+  lootPoolConfig      Json
+
+  // 7-Day Weekly Raid Cycle
+  startsAt    DateTime
+  endsAt      DateTime // startsAt + 7 days
+  resolvedAt  DateTime?
+  bullMqJobId String?
+
+  status          RaidStatus @default(ACTIVE)
+  isDefeated      Boolean    @default(false)
+  totalRaidDamage BigInt     @default(0)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  guild             Guild?                        @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  contributions     RaidParticipantContribution[]
+  channeledWorkouts WorkoutLog[]                  @relation("RaidChanneledWorkouts")
+
+  @@index([accessType, status, endsAt])
+  @@index([guildId, status])
+}
+
+model RaidParticipantContribution {
+  id             String @id @default(cuid())
+  raidInstanceId String
+  characterId    String
+
+  // Damage & Energy Channels
+  combatDamageDealt      BigInt @default(0) // Daily combat attacks locked in
+  workoutEnergyDamage    BigInt @default(0) // Direct workout energy channeled into raid boss
+  supportScore           BigInt @default(0) // Sustain/mitigation party contribution
+  totalContributionScore BigInt @default(0)
+
+  dailyAttacksUsed  Int       @default(0)
+  lastAttackAt      DateTime?
+  workoutsChanneled Int       @default(0)
+
+  // End-of-Week Reward Resolution
+  contributionRatio Float   @default(0.0)
+  rewardTier        String? // e.g., S, A, B, C, PARTICIPATION
+  rewardsClaimed    Boolean @default(false)
+  rewardPayload     Json?   // Gold, rare gear, crafting materials, guild reputation
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  raidInstance RaidBossInstance @relation(fields: [raidInstanceId], references: [id], onDelete: Cascade)
+  character    Character        @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([raidInstanceId, characterId])
+  @@index([characterId])
+}

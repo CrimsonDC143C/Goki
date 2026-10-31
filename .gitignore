@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+.expo/
+*.tsbuildinfo
+
+# Test reports & artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Database mounts & local data
+database/postgres-data/
+postgres-data/
+redis-data/
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env*.local
+!.env.example
+
+# Logs & OS
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

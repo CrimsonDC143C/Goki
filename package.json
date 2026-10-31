@@ -1,0 +1,39 @@
+{
+  "name": "gymify-rpg",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-platform multiplayer gamified RPG fitness tracker monorepo",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@gymify/game-engine && npm run build --workspace=@gymify/database && npm run build --workspace=@gymify/server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspace=@gymify/game-engine && npm run test --workspace=@gymify/server",
+    "test:e2e": "playwright test",
+    "db:validate": "npm run db:validate --workspace=@gymify/database",
+    "db:generate": "npm run db:generate --workspace=@gymify/database",
+    "db:push": "npm run db:push --workspace=@gymify/database",
+    "db:seed": "npm run db:seed --workspace=@gymify/database",
+    "dev:server": "npm run dev --workspace=@gymify/server",
+    "dev:mobile": "npm run start --workspace=@gymify/mobile",
+    "dev:web": "npm run web --workspace=@gymify/mobile"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^22.10.0",
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3",
+    "vitest": "^2.1.8"
+  },
+  "overrides": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.0",
+    "@types/react": "~19.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

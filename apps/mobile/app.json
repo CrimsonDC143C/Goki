@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Gymify RPG",
+    "slug": "gymify-rpg",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "backgroundColor": "#0B0E14",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.gymify.rpg",
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "Gymify RPG requires access to your biometric Heart Rate telemetry to cryptographically verify workout effort and unlock Ironman Mode rewards.",
+        "NSHealthUpdateUsageDescription": "Gymify RPG writes verified workout sessions and biometric telemetry to Apple Health."
+      }
+    },
+    "android": {
+      "package": "com.gymify.rpg",
+      "permissions": [
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.BODY_SENSORS",
+        "android.permission.ACTIVITY_RECOGNITION"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "backgroundColor": "#0B0E14"
+    },
+    "plugins": [
+      "expo-status-bar",
+      [
+        "expo-notifications",
+        {
+          "color": "#26A69A"
+        }
+      ],
+      "react-native-health-connect"
+    ]
+  }
+}
