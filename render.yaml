@@ -3,7 +3,7 @@ services:
   - type: web
     name: gymify-server
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start --workspace=@gymify/server
     envVars:
@@ -26,7 +26,7 @@ services:
   # Redis instance for BullMQ background workers and timers
   - type: redis
     name: gymify-redis
-    plan: starter
+    plan: free
     maxmemoryPolicy: noeviction
     ipAllowList: []
 
@@ -35,4 +35,4 @@ databases:
   - name: gymify-postgres
     databaseName: gymify_rpg
     user: gymify
-    plan: starter
+    plan: free
