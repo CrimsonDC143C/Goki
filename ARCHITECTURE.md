@@ -256,7 +256,7 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
        |   |                      (gymify-server)                            |   |
        |   |   - Node.js Runtime (Node >= 20.0)                              |   |
        |   |   - Bound to 0.0.0.0:${PORT}                                    |   |
-       |   |   - Build: npm install && npm run build                         |   |
+       |   |   - Build: npm install --include=dev && npx prisma generate --schema=./packages/database/prisma/schema.prisma && npm run build |   |
        |   |   - Start: npm start --workspace=@gymify/server                 |   |
        |   |   - Injected Env: DATABASE_URL, REDIS_URL, NODE_ENV=production   |   |
        |   +--------------------+-----------------------+--------------------+   |
@@ -284,7 +284,7 @@ The backend is fully declaratively configured via the repository root [`render.y
    * Configured with `maxmemoryPolicy: noeviction` to ensure BullMQ delayed jobs and repeatable timers are never prematurely evicted under memory pressure.
    * Connection string is automatically injected as `REDIS_URL`.
 3. **Fastify Node.js Web Service (`gymify-server`):**
-   * **Build Command:** `npm install && npm run build` (compiles `@gymify/game-engine`, `@gymify/database`, and `@gymify/server`).
+   * **Build Command:** `npm install --include=dev && npx prisma generate --schema=./packages/database/prisma/schema.prisma && npm run build` (installs devDependencies in production, generates Prisma client, and compiles all workspaces).
    * **Start Command:** `npm start --workspace=@gymify/server` (launches `dist/index.js`).
    * **Network Binding:** Binds explicitly to `host: '0.0.0.0'` and dynamic port `port: Number(process.env.PORT) || 4000` to satisfy Render cloud ingress routing.
    * **Injected Environment:**
