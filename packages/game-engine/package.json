@@ -4,6 +4,7 @@
   "private": true,
   "description": "Pure deterministic RPG & fitness mathematical game engine",
   "main": "./dist/index.js",
+  "react-native": "src/index.ts",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {

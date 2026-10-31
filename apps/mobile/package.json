@@ -5,6 +5,7 @@
   "description": "Expo React Native + Expo Web RPG client & 2D Auto-Battler replay viewer",
   "main": "index.js",
   "scripts": {
+    "eas-build-pre-build": "cd ../../ && npm run build --workspace=@gymify/game-engine",
     "start": "expo start --lan",
     "tunnel": "expo start --tunnel",
     "android": "expo start --android",
