@@ -5,6 +5,8 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { HolisticStatType, StatType, isIntraWorkoutFocusLocked } from '@gymify/game-engine';
 import { BugReportModal } from './src/components/BugReportModal';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { UpdateBanner } from './src/components/UpdateBanner';
+import { autoUpdateManager } from './src/services/AutoUpdateManager';
 import { CharacterProfileScreen } from './src/screens/CharacterProfileScreen';
 import { DungeonScreen } from './src/screens/DungeonScreen';
 import { GatheringScreen } from './src/screens/GatheringScreen';
@@ -292,9 +294,48 @@ const MainShell: React.FC<MainShellProps> = ({
 };
 
 const AppRouter: React.FC = () => {
-  const { notificationTapTick, syncOfflineWorkouts } = useGame();
+  const {
+    notificationTapTick,
+    syncOfflineWorkouts,
+    workoutMachine,
+    offlineDraft,
+  } = useGame();
   const [appMode, setAppMode] = useState<AppMode>('LANDING');
   const [worldTab, setWorldTab] = useState<ActiveTab>(DEFAULT_WORLD_ENTRY_TAB);
+
+  // Initialize dual-layer Auto-Update subsystem and wire Zero-Lost-Sets guards
+  useEffect(() => {
+    autoUpdateManager.init();
+
+    autoUpdateManager.registerWorkoutGuards(
+      () => {
+        const isLocked = isIntraWorkoutFocusLocked(workoutMachine.phase);
+        const hasCompletedSets = offlineDraft.exerciseBlocks.some((b) =>
+          b.sets.some((s) => s.completed)
+        );
+        return isLocked || hasCompletedSets;
+      },
+      async () => {
+        try {
+          await syncOfflineWorkouts({ evaluateLocallyIfOffline: true });
+        } catch {
+          // Non-blocking emergency sync
+        }
+      }
+    );
+
+    return () => {
+      autoUpdateManager.destroy();
+    };
+  }, [workoutMachine.phase, offlineDraft, syncOfflineWorkouts]);
+
+  // When active workout completes, auto-apply any staged background update
+  useEffect(() => {
+    const isLocked = isIntraWorkoutFocusLocked(workoutMachine.phase);
+    if (!isLocked && workoutMachine.phase === 'Idle') {
+      void autoUpdateManager.onWorkoutCompleted();
+    }
+  }, [workoutMachine.phase]);
 
   useEffect(() => {
     if (notificationTapTick > 0) {
@@ -303,50 +344,59 @@ const AppRouter: React.FC = () => {
     }
   }, [notificationTapTick]);
 
-  if (appMode === 'LANDING') {
-    return (
-      <SafeAreaView
-        style={styles.landingSafeArea}
-        edges={['top', 'bottom', 'left', 'right']}
-      >
-        <StatusBar style="light" />
-        <LandingScreen
-          onSelectOfflineWorkout={() => setAppMode('OFFLINE_WORKOUT')}
-          onSelectOnlineWorkout={() => {
-            setWorldTab('WORKOUT');
-            setAppMode('WORLD');
-          }}
-          onEnterWorld={() => {
-            void syncOfflineWorkouts({ evaluateLocallyIfOffline: true });
-            setWorldTab(DEFAULT_WORLD_ENTRY_TAB);
-            setAppMode('WORLD');
-          }}
-        />
-      </SafeAreaView>
-    );
-  }
+  const renderContent = () => {
+    if (appMode === 'LANDING') {
+      return (
+        <SafeAreaView
+          style={styles.landingSafeArea}
+          edges={['top', 'bottom', 'left', 'right']}
+        >
+          <StatusBar style="light" />
+          <LandingScreen
+            onSelectOfflineWorkout={() => setAppMode('OFFLINE_WORKOUT')}
+            onSelectOnlineWorkout={() => {
+              setWorldTab('WORKOUT');
+              setAppMode('WORLD');
+            }}
+            onEnterWorld={() => {
+              void syncOfflineWorkouts({ evaluateLocallyIfOffline: true });
+              setWorldTab(DEFAULT_WORLD_ENTRY_TAB);
+              setAppMode('WORLD');
+            }}
+          />
+        </SafeAreaView>
+      );
+    }
 
-  if (appMode === 'OFFLINE_WORKOUT') {
+    if (appMode === 'OFFLINE_WORKOUT') {
+      return (
+        <SafeAreaView
+          style={styles.offlineSafeArea}
+          edges={['top', 'bottom', 'left', 'right']}
+        >
+          <StatusBar style="light" />
+          <OfflineWorkoutScreen
+            onFinishAndReturn={() => setAppMode('LANDING')}
+            onBackToLanding={() => setAppMode('LANDING')}
+          />
+        </SafeAreaView>
+      );
+    }
+
     return (
-      <SafeAreaView
-        style={styles.offlineSafeArea}
-        edges={['top', 'bottom', 'left', 'right']}
-      >
-        <StatusBar style="light" />
-        <OfflineWorkoutScreen
-          onFinishAndReturn={() => setAppMode('LANDING')}
-          onBackToLanding={() => setAppMode('LANDING')}
-        />
-      </SafeAreaView>
+      <MainShell
+        tab={worldTab}
+        onChangeTab={setWorldTab}
+        onReturnToLanding={() => setAppMode('LANDING')}
+      />
     );
-  }
+  };
 
   return (
-    <MainShell
-      tab={worldTab}
-      onChangeTab={setWorldTab}
-      onReturnToLanding={() => setAppMode('LANDING')}
-    />
+    <>
+      {renderContent()}
+      <UpdateBanner />
+    </>
   );
 };
 

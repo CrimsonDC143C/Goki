@@ -22,6 +22,7 @@ import {
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { BugReportModal } from '../components/BugReportModal';
 import { DeveloperTriageModal } from '../components/DeveloperTriageModal';
+import { autoUpdateManager, AutoUpdateState } from '../services/AutoUpdateManager';
 import { audioManager } from '../services/AudioManager';
 import {
   InventoryEntry,
@@ -174,7 +175,14 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   const [spoilsModalOpen, setSpoilsModalOpen] = useState<boolean>(false);
   const [bugReportModalVisible, setBugReportModalVisible] = useState<boolean>(false);
   const [devTriageModalVisible, setDevTriageModalVisible] = useState<boolean>(false);
+  const [updateState, setUpdateState] = useState<AutoUpdateState>(() =>
+    autoUpdateManager.getState()
+  );
   const [isMuted, setIsMuted] = useState<boolean>(audioManager.isMuted());
+
+  useEffect(() => {
+    return autoUpdateManager.subscribe(setUpdateState);
+  }, []);
 
   useEffect(() => {
     return audioManager.subscribe(setIsMuted);
@@ -436,6 +444,32 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                 onPress={() => setDevTriageModalVisible(true)}
               >
                 <Text style={styles.devTriageBtnText}>🛠️ Dev Triage</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.updateCheckBtn,
+                  (updateState.status === 'CHECKING' ||
+                    updateState.status === 'DOWNLOADING_OTA') &&
+                    styles.updateCheckBtnDisabled,
+                ]}
+                onPress={() => void autoUpdateManager.checkForUpdates(true)}
+                disabled={
+                  updateState.status === 'CHECKING' ||
+                  updateState.status === 'DOWNLOADING_OTA'
+                }
+              >
+                <Text style={styles.updateCheckBtnText}>
+                  {updateState.status === 'CHECKING'
+                    ? '⏳ Checking...'
+                    : updateState.status === 'DOWNLOADING_OTA'
+                    ? '📥 Fetching...'
+                    : '🔄 Updates'}
+                </Text>
+                <View style={styles.versionBadgeInline}>
+                  <Text style={styles.versionBadgeInlineText}>
+                    v{updateState.currentVersion}
+                  </Text>
+                </View>
               </Pressable>
             </View>
           </View>
@@ -1960,5 +1994,35 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     color: '#DFB660',
+  },
+  updateCheckBtn: {
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#38BDF8',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  updateCheckBtnDisabled: {
+    opacity: 0.6,
+  },
+  updateCheckBtnText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#38BDF8',
+  },
+  versionBadgeInline: {
+    backgroundColor: '#0F172A',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  versionBadgeInlineText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#94A3B8',
   },
 });

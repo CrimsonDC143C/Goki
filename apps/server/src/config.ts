@@ -12,6 +12,12 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default('*'),
   JWT_SECRET: z.string().default('gymify_jwt_super_secret_dev_secret_key_2026'),
   DIAGNOSTICS_WEBHOOK_URL: z.string().optional(),
+  APP_LATEST_VERSION: z.string().default('0.1.0'),
+  APP_MIN_REQUIRED_VERSION: z.string().default('0.1.0'),
+  ANDROID_APK_DOWNLOAD_URL: z.string().optional(),
+  APP_RELEASE_NOTES: z
+    .string()
+    .default('Performance improvements, bug fixes, and new RPG content.'),
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;

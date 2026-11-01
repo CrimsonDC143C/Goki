@@ -11,3 +11,4 @@ export * from './workout-presets-rest';
 export * from './gathering-calculator';
 export * from './ironman-verifier';
 export * from './diagnostics';
+export * from './version';

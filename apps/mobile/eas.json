@@ -8,6 +8,7 @@
       "distribution": "internal"
     },
     "preview": {
+      "channel": "preview",
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://gymify-server.onrender.com"
@@ -20,6 +21,7 @@
       }
     },
     "production": {
+      "channel": "production",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://gymify-server.onrender.com"
       }

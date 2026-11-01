@@ -399,3 +399,45 @@ The Prisma schema (`packages/database/prisma/schema.prisma`) defines the persist
   * Each card displays severity badges, category, title, platform/OS metadata, and user description.
   * Expanding a card reveals full stack traces, component stacks, sanitized state snapshots, and rolling breadcrumb event timelines.
   * Includes one-tap status updates (`Investigate`, `Resolve`, `Ignore`, `Reopen`) via `PATCH /api/diagnostics/reports/:id` and a `Copy Full JSON` action.
+
+---
+
+## VIII. Workout-Safe Dual-Layer Auto-Update System
+
+### A. Dual-Layer Update Architecture
+Gymify RPG targets diverse deployment targets including Standalone Android APKs, iOS builds (via EAS), and Expo Web. Updates are classified into two distinct operational layers:
+1. **Over-The-Air (OTA) Updates (`expo-updates`):**
+   * Transmits updated JavaScript bundles and UI assets instantly to existing installed clients.
+   * Configured via runtime policy `appVersion` and EAS update channels (`preview`, `production`).
+   * Downloads occur asynchronously in the background without halting application execution.
+2. **Native Binary / APK Upgrades (`/api/version`):**
+   * Required when adding new native device libraries, updating Android permissions (e.g. Health Connect / Bluetooth), or modifying native SDK configurations.
+   * Serves an authoritative version manifest from the backend detailing the latest release, minimum required version, direct APK download links, and release notes.
+
+### B. Pure Mathematical Version Comparison (`@gymify/game-engine`)
+* **`parseSemver(version)`:** Cleans and decomposes semantic version strings (handling `v` prefixes, prereleases, and numeric tokens) into `{ major, minor, patch, prerelease }`.
+* **`compareSemver(a, b)`:** Returns `-1` (`a < b`), `0` (`a == b`), or `1` (`a > b`), adhering strictly to SemVer precedence standards.
+* **`isUpdateAvailable(current, latest)`:** Evaluates whether target latest version is newer than running client.
+* **`isForceUpdateRequired(current, minRequired)`:** Determines if the client is below the backend's minimum required operational threshold.
+
+### C. Backend Version Manifest Endpoint (`apps/server`)
+* **`GET /api/version`:** Public, non-authenticated endpoint returning:
+  * `latestVersion`: `process.env.APP_LATEST_VERSION` (default `"0.1.0"`)
+  * `minRequiredVersion`: `process.env.APP_MIN_REQUIRED_VERSION` (default `"0.1.0"`)
+  * `androidApkDownloadUrl`: Direct link to latest EAS preview/production APK build
+  * `releaseNotes`: Descriptive summary of the release
+  * `serverTimestamp`: ISO timestamp of the response
+
+### D. Multi-Trigger Detection & Workout-Safe Reload Guard (`apps/mobile`)
+* **Multi-Trigger Polling:**
+  1. **Cold Start:** Queried immediately on initial application boot.
+  2. **Foreground Resume:** Triggered whenever the athlete returns to Gymify RPG (`AppState: active`).
+  3. **Periodic Heartbeat:** Background polling every 15 minutes while the app remains open.
+  4. **Manual In-App Check:** One-tap `🔄 Updates` button with inline version badge in `CharacterProfileScreen`.
+* **"Zero Interrupted Sets Guarantee":**
+  * When an OTA download finishes, `AutoUpdateManager` consults registered workout guards (`isIntraWorkoutFocusLocked(phase)` and active draft set progress).
+  * If the athlete is currently training, resting, or holds uncompleted sets, the reload is staged under `WAITING_FOR_WORKOUT`.
+  * An ambient HUD pill (`UpdateBanner`) informs the athlete: `"✨ Update Downloaded — Will install after workout"`.
+  * Athletes have the option to trigger `"Reload Now (Draft Saved)"`, which securely commits drafts before restarting.
+  * When the session transitions to `Idle` or concludes `LootReview`, the update is automatically applied.
+

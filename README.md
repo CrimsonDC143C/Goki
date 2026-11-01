@@ -84,6 +84,26 @@ Gymify RPG includes a built-in offline-first diagnostic subsystem:
 
 ---
 
+## Workout-Safe Auto-Update System
+
+Gymify RPG incorporates a dual-layer, zero-interrupted-sets auto-update subsystem designed for standalone Android APKs, iOS builds, and Expo Web:
+
+* **Dual-Layer Update Architecture:**
+  * **Over-The-Air (OTA) JS/Asset Bundles:** Powered by `expo-updates` (`preview` and `production` channels). New bundles download silently in the background without user intervention.
+  * **Native Binary / APK Upgrades:** Queried via the public `/api/version` manifest (`latestVersion`, `minRequiredVersion`, `androidApkDownloadUrl`, `releaseNotes`).
+* **Zero Interrupted Sets Guarantee:**
+  * If an update finishes downloading while an athlete is resting, focus-locked, or in an active workout session, the reload is deferred.
+  * A non-intrusive HUD pill (`✨ Update Downloaded — Will install after workout`) appears with an optional `"Reload Now (Draft Saved)"` action.
+  * As soon as the workout session finishes or returns to `Idle`, the staged update is automatically applied.
+* **Force Binary Upgrade Guard:**
+  * When breaking schema or native library changes occur, setting `APP_MIN_REQUIRED_VERSION` on the backend activates a blocking modal directing athletes to download the latest APK build via direct link.
+* **Manual Trigger:** Athletes and testers can tap `🔄 Check Updates` with live version badge `v0.1.0` directly from the `CharacterProfileScreen` badge strip.
+* **Publishing Updates:**
+  * **OTA Updates:** `npx eas update --channel preview` or `npx eas update --channel production`
+  * **Full APK Builds:** `npx eas build -p android --profile preview`
+
+---
+
 ## Technical Documentation
 
 For the complete architectural blueprint, mathematical formulas, state machine definitions, Ironman verification protocols, and cloud infrastructure specifications, refer to:

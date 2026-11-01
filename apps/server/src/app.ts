@@ -15,6 +15,7 @@ import { registerGatheringRoutes } from './routes/gathering';
 import { registerGuildAndRaidRoutes } from './routes/guilds-raids';
 import { registerPresetRoutes } from './routes/presets';
 import { registerTalentRoutes } from './routes/talents';
+import { registerVersionRoutes } from './routes/version';
 import { registerWebSocketRoutes } from './routes/websocket';
 import { registerWorkoutRoutes } from './routes/workouts';
 import { WebSocketManager, websocketManager } from './services/websocket-manager';
@@ -108,6 +109,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
   }));
 
   registerWebSocketRoutes(app, wsManager);
+  registerVersionRoutes(app);
   registerAuthRoutes(app, options.db);
   registerDiagnosticsRoutes(app, options.db);
   registerCharacterRoutes(app, options.db);
