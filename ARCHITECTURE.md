@@ -381,7 +381,7 @@ The Prisma schema (`packages/database/prisma/schema.prisma`) defines the persist
   * If offline or the network drops, the report is saved locally to `@gymify_bug_report_outbox`.
   * `DiagnosticLogger.flushBugReportOutbox()` is invoked automatically when connectivity returns (`online` event), when the app returns to foreground (`AppState: active`), or during `GameContext` offline workout sync passes.
 
-### D. Mobile UI: Error Boundary & Bug Report Modal (`apps/mobile`)
+### D. Mobile UI: Error Boundary, Bug Report Modal, & Developer Sanctum (`apps/mobile`)
 
 * **`ErrorBoundary.tsx`:**
   * Root React Class Error Boundary wrapping `App.tsx`.
@@ -392,3 +392,10 @@ The Prisma schema (`packages/database/prisma/schema.prisma`) defines the persist
   * Accessible from the top RPG Character HUD and the `CharacterProfileScreen` badge strip.
   * Allows selecting categories (`UI / Display`, `Workout Sync`, `Wearable Telemetry`, `Combat & Dungeon`, `Other`), entering titles and descriptions, and toggling diagnostic logs inclusion.
   * Contains an expandable **"View Recent Logs & Telemetry"** accordion with a **"Copy JSON"** button allowing athletes and QA testers to inspect or export their diagnostic bundle directly.
+* **`DeveloperTriageModal.tsx` ("Developer Sanctum"):**
+  * Accessible directly from `CharacterProfileScreen` via the **🛠️ Dev Triage** badge button.
+  * Connects to `GET /api/diagnostics/reports` to inspect live reports directly from mobile or desktop browser without needing database GUI clients.
+  * Provides multi-dimensional filter chips (`Status`: `ALL`, `OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`; `Severity`: `ALL`, `FATAL`, `ERROR`, `WARNING`, `INFO`).
+  * Each card displays severity badges, category, title, platform/OS metadata, and user description.
+  * Expanding a card reveals full stack traces, component stacks, sanitized state snapshots, and rolling breadcrumb event timelines.
+  * Includes one-tap status updates (`Investigate`, `Resolve`, `Ignore`, `Reopen`) via `PATCH /api/diagnostics/reports/:id` and a `Copy Full JSON` action.

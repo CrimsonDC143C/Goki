@@ -21,6 +21,7 @@ import {
 } from '@gymify/game-engine';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { BugReportModal } from '../components/BugReportModal';
+import { DeveloperTriageModal } from '../components/DeveloperTriageModal';
 import { audioManager } from '../services/AudioManager';
 import {
   InventoryEntry,
@@ -172,6 +173,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   const [showFatigueDetails, setShowFatigueDetails] = useState<boolean>(false);
   const [spoilsModalOpen, setSpoilsModalOpen] = useState<boolean>(false);
   const [bugReportModalVisible, setBugReportModalVisible] = useState<boolean>(false);
+  const [devTriageModalVisible, setDevTriageModalVisible] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(audioManager.isMuted());
 
   useEffect(() => {
@@ -428,6 +430,12 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                 onPress={() => setBugReportModalVisible(true)}
               >
                 <Text style={styles.bugReportBtnText}>🐛 Report Bug</Text>
+              </Pressable>
+              <Pressable
+                style={styles.devTriageBtn}
+                onPress={() => setDevTriageModalVisible(true)}
+              >
+                <Text style={styles.devTriageBtnText}>🛠️ Dev Triage</Text>
               </Pressable>
             </View>
           </View>
@@ -1118,6 +1126,11 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
       <BugReportModal
         visible={bugReportModalVisible}
         onClose={() => setBugReportModalVisible(false)}
+      />
+
+      <DeveloperTriageModal
+        visible={devTriageModalVisible}
+        onClose={() => setDevTriageModalVisible(false)}
       />
     </ScrollView>
   );
@@ -1932,5 +1945,20 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     color: '#E5E7EB',
+  },
+  devTriageBtn: {
+    backgroundColor: '#352A15',
+    borderWidth: 1,
+    borderColor: '#C69A45',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  devTriageBtnText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#DFB660',
   },
 });

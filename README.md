@@ -80,6 +80,7 @@ Gymify RPG includes a built-in offline-first diagnostic subsystem:
   * `DiagnosticLogger`: 100-event rolling ring-buffer, recursive credential sanitization (`password`, `jwt`, `bearer`), and offline outbox (`@gymify_bug_report_outbox`) with automatic reconnection flush.
   * `ErrorBoundary`: High-contrast "Encounter Interrupted" crash recovery screen with **Zero Lost Sets Guarantee** and startup crash prompt (`@gymify_pending_crash_report`).
   * `BugReportModal`: Manual bug reporting interface accessible via the top HUD and Profile screen, complete with an expandable diagnostic JSON viewer and clipboard copy fallback.
+  * `DeveloperTriageModal` ("Developer Sanctum"): In-app live triage UI accessible via `🛠️ Dev Triage` on the Character Profile screen to inspect, filter, copy raw JSON, and transition bug statuses (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`) directly from mobile or web.
 
 ---
 
