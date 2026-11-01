@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
 
 export type SoundEffectKey =
   | 'level-up'
@@ -82,7 +82,7 @@ const MUTE_STORAGE_KEY = 'gymify_sfx_muted_v1';
 class AudioManagerService {
   private static instance: AudioManagerService;
   private _isMuted = false;
-  private _soundsMap = new Map<SoundEffectKey, Audio.Sound>();
+  private _soundsMap = new Map<SoundEffectKey, AudioPlayer>();
   private _audioConfigured = false;
   private _listeners: Array<(muted: boolean) => void> = [];
 
@@ -154,10 +154,10 @@ class AudioManagerService {
   private async ensureAudioConfigured(): Promise<void> {
     if (this._audioConfigured || Platform.OS === 'web') return;
     try {
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+        interruptionMode: 'mixWithOthers',
       });
       this._audioConfigured = true;
     } catch {
@@ -186,19 +186,13 @@ class AudioManagerService {
 
     const vol = volumeOverride ?? preset.volume ?? 0.75;
 
-    // 1. Try Native expo-av playback if cached or URI available
+    // 1. Try Native expo-audio playback if cached or URI available
     if (Platform.OS !== 'web' && preset.uri) {
       try {
         await this.ensureAudioConfigured();
-        const { sound } = await Audio.Sound.createAsync(
-          typeof preset.uri === 'string' ? { uri: preset.uri } : preset.uri,
-          { shouldPlay: true, volume: vol }
-        );
-        sound.setOnPlaybackStatusUpdate((status) => {
-          if (status.isLoaded && status.didJustFinish) {
-            void sound.unloadAsync();
-          }
-        });
+        const player = createAudioPlayer(preset.uri);
+        player.volume = vol;
+        player.play();
         return;
       } catch {
         // Fall back to synth on audio load failure
@@ -272,9 +266,9 @@ class AudioManagerService {
   }
 
   public async unloadAll(): Promise<void> {
-    for (const sound of this._soundsMap.values()) {
+    for (const player of this._soundsMap.values()) {
       try {
-        await sound.unloadAsync();
+        player.release();
       } catch {
         // Safe unload
       }
