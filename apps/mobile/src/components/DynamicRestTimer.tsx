@@ -71,19 +71,6 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
     };
   }, [targetEndTimeMs, mode, headline, onComplete]);
 
-  if (!targetEndTimeMs || secondsRemaining <= 0) {
-    return null;
-  }
-
-  const mm = Math.floor(secondsRemaining / 60);
-  const ss = secondsRemaining % 60;
-  const timeFormatted = `${mm}:${ss < 10 ? '0' : ''}${ss}`;
-
-  const progressFraction = Math.max(
-    0,
-    Math.min(1, totalDurationSeconds > 0 ? (totalDurationSeconds - secondsRemaining) / totalDurationSeconds : 1)
-  );
-
   const modeBadge = useMemo(() => {
     switch (mode) {
       case 'DROP_SET_TRANSITION':
@@ -97,6 +84,19 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
         return { label: '⏱️ REST PERIOD', color: '#4ADE80', border: '#15803D' };
     }
   }, [mode]);
+
+  if (!targetEndTimeMs || secondsRemaining <= 0) {
+    return null;
+  }
+
+  const mm = Math.floor(secondsRemaining / 60);
+  const ss = secondsRemaining % 60;
+  const timeFormatted = `${mm}:${ss < 10 ? '0' : ''}${ss}`;
+
+  const progressFraction = Math.max(
+    0,
+    Math.min(1, totalDurationSeconds > 0 ? (totalDurationSeconds - secondsRemaining) / totalDurationSeconds : 1)
+  );
 
   const handleAdjust = (delta: number) => {
     onAdjustDelta(delta);

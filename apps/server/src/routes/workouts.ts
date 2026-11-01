@@ -182,9 +182,23 @@ export function registerWorkoutRoutes(
       }
     }
 
+    // Verify foreign key integrity: ensure gymId exists in RegisteredGymGuild before persisting relation
+    let validatedGymGuildId: string | null = null;
+    if (matchedGymId) {
+      const existingGym = await db.registeredGymGuild.findUnique({
+        where: { id: matchedGymId },
+      });
+      if (existingGym) {
+        validatedGymGuildId = existingGym.id;
+        if (!matchedGymName) {
+          matchedGymName = existingGym.name;
+        }
+      }
+    }
+
     const arrivalBoon = createArrivalBoon({
       trigger: effectiveTrigger,
-      gymId: matchedGymId,
+      gymId: validatedGymGuildId,
       gymName: matchedGymName,
     });
 
@@ -195,7 +209,7 @@ export function registerWorkoutRoutes(
       data: {
         userId: character.userId,
         characterId,
-        gymGuildId: matchedGymId,
+        gymGuildId: validatedGymGuildId,
         gymName: arrivalBoon.gymName,
         phase: 'DUNGEON_ACTIVE',
         workoutType: body.workoutType,
