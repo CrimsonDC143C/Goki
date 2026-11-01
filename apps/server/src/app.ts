@@ -9,6 +9,7 @@ import { requireAuth } from './middleware/auth';
 import { GameTimerScheduler, createNoopTimerScheduler } from './queues/bullmq-workers';
 import { registerAuthRoutes } from './routes/auth';
 import { registerCharacterRoutes } from './routes/characters';
+import { registerDiagnosticsRoutes, forwardWebhookAlert } from './routes/diagnostics';
 import { registerDungeonRoutes } from './routes/dungeons';
 import { registerGatheringRoutes } from './routes/gathering';
 import { registerGuildAndRaidRoutes } from './routes/guilds-raids';
@@ -52,7 +53,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
   });
 
   // Global error handler translating Zod validation & domain errors cleanly
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
       return reply.status(400).send({
         error: 'Validation error',
@@ -64,6 +65,39 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
         ? (error as { statusCode: number }).statusCode
         : 500;
     const message = error instanceof Error ? error.message : 'Internal server error';
+
+    // Enhance Fastify error handler: unhandled 500 exceptions are logged into BugReport
+    if (statusCode >= 500 && options.db?.bugReport?.create) {
+      options.db.bugReport
+        .create({
+          data: {
+            severity: 'FATAL',
+            category: 'CRASH_EXCEPTION',
+            title: `Unhandled Server Exception: ${message.slice(0, 200)}`,
+            errorMessage: message,
+            stackTrace: error instanceof Error ? error.stack ?? null : null,
+            breadcrumbs: [],
+            stateSnapshot: {
+              url: request.raw.url,
+              method: request.raw.method,
+            },
+            deviceMetadata: {
+              source: 'fastify-server',
+              nodeVersion: process.version,
+            },
+          },
+        })
+        .then((created) => {
+          const webhookUrl = env.DIAGNOSTICS_WEBHOOK_URL || process.env.DIAGNOSTICS_WEBHOOK_URL;
+          if (webhookUrl) {
+            forwardWebhookAlert(webhookUrl, created).catch(() => {});
+          }
+        })
+        .catch((err) => {
+          app.log?.error?.({ err }, 'Failed to persist unhandled server exception to BugReport');
+        });
+    }
+
     return reply.status(statusCode).send({ error: message });
   });
 
@@ -75,6 +109,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
 
   registerWebSocketRoutes(app, wsManager);
   registerAuthRoutes(app, options.db);
+  registerDiagnosticsRoutes(app, options.db);
   registerCharacterRoutes(app, options.db);
   registerWorkoutRoutes(app, options.db, timers);
   registerPresetRoutes(app, options.db);

@@ -222,6 +222,29 @@ enum LootChestTier {
   EPIC
 }
 
+enum BugReportSeverity {
+  INFO
+  WARNING
+  ERROR
+  FATAL
+}
+
+enum BugReportCategory {
+  UI_UX
+  WORKOUT_SYNC
+  WEARABLE_TELEMETRY
+  COMBAT_DUNGEON
+  CRASH_EXCEPTION
+  OTHER
+}
+
+enum BugReportStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  IGNORED
+}
+
 // ============================================================================
 // 1. USERS, CHARACTERS, CORE STATS, & REST / FATIGUE STATE
 // ============================================================================
@@ -242,6 +265,7 @@ model User {
   registeredGyms  RegisteredGymGuild[]
   exercisePRs     UserExercisePR[]
   workoutPresets  WorkoutPreset[]
+  bugReports      BugReport[]
 }
 
 model Character {
@@ -283,6 +307,7 @@ model Character {
   ledDungeonRuns        DungeonRun[]                  @relation("DungeonRunLeader")
   dungeonParticipations DungeonRunParticipant[]
   ledGuilds             Guild[]                       @relation("GuildLeader")
+  bugReports            BugReport[]
   guildMembership       GuildMember?
   bountyCompletions     CharacterBountyCompletion[]
   raidContributions     RaidParticipantContribution[]
@@ -1031,4 +1056,34 @@ model RaidParticipantContribution {
 
   @@unique([raidInstanceId, characterId])
   @@index([characterId])
+}
+
+// ============================================================================
+// 12. BUG REPORTING & SYSTEM DIAGNOSTICS
+// ============================================================================
+
+model BugReport {
+  id              String            @id @default(uuid())
+  userId          String?
+  characterId     String?
+  severity        BugReportSeverity
+  category        BugReportCategory
+  status          BugReportStatus   @default(OPEN)
+  title           String
+  userDescription String?
+  errorMessage    String?
+  stackTrace      String?
+  componentStack  String?
+  breadcrumbs     Json              // Stores the array of recent ring-buffer log entries
+  stateSnapshot   Json              // Sanitized snapshot of current screen, FSM state, sync queue length, etc.
+  deviceMetadata  Json              // Platform, OS version, app version, web vs native
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  user            User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  character       Character?        @relation(fields: [characterId], references: [id], onDelete: SetNull)
+
+  @@index([status, severity])
+  @@index([createdAt])
+  @@index([userId])
 }

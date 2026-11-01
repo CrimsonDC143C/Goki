@@ -20,6 +20,7 @@ import {
   xpRequiredForStatLevel,
 } from '@gymify/game-engine';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
+import { BugReportModal } from '../components/BugReportModal';
 import { audioManager } from '../services/AudioManager';
 import {
   InventoryEntry,
@@ -170,6 +171,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   } | null>(null);
   const [showFatigueDetails, setShowFatigueDetails] = useState<boolean>(false);
   const [spoilsModalOpen, setSpoilsModalOpen] = useState<boolean>(false);
+  const [bugReportModalVisible, setBugReportModalVisible] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(audioManager.isMuted());
 
   useEffect(() => {
@@ -420,6 +422,12 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                 <Text style={[styles.audioMuteBtnText, isMuted && styles.audioMuteBtnTextActive]}>
                   {isMuted ? '🔇 Muted' : '🔊 SFX'}
                 </Text>
+              </Pressable>
+              <Pressable
+                style={styles.bugReportBtn}
+                onPress={() => setBugReportModalVisible(true)}
+              >
+                <Text style={styles.bugReportBtnText}>🐛 Report Bug</Text>
               </Pressable>
             </View>
           </View>
@@ -1106,6 +1114,11 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           </View>
         </View>
       </Modal>
+
+      <BugReportModal
+        visible={bugReportModalVisible}
+        onClose={() => setBugReportModalVisible(false)}
+      />
     </ScrollView>
   );
 };
@@ -1904,5 +1917,20 @@ const styles = StyleSheet.create({
   },
   audioMuteBtnTextActive: {
     color: '#FB7185',
+  },
+  bugReportBtn: {
+    backgroundColor: '#26242E',
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bugReportBtnText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#E5E7EB',
   },
 });

@@ -85,8 +85,17 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
 
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [openExercisePickerBlockId, setOpenExercisePickerBlockId] = useState<string | null>(null);
+  const [exerciseSearchQuery, setExerciseSearchQuery] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showPresetDesigner, setShowPresetDesigner] = useState<boolean>(false);
+
+  const filteredResistanceExercises = useMemo(() => {
+    const q = exerciseSearchQuery.trim().toLowerCase();
+    if (!q) return resistanceExercises;
+    return resistanceExercises.filter(
+      (e) => e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q)
+    );
+  }, [resistanceExercises, exerciseSearchQuery]);
 
   // Dynamic Rest Timer State
   const [restTargetEndTimeMs, setRestTargetEndTimeMs] = useState<number | null>(null);
@@ -173,6 +182,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       ),
     }));
     setOpenExercisePickerBlockId(null);
+    setExerciseSearchQuery('');
   };
 
   const handleUpdateSetField = (
@@ -591,9 +601,10 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
                   <View style={styles.exerciseCardHeader}>
                     <Pressable
                       style={styles.exerciseSelectorBtn}
-                      onPress={() =>
-                        setOpenExercisePickerBlockId(pickerOpen ? null : block.blockId)
-                      }
+                      onPress={() => {
+                        setExerciseSearchQuery('');
+                        setOpenExercisePickerBlockId(pickerOpen ? null : block.blockId);
+                      }}
                     >
                       <Text style={styles.exerciseSelectorText}>
                         {exMeta?.name ?? block.exerciseName ?? block.exerciseId}
@@ -628,29 +639,66 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
                   </View>
 
                   {pickerOpen && (
-                    <View style={styles.exercisePickerList}>
-                      {resistanceExercises.map((option) => {
-                        const active = option.id === block.exerciseId;
-                        return (
-                          <Pressable
-                            key={option.id}
-                            style={[
-                              styles.exerciseOptionPill,
-                              active && styles.exerciseOptionPillActive,
-                            ]}
-                            onPress={() => handleSelectExercise(block.blockId, option.id)}
+                    <View style={styles.exercisePickerContainer}>
+                      <View style={styles.exerciseSearchRow}>
+                        <TextInput
+                          style={styles.exerciseSearchInput}
+                          placeholder="Filter exercises..."
+                          placeholderTextColor="#6B7280"
+                          value={exerciseSearchQuery}
+                          onChangeText={setExerciseSearchQuery}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                        />
+                        {exerciseSearchQuery.length > 0 && (
+                          <TouchableOpacity
+                            style={styles.exerciseSearchClearBtn}
+                            onPress={() => setExerciseSearchQuery('')}
                           >
-                            <Text
-                              style={[
-                                styles.exerciseOptionText,
-                                active && styles.exerciseOptionTextActive,
-                              ]}
-                            >
-                              {option.name}
+                            <Text style={styles.exerciseSearchClearText}>✕</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      <ScrollView
+                        style={styles.exercisePickerScroll}
+                        contentContainerStyle={styles.exercisePickerScrollContent}
+                        nestedScrollEnabled={true}
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={true}
+                      >
+                        {filteredResistanceExercises.length === 0 ? (
+                          <View style={styles.exerciseNoResults}>
+                            <Text style={styles.exerciseNoResultsText}>
+                              No exercises found matching "{exerciseSearchQuery}"
                             </Text>
-                          </Pressable>
-                        );
-                      })}
+                          </View>
+                        ) : (
+                          filteredResistanceExercises.map((option) => {
+                            const active = option.id === block.exerciseId;
+                            return (
+                              <TouchableOpacity
+                                key={option.id}
+                                style={[
+                                  styles.exerciseOptionPill,
+                                  active && styles.exerciseOptionPillActive,
+                                ]}
+                                onPress={() => handleSelectExercise(block.blockId, option.id)}
+                              >
+                                <Text
+                                  style={[
+                                    styles.exerciseOptionText,
+                                    active && styles.exerciseOptionTextActive,
+                                  ]}
+                                >
+                                  {option.name}
+                                </Text>
+                                {active && <Text style={styles.exerciseOptionCheck}>✓</Text>}
+                              </TouchableOpacity>
+                            );
+                          })
+                        )}
+                      </ScrollView>
                     </View>
                   )}
 
@@ -1088,32 +1136,84 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontWeight: '800',
   },
-  exercisePickerList: {
+  exercisePickerContainer: {
     backgroundColor: '#161519',
     borderColor: '#36343C',
     borderWidth: 1,
     borderRadius: 8,
     padding: 8,
     marginBottom: 10,
-    gap: 6,
+    overflow: 'hidden',
+  },
+  exerciseSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#201E25',
+    borderColor: '#3D3A44',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    marginBottom: 8,
+  },
+  exerciseSearchInput: {
+    flex: 1,
+    color: '#E8E6E1',
+    fontSize: 12,
+    paddingVertical: 6,
+  },
+  exerciseSearchClearBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  exerciseSearchClearText: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  exercisePickerScroll: {
     maxHeight: 220,
   },
+  exercisePickerScrollContent: {
+    gap: 6,
+    paddingVertical: 2,
+  },
   exerciseOptionPill: {
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderRadius: 6,
     backgroundColor: '#222027',
   },
   exerciseOptionPillActive: {
     backgroundColor: '#5E1924',
+    borderColor: '#C69A45',
+    borderWidth: 1,
   },
   exerciseOptionText: {
     fontSize: 12,
     color: '#D1D5DB',
+    flex: 1,
   },
   exerciseOptionTextActive: {
     color: '#FEE2E2',
     fontWeight: '800',
+  },
+  exerciseOptionCheck: {
+    color: '#FCD34D',
+    fontSize: 12,
+    fontWeight: '900',
+    marginLeft: 6,
+  },
+  exerciseNoResults: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  exerciseNoResultsText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontStyle: 'italic',
   },
   setTableHeader: {
     flexDirection: 'row',

@@ -66,6 +66,7 @@ import {
   getSystemicFatigueCombatPenalties,
   inferOfflineWorkoutType,
   isEquippableItemType,
+  isIntraWorkoutFocusLocked,
   recordWorkoutInFatigueState,
   simulateDungeonRun,
   spendTalentPoint,
@@ -101,6 +102,7 @@ import {
   scheduleGatheringTargetNotification,
 } from '../utils/gatheringNotifications';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+import { diagnosticLogger } from '../services/DiagnosticLogger';
 import {
   API_BASE_URL,
   AuthUser,
@@ -2002,12 +2004,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (queuedOfflineWorkouts.length > 0 || unsyncedServerPayloads.length > 0) {
       void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
     }
+    void diagnosticLogger.flushBugReportOutbox();
   }, [offlineHydrated, queuedOfflineWorkouts.length, unsyncedServerPayloads.length, syncOfflineWorkouts]);
 
   useEffect(() => {
     const appSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
+        void diagnosticLogger.flushBugReportOutbox();
       }
     });
 
@@ -2019,6 +2023,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
       const onOnline = () => {
         void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
+        void diagnosticLogger.flushBugReportOutbox();
       };
       win.addEventListener?.('online', onOnline);
       removeWebOnline = () => win.removeEventListener?.('online', onOnline);
@@ -2194,6 +2199,35 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }),
     [stats]
   );
+
+  // Register dynamic state snapshot provider for diagnostic logger and crash reporting
+  useEffect(() => {
+    diagnosticLogger.setStateProvider(() => ({
+      characterName,
+      overallLevel,
+      adventurerRank,
+      gold,
+      location,
+      workoutPhase: workoutMachine.phase,
+      focusLocked: isIntraWorkoutFocusLocked(workoutMachine.phase),
+      queuedOfflineWorkoutsCount: queuedOfflineWorkouts.length,
+      unsyncedServerPayloadsCount: unsyncedServerPayloads.length,
+      serverOnline,
+      hasActiveSession: Boolean(workoutMachine.activeSession),
+      timestamp: Date.now(),
+    }));
+  }, [
+    characterName,
+    overallLevel,
+    adventurerRank,
+    gold,
+    location,
+    workoutMachine.phase,
+    workoutMachine.activeSession,
+    queuedOfflineWorkouts.length,
+    unsyncedServerPayloads.length,
+    serverOnline,
+  ]);
 
   // Dynamic Stat-Driven Gathering Loop (Interval Ticks)
   const finalizeGatheringTask = useCallback(

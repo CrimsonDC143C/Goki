@@ -3,6 +3,8 @@ import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { HolisticStatType, StatType, isIntraWorkoutFocusLocked } from '@gymify/game-engine';
+import { BugReportModal } from './src/components/BugReportModal';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { CharacterProfileScreen } from './src/screens/CharacterProfileScreen';
 import { DungeonScreen } from './src/screens/DungeonScreen';
 import { GatheringScreen } from './src/screens/GatheringScreen';
@@ -77,6 +79,7 @@ const MainShell: React.FC<MainShellProps> = ({
   const [talentFocusStat, setTalentFocusStat] = useState<HolisticStatType | StatType | undefined>(
     undefined
   );
+  const [bugReportVisible, setBugReportVisible] = useState(false);
 
   const focusLocked = isIntraWorkoutFocusLocked(workoutMachine.phase);
   const pendingTargetTab = workoutMachine.activeSession?.pendingFocusOverrideTarget as
@@ -129,6 +132,13 @@ const MainShell: React.FC<MainShellProps> = ({
 
             <View style={styles.hudRight}>
               <Text style={styles.goldText}>🪙 {gold}g</Text>
+              <Pressable
+                style={styles.hudBugBtn}
+                onPress={() => setBugReportVisible(true)}
+                accessibilityLabel="Report Bug or Feedback"
+              >
+                <Text style={styles.hudBugBtnText}>🐛</Text>
+              </Pressable>
               <Text
                 style={[
                   styles.connBadge,
@@ -270,6 +280,12 @@ const MainShell: React.FC<MainShellProps> = ({
             </View>
           </View>
         </Modal>
+
+        {/* Global Bug & Diagnostics Reporting Modal */}
+        <BugReportModal
+          visible={bugReportVisible}
+          onClose={() => setBugReportVisible(false)}
+        />
       </View>
     </SafeAreaView>
   );
@@ -337,9 +353,11 @@ const AppRouter: React.FC = () => {
 export default function App() {
   return (
     <SafeAreaProvider>
-      <GameProvider>
-        <AppRouter />
-      </GameProvider>
+      <ErrorBoundary>
+        <GameProvider>
+          <AppRouter />
+        </GameProvider>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }
@@ -417,6 +435,16 @@ const styles = StyleSheet.create({
     color: COLORS.gold,
     fontSize: 14,
     fontWeight: '800',
+  },
+  hudBugBtn: {
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginTop: 2,
+    borderRadius: 4,
+    backgroundColor: '#26222B',
+  },
+  hudBugBtnText: {
+    fontSize: 11,
   },
   connBadge: {
     fontSize: 10,

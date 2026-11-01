@@ -11,6 +11,7 @@ const envSchema = z.object({
   REDIS_URL: z.string().default('redis://localhost:6379'),
   CORS_ORIGIN: z.string().default('*'),
   JWT_SECRET: z.string().default('gymify_jwt_super_secret_dev_secret_key_2026'),
+  DIAGNOSTICS_WEBHOOK_URL: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;
