@@ -808,6 +808,15 @@ export function registerWorkoutRoutes(
       include: { dungeonRun: true },
     });
 
+    // 5B. Verify channeled raid boss foreign key exists in DB (defensive safeguard against stale/mock IDs)
+    let validRaid: { id: string; status: string; currentHp: bigint } | null = null;
+    if (body.channeledRaidInstanceId) {
+      validRaid = await db.raidBossInstance.findUnique({
+        where: { id: body.channeledRaidInstanceId },
+        select: { id: true, status: true, currentHp: true },
+      });
+    }
+
     // 6. Persist WorkoutLog & WorkoutSets
     const createdWorkout = await db.workoutLog.create({
       data: {
@@ -834,7 +843,7 @@ export function registerWorkoutRoutes(
         prCritBonusXp: evalResult.criticalTrainingBonus.totalBonusXp,
         prCritLootDrop: (evalResult.criticalTrainingBonus.guaranteedLootDrop ?? null) as unknown as object,
         injectedDungeonRunId: activeParticipation?.dungeonRunId ?? null,
-        channeledRaidInstanceId: body.channeledRaidInstanceId ?? null,
+        channeledRaidInstanceId: validRaid?.id ?? null,
         sets: {
           create: evalResult.evaluatedSets
             .filter((es) => catalogByKey.has(es.exerciseId))
@@ -999,48 +1008,43 @@ export function registerWorkoutRoutes(
 
     // 10. Channel Workout Energy Damage into Active 7-Day Raid Boss if specified
     let raidEnergyDamageDealt = 0;
-    if (body.channeledRaidInstanceId) {
-      const raid = await db.raidBossInstance.findUnique({
-        where: { id: body.channeledRaidInstanceId },
+    if (validRaid && validRaid.status === 'ACTIVE') {
+      raidEnergyDamageDealt = calculateWorkoutRaidEnergyDamage({
+        strengthXp: rewardPayload.finalXpByStat.STRENGTH,
+        enduranceXp: rewardPayload.finalXpByStat.ENDURANCE,
+        agilityXp: rewardPayload.finalXpByStat.AGILITY,
+        triggeredPrCrit: evalResult.criticalTrainingBonus.triggered,
       });
-      if (raid && raid.status === 'ACTIVE') {
-        raidEnergyDamageDealt = calculateWorkoutRaidEnergyDamage({
-          strengthXp: rewardPayload.finalXpByStat.STRENGTH,
-          enduranceXp: rewardPayload.finalXpByStat.ENDURANCE,
-          agilityXp: rewardPayload.finalXpByStat.AGILITY,
-          triggeredPrCrit: evalResult.criticalTrainingBonus.triggered,
-        });
-        const dmgBig = BigInt(raidEnergyDamageDealt);
-        const nextHp = raid.currentHp > dmgBig ? raid.currentHp - dmgBig : 0n;
+      const dmgBig = BigInt(raidEnergyDamageDealt);
+      const nextHp = validRaid.currentHp > dmgBig ? validRaid.currentHp - dmgBig : 0n;
 
-        await db.raidBossInstance.update({
-          where: { id: raid.id },
-          data: {
-            currentHp: nextHp,
-            totalRaidDamage: { increment: dmgBig },
-            isDefeated: nextHp === 0n,
-            status: nextHp === 0n ? 'DEFEATED' : 'ACTIVE',
-          },
-        });
+      await db.raidBossInstance.update({
+        where: { id: validRaid.id },
+        data: {
+          currentHp: nextHp,
+          totalRaidDamage: { increment: dmgBig },
+          isDefeated: nextHp === 0n,
+          status: nextHp === 0n ? 'DEFEATED' : 'ACTIVE',
+        },
+      });
 
-        await db.raidParticipantContribution.upsert({
-          where: {
-            raidInstanceId_characterId: { raidInstanceId: raid.id, characterId },
-          },
-          update: {
-            workoutEnergyDamage: { increment: dmgBig },
-            totalContributionScore: { increment: dmgBig },
-            workoutsChanneled: { increment: 1 },
-          },
-          create: {
-            raidInstanceId: raid.id,
-            characterId,
-            workoutEnergyDamage: dmgBig,
-            totalContributionScore: dmgBig,
-            workoutsChanneled: 1,
-          },
-        });
-      }
+      await db.raidParticipantContribution.upsert({
+        where: {
+          raidInstanceId_characterId: { raidInstanceId: validRaid.id, characterId },
+        },
+        update: {
+          workoutEnergyDamage: { increment: dmgBig },
+          totalContributionScore: { increment: dmgBig },
+          workoutsChanneled: { increment: 1 },
+        },
+        create: {
+          raidInstanceId: validRaid.id,
+          characterId,
+          workoutEnergyDamage: dmgBig,
+          totalContributionScore: dmgBig,
+          workoutsChanneled: 1,
+        },
+      });
     }
 
     // 10B. If verified via wearable hardware telemetry, tag Ironman mode if account has no existing Ironman character

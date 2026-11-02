@@ -1731,6 +1731,43 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  const fetchActiveRaids = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/raids');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.raids) && data.raids.length > 0) {
+          setRaids(
+            data.raids.map((r: any) => ({
+              id: r.id,
+              bossName: r.bossName,
+              accessType: r.accessType,
+              maxHp: Number(r.maxHp),
+              currentHp: Number(r.currentHp),
+              endsAtMs: new Date(r.endsAt).getTime(),
+              dailyAttackUsedToday: false,
+              participants: (r.contributions || []).map((c: any) => ({
+                characterId: c.characterId,
+                name: c.character?.name || 'Adventurer',
+                combatDamageDealt: Number(c.combatDamageDealt || 0),
+                workoutEnergyDamage: Number(c.workoutEnergyDamage || 0),
+                supportScore: Number(c.supportScore || 0),
+              })),
+            }))
+          );
+        }
+      }
+    } catch {
+      // Non-blocking fallback
+    }
+  }, []);
+
+  useEffect(() => {
+    if (serverOnline) {
+      void fetchActiveRaids();
+    }
+  }, [fetchActiveRaids, serverOnline]);
+
   const addDropsToInventory = useCallback((drops: LootDrop[]) => {
     if (drops.length === 0) return;
     setRawInventory((prev) => {
@@ -1856,7 +1893,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     averageHrZone: dominantZone,
                     arrivalTrigger: 'MANUAL_OPEN_WORLD',
                     chestOpened: false,
-                    channeledRaidInstanceId: item.channelToRaidId ?? undefined,
+                    channeledRaidInstanceId:
+                      item.channelToRaidId && !item.channelToRaidId.startsWith('raid_public_')
+                        ? item.channelToRaidId
+                        : undefined,
                     sets: item.sets.map((s) => ({
                       exerciseId: s.exerciseId,
                       reps: s.reps,
@@ -1954,7 +1994,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     averageHrZone: dominantZone,
                     arrivalTrigger: 'MANUAL_OPEN_WORLD',
                     chestOpened: false,
-                    channeledRaidInstanceId: queued.channelToRaidId ?? undefined,
+                    channeledRaidInstanceId:
+                      queued.channelToRaidId && !queued.channelToRaidId.startsWith('raid_public_')
+                        ? queued.channelToRaidId
+                        : undefined,
                     sets: queued.sets.map((s) => ({
                       exerciseId: s.exerciseId,
                       reps: s.reps,
@@ -3770,7 +3813,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             gymName: active.arrivalBoon.gymName ?? undefined,
             lowEnergyMode: active.lowEnergyMode,
             focusOverrideCount: active.focusOverrideCount,
-            channeledRaidInstanceId: channelToRaidId,
+            channeledRaidInstanceId:
+              channelToRaidId && !channelToRaidId.startsWith('raid_public_')
+                ? channelToRaidId
+                : undefined,
             verificationSource:
               telemetryOptions?.source ??
               (telemetryOptions?.isHardwareVerified ? 'WEARABLE_TELEMETRY' : 'MANUAL_HONESTY'),
