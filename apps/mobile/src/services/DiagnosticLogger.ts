@@ -278,6 +278,7 @@ class DiagnosticLoggerService {
    * Submits a diagnostic bug report. If offline or the network call fails,
    * it queues the report into AsyncStorage (@gymify_bug_report_outbox)
    * to be flushed automatically when connectivity is restored.
+   * Includes immediate retry with 8s timeout to handle satellite (Starlink) jitter.
    */
   public async submitDiagnosticReport(
     payload: BugReportSubmissionPayload
@@ -297,30 +298,61 @@ class DiagnosticLoggerService {
       userId: payload.userId ?? null,
     };
 
-    try {
-      const response = await apiFetch('/api/diagnostics/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fullPayload),
-      }, 4000);
+    // Tolerate brief satellite handovers / latency jitter with a 2-attempt cycle (8s timeout)
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await apiFetch('/api/diagnostics/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(fullPayload),
+        }, 8000);
 
-      if (response.ok) {
-        const json = await response.json();
-        return { ok: true, id: json.id };
-      }
+        if (response.ok) {
+          const json = await response.json();
+          return { ok: true, id: json.id };
+        }
 
-      // 4xx client errors (validation failures) shouldn't loop indefinitely in outbox
-      if (response.status >= 400 && response.status < 500) {
-        const errJson = await response.json().catch(() => ({}));
-        return { ok: false, error: errJson.error || 'Diagnostic report validation failed' };
+        // 4xx client errors (validation failures) shouldn't loop indefinitely in outbox
+        if (response.status >= 400 && response.status < 500) {
+          const errJson = await response.json().catch(() => ({}));
+          return { ok: false, error: errJson.error || 'Diagnostic report validation failed' };
+        }
+      } catch {
+        if (attempt < 2) {
+          // Pause 1000ms to let satellite handoff / socket reconnection settle
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
       }
-    } catch {
-      // Network drop, timeout, or server unavailable -> Enqueue locally
     }
 
-    // Queue in local outbox
+    // Queue in local outbox if both attempts failed
     await this.enqueueOutboxReport(fullPayload);
     return { ok: true, queuedLocally: true };
+  }
+
+  /**
+   * Returns the number of diagnostic reports currently waiting in the offline outbox.
+   */
+  public async getPendingOutboxCount(): Promise<number> {
+    try {
+      const raw = await AsyncStorage.getItem(BUG_REPORT_OUTBOX_STORAGE_KEY);
+      if (!raw) return 0;
+      const queue = JSON.parse(raw);
+      return Array.isArray(queue) ? queue.length : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Clears any queued offline bug reports.
+   */
+  public async clearOutbox(): Promise<void> {
+    try {
+      await AsyncStorage.removeItem(BUG_REPORT_OUTBOX_STORAGE_KEY);
+    } catch {
+      // Ignore
+    }
   }
 
   private async enqueueOutboxReport(payload: BugReportSubmissionPayload): Promise<void> {
@@ -369,7 +401,7 @@ class DiagnosticLoggerService {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(item),
-          }, 4000);
+          }, 8000);
 
           if (res.ok) {
             flushedCount++;

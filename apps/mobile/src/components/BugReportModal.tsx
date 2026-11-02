@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -58,6 +58,37 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
     status: 'success' | 'queued' | 'error';
     message: string;
   } | null>(null);
+  const [pendingOutboxCount, setPendingOutboxCount] = useState<number>(0);
+  const [isFlushingOutbox, setIsFlushingOutbox] = useState<boolean>(false);
+  const [flushFeedback, setFlushFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (visible) {
+      void diagnosticLogger.getPendingOutboxCount().then(setPendingOutboxCount);
+      setFlushFeedback(null);
+    }
+  }, [visible]);
+
+  const handleFlushOutbox = async () => {
+    setIsFlushingOutbox(true);
+    setFlushFeedback(null);
+    try {
+      const res = await diagnosticLogger.flushBugReportOutbox();
+      const updated = await diagnosticLogger.getPendingOutboxCount();
+      setPendingOutboxCount(updated);
+      if (res.flushed > 0) {
+        setFlushFeedback(`Successfully sent ${res.flushed} report(s) directly to developers!`);
+      } else if (res.remaining > 0) {
+        setFlushFeedback('Connection blip: will auto-upload when satellite signal clears.');
+      } else {
+        setFlushFeedback('All reports are synced.');
+      }
+    } catch {
+      setFlushFeedback('Upload attempt timed out. Will auto-retry in background.');
+    } finally {
+      setIsFlushingOutbox(false);
+    }
+  };
 
   const isSuggestion = category === 'FEATURE_SUGGESTION';
 
@@ -115,6 +146,9 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
         characterId,
         userId,
       });
+
+      const updatedCount = await diagnosticLogger.getPendingOutboxCount();
+      setPendingOutboxCount(updatedCount);
 
       if (res.queuedLocally) {
         setSubmitResult({
@@ -312,6 +346,33 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
                 </View>
               )}
             </View>
+
+            {/* Outbox Status Banner */}
+            {(pendingOutboxCount > 0 || flushFeedback) && (
+              <View style={styles.outboxNoticeBox}>
+                <View style={styles.outboxNoticeTextCol}>
+                  <Text style={styles.outboxNoticeTitle}>
+                    📦 {pendingOutboxCount} {pendingOutboxCount === 1 ? 'Report' : 'Reports'} in Offline Outbox
+                  </Text>
+                  <Text style={styles.outboxNoticeSubtitle}>
+                    {flushFeedback
+                      ? flushFeedback
+                      : 'Saved locally on device. Transmits automatically in background, or send now:'}
+                  </Text>
+                </View>
+                {pendingOutboxCount > 0 && (
+                  <Pressable
+                    style={[styles.outboxNoticeBtn, isFlushingOutbox && styles.btnDisabled]}
+                    onPress={() => void handleFlushOutbox()}
+                    disabled={isFlushingOutbox}
+                  >
+                    <Text style={styles.outboxNoticeBtnText}>
+                      {isFlushingOutbox ? 'Transmitting...' : '🚀 Send Now'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
 
             {/* Submission Status Message */}
             {submitResult && (
@@ -576,6 +637,44 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 6,
     borderWidth: 1,
+  },
+  outboxNoticeBox: {
+    backgroundColor: '#2A1F11',
+    borderColor: '#D97706',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  outboxNoticeTextCol: {
+    flex: 1,
+    gap: 3,
+  },
+  outboxNoticeTitle: {
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  outboxNoticeSubtitle: {
+    color: '#D1D5DB',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  outboxNoticeBtn: {
+    backgroundColor: '#78350F',
+    borderColor: '#F59E0B',
+    borderWidth: 1,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  outboxNoticeBtnText: {
+    color: '#FEF3C7',
+    fontSize: 11,
+    fontWeight: '700',
   },
   statusBoxSuccess: {
     backgroundColor: '#064E3B',

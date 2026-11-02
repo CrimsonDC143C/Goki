@@ -1261,7 +1261,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const ensureRemoteCharacterBootstrapped = useCallback(async (): Promise<string | null> => {
     try {
-      const healthRes = await fetchWithTimeout(`${API_BASE_URL}/health`, undefined, 2200);
+      const healthRes = await fetchWithTimeout(`${API_BASE_URL}/health`, undefined, 6000);
       if (!healthRes.ok) {
         setServerOnline(false);
         return null;
@@ -1527,7 +1527,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     isHardwareVerified: item.isHardwareVerified ?? undefined,
                   }),
                 },
-                3500
+                8000
               );
               if (!res.ok) {
                 remainingUnsynced.push(item);
@@ -1625,7 +1625,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     isHardwareVerified: queued.isHardwareVerified ?? undefined,
                   }),
                 },
-                3500
+                8000
               );
 
               if (res.ok) {
@@ -2010,6 +2010,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const appSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
+        void ensureRemoteCharacterBootstrapped();
         void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
         void diagnosticLogger.flushBugReportOutbox();
       }
@@ -2022,6 +2023,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         removeEventListener?: (type: string, fn: () => void) => void;
       };
       const onOnline = () => {
+        void ensureRemoteCharacterBootstrapped();
         void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
         void diagnosticLogger.flushBugReportOutbox();
       };
@@ -2033,17 +2035,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       appSub.remove();
       removeWebOnline?.();
     };
-  }, [syncOfflineWorkouts]);
+  }, [ensureRemoteCharacterBootstrapped, syncOfflineWorkouts]);
 
+  // Periodic background heartbeat (25s) — recovers serverOnline status, drains diagnostic outbox & syncs workouts
   useEffect(() => {
-    if (queuedOfflineWorkouts.length === 0 && unsyncedServerPayloads.length === 0) {
-      return;
-    }
     const timer = setInterval(() => {
-      void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
-    }, 15_000);
+      if (!serverOnline) {
+        void ensureRemoteCharacterBootstrapped();
+      }
+      void diagnosticLogger.flushBugReportOutbox();
+      if (queuedOfflineWorkouts.length > 0 || unsyncedServerPayloads.length > 0) {
+        void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
+      }
+    }, 25_000);
     return () => clearInterval(timer);
-  }, [queuedOfflineWorkouts.length, unsyncedServerPayloads.length, syncOfflineWorkouts]);
+  }, [serverOnline, ensureRemoteCharacterBootstrapped, queuedOfflineWorkouts.length, unsyncedServerPayloads.length, syncOfflineWorkouts]);
 
   const completeOfflineWorkout = useCallback(() => {
     const draft = offlineDraftRef.current;

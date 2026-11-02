@@ -6,8 +6,10 @@ import {
 } from './tokenStorage';
 
 export function resolveApiBaseUrl(): string {
-  const envUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+  let envUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
   if (envUrl) {
+    // Strip quotes if present (e.g. from .env.local: "http://...")
+    envUrl = envUrl.replace(/^["']|["']$/g, '').trim();
     if ((envUrl.includes('localhost') || envUrl.includes('127.0.0.1')) && Constants?.expoConfig?.hostUri) {
       const lanHost = Constants.expoConfig.hostUri.split(':')[0];
       if (lanHost) {
@@ -23,7 +25,7 @@ export function resolveApiBaseUrl(): string {
       return `http://${lanHost}:4000`;
     }
   }
-  return 'http://localhost:4000';
+  return 'https://gymify-server.onrender.com';
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
@@ -77,7 +79,7 @@ export interface LoginPayload {
 export async function apiFetch(
   pathOrUrl: string,
   init?: RequestInit,
-  timeoutMs = 3000
+  timeoutMs = 6000
 ): Promise<Response> {
   const baseUrl = resolveApiBaseUrl();
   const url =
