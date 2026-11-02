@@ -79,6 +79,10 @@ import {
   SetType,
   WorkoutPresetDefinition,
   STARTER_WORKOUT_PRESETS,
+  CompletedWorkoutRecord,
+  CompletedExerciseEntry,
+  CompletedSetEntry,
+  DEFAULT_SAMPLE_WORKOUT_HISTORY,
 } from '@gymify/game-engine';
 import {
   OfflineDraftExerciseBlock,
@@ -304,6 +308,11 @@ interface GameContextValue {
   completeOfflineWorkout: () => { ok: boolean; error?: string };
   syncOfflineWorkouts: (options?: { evaluateLocallyIfOffline?: boolean }) => Promise<void>;
   claimPendingSpoils: () => void;
+
+  // Training History Matrix Data
+  workoutHistory: CompletedWorkoutRecord[];
+  recordWorkoutHistory: (record: CompletedWorkoutRecord) => void;
+  clearWorkoutHistory: () => void;
 
   // Presets
   presets: WorkoutPresetDefinition[];
@@ -1109,6 +1118,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     []
   );
   const [customPresets, setCustomPresets] = useState<WorkoutPresetDefinition[]>([]);
+  const [workoutHistory, setWorkoutHistory] = useState<CompletedWorkoutRecord[]>(
+    DEFAULT_SAMPLE_WORKOUT_HISTORY
+  );
   const [landingToastMessage, setLandingToastMessage] = useState<string | null>(null);
   const [offlineHydrated, setOfflineHydrated] = useState(false);
 
@@ -1136,6 +1148,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   pendingReceiptsRef.current = pendingWorkoutReceipts;
   const customPresetsRef = useRef<WorkoutPresetDefinition[]>(customPresets);
   customPresetsRef.current = customPresets;
+  const workoutHistoryRef = useRef<CompletedWorkoutRecord[]>(workoutHistory);
+  workoutHistoryRef.current = workoutHistory;
   const isSyncingOfflineRef = useRef(false);
 
   const persistBundleSnapshot = useCallback((partial: Partial<PersistedOfflineBundle>) => {
@@ -1150,6 +1164,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         partial.pendingWorkoutReceipts ?? pendingReceiptsRef.current,
       customPresets:
         partial.customPresets ?? customPresetsRef.current,
+      workoutHistory:
+        partial.workoutHistory ?? workoutHistoryRef.current,
       characterProfile:
         partial.characterProfile !== undefined ? partial.characterProfile : currentProfileRef.current,
       availableCharacters:
@@ -1159,6 +1175,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     void savePersistedOfflineBundle(nextBundle);
   }, []);
+
+  const recordWorkoutHistory = useCallback((record: CompletedWorkoutRecord) => {
+    setWorkoutHistory((prev) => {
+      const next = [record, ...prev.filter((r) => r.id !== record.id)];
+      workoutHistoryRef.current = next;
+      persistBundleSnapshot({ workoutHistory: next });
+      return next;
+    });
+  }, [persistBundleSnapshot]);
+
+  const clearWorkoutHistory = useCallback(() => {
+    workoutHistoryRef.current = [];
+    setWorkoutHistory([]);
+    persistBundleSnapshot({ workoutHistory: [] });
+  }, [persistBundleSnapshot]);
 
   // Hydrate persisted offline draft, queued workouts, character profile and unclaimed spoils on boot
   useEffect(() => {
@@ -1193,6 +1224,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (loaded.activeCharacterId) {
         activeCharacterIdRef.current = loaded.activeCharacterId;
         setActiveCharacterId(loaded.activeCharacterId);
+      }
+      if (loaded.workoutHistory && loaded.workoutHistory.length > 0) {
+        workoutHistoryRef.current = loaded.workoutHistory;
+        setWorkoutHistory(loaded.workoutHistory);
       }
       if (loaded.characterProfile) {
         currentProfileRef.current = loaded.characterProfile;
@@ -2434,6 +2469,46 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const nextQueue = [...queuedOfflineRef.current, payload];
     const freshDraft = createDefaultOfflineDraft(nowMs + 1);
 
+    // Build historical record for Training History Matrix
+    const historyExercises: CompletedExerciseEntry[] = [];
+    for (const block of draft.exerciseBlocks) {
+      const exMeta = STARTER_EXERCISES.find((e) => e.id === block.exerciseId);
+      const completedRows = block.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
+      if (completedRows.length > 0) {
+        historyExercises.push({
+          exerciseId: block.exerciseId,
+          exerciseName: exMeta?.name ?? block.exerciseName ?? block.exerciseId,
+          sets: completedRows.map((s, idx) => ({
+            setNumber: idx + 1,
+            weightKg: Math.max(0, Number(s.weightKgStr) || 0),
+            reps: Math.floor(Number(s.repsStr) || 0),
+            rpe: s.rpe ?? null,
+            setType: s.setType,
+            isWarmup: s.isWarmup,
+          })),
+        });
+      }
+    }
+
+    const offlineRecord: CompletedWorkoutRecord = {
+      id: `offline_hist_${nowMs}`,
+      source: 'OFFLINE',
+      performedAtIso: new Date(nowMs).toISOString(),
+      durationSeconds: elapsedSec,
+      workoutCategory: draft.category ?? 'GYM',
+      workoutType,
+      presetName: draft.sourcePresetId
+        ? customPresetsRef.current.find((p) => p.id === draft.sourcePresetId)?.name ??
+          STARTER_WORKOUT_PRESETS.find((p) => p.id === draft.sourcePresetId)?.name ??
+          'Routine Preset'
+        : undefined,
+      exercises: historyExercises,
+    };
+
+    const nextHistory = [offlineRecord, ...workoutHistoryRef.current];
+    workoutHistoryRef.current = nextHistory;
+    setWorkoutHistory(nextHistory);
+
     queuedOfflineRef.current = nextQueue;
     offlineDraftRef.current = freshDraft;
 
@@ -2444,6 +2519,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     persistBundleSnapshot({
       offlineDraft: null,
       queuedOfflineWorkouts: nextQueue,
+      workoutHistory: nextHistory,
     });
 
     // Silently attempt server sync in the background (with zero RPG popups)
@@ -3716,9 +3792,57 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }).catch(() => {});
       }
 
+      // Group active.setLogs into completed exercise history for Training History Matrix
+      const exercisesMap = new Map<
+        string,
+        { exerciseId: string; exerciseName: string; sets: CompletedSetEntry[] }
+      >();
+      for (const s of active.setLogs) {
+        let exGroup = exercisesMap.get(s.exerciseId);
+        if (!exGroup) {
+          exGroup = { exerciseId: s.exerciseId, exerciseName: s.exerciseName || s.exerciseId, sets: [] };
+          exercisesMap.set(s.exerciseId, exGroup);
+        }
+        exGroup.sets.push({
+          setNumber: s.setNumber,
+          weightKg: s.weightKg,
+          reps: s.reps,
+          rpe: s.rpe ?? null,
+          setType: s.setType,
+          isWarmup: s.isWarmup,
+        });
+      }
+
+      const inferredCategory: WorkoutCategory =
+        active.workoutType === 'RESISTANCE'
+          ? 'GYM'
+          : active.workoutType === 'ACTIVE_RECOVERY'
+          ? 'RECOVERY'
+          : active.workoutType === 'CARDIO_HIGH_INTENSITY'
+          ? 'SPORT'
+          : 'CARDIO';
+
+      const onlineRecord: CompletedWorkoutRecord = {
+        id: `online_hist_${now.getTime()}`,
+        source: 'ONLINE',
+        performedAtIso: now.toISOString(),
+        durationSeconds: payload.durationSeconds,
+        workoutCategory: inferredCategory,
+        workoutType: active.workoutType,
+        presetName: active.workoutType === 'RESISTANCE' ? 'Live Resistance Training' : 'Live Conditioning',
+        exercises: Array.from(exercisesMap.values()),
+      };
+
+      const nextHistory = [onlineRecord, ...workoutHistoryRef.current];
+      workoutHistoryRef.current = nextHistory;
+      setWorkoutHistory(nextHistory);
+      persistBundleSnapshot({
+        workoutHistory: nextHistory,
+      });
+
       return { ok: true };
     },
-    [addDropsToInventory, consistencyStreak, fatigueState, historicalPRs, stats, workoutMachine]
+    [addDropsToInventory, consistencyStreak, fatigueState, historicalPRs, persistBundleSnapshot, stats, workoutMachine]
   );
 
   const proceedToHybridLootReview = useCallback(() => {
@@ -3837,6 +3961,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     completeOfflineWorkout,
     syncOfflineWorkouts,
     claimPendingSpoils,
+    workoutHistory,
+    recordWorkoutHistory,
+    clearWorkoutHistory,
     presets,
     savePreset,
     deletePreset,

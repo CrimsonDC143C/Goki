@@ -35,6 +35,7 @@ export interface WorkoutCategoryGatewayProps {
   onResetCategory: () => void;
   onLoadPreset: (preset: WorkoutPresetDefinition) => void;
   onOpenPresetDesigner?: () => void;
+  onOpenTrainingHistory?: () => void;
 }
 
 export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
@@ -48,6 +49,7 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
   onResetCategory,
   onLoadPreset,
   onOpenPresetDesigner,
+  onOpenTrainingHistory,
 }) => {
   const [showSecondaryPicker, setShowSecondaryPicker] = useState<boolean>(false);
   const [showPresetsDrawer, setShowPresetsDrawer] = useState<boolean>(false);
@@ -108,17 +110,31 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         <View style={styles.presetSection}>
           <View style={styles.presetSectionHeader}>
             <Text style={styles.presetSectionTitle}>Or Load a Routine Preset</Text>
-            {onOpenPresetDesigner ? (
-              <TouchableOpacity
-                style={styles.designerLinkBtn}
-                onPress={() => {
-                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
-                  onOpenPresetDesigner();
-                }}
-              >
-                <Text style={styles.designerLinkText}>+ Preset Designer</Text>
-              </TouchableOpacity>
-            ) : null}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {onOpenTrainingHistory ? (
+                <TouchableOpacity
+                  style={styles.historyLinkBtn}
+                  onPress={() => {
+                    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                    onOpenTrainingHistory();
+                  }}
+                  testID="gateway-history-link-btn"
+                >
+                  <Text style={styles.historyLinkText}>📊 Training History</Text>
+                </TouchableOpacity>
+              ) : null}
+              {onOpenPresetDesigner ? (
+                <TouchableOpacity
+                  style={styles.designerLinkBtn}
+                  onPress={() => {
+                    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                    onOpenPresetDesigner();
+                  }}
+                >
+                  <Text style={styles.designerLinkText}>+ Preset Designer</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
@@ -183,6 +199,20 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         </View>
 
         <View style={styles.headerRightActions}>
+          {onOpenTrainingHistory && (
+            <TouchableOpacity
+              style={styles.historyBtn}
+              onPress={() => {
+                triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                onOpenTrainingHistory();
+              }}
+              activeOpacity={0.7}
+              testID="gateway-history-btn"
+            >
+              <Text style={styles.historyBtnText}>📊 History</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={styles.presetsBtn}
             onPress={() => setShowPresetsDrawer(true)}
@@ -464,6 +494,19 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#C69A45',
   },
+  historyLinkBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#2A241A',
+    borderColor: '#DFB660',
+    borderWidth: 1,
+    borderRadius: 6,
+  },
+  historyLinkText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FDE68A',
+  },
   presetScroll: {
     flexDirection: 'row',
   },
@@ -547,6 +590,19 @@ const styles = StyleSheet.create({
   headerRightActions: {
     flexDirection: 'row',
     gap: 6,
+  },
+  historyBtn: {
+    backgroundColor: '#2A241A',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  historyBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FDE68A',
   },
   presetsBtn: {
     backgroundColor: '#26242B',

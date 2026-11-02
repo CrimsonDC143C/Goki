@@ -8,6 +8,8 @@ import {
   SetType,
   WorkoutPresetDefinition,
   STARTER_WORKOUT_PRESETS,
+  CompletedWorkoutRecord,
+  DEFAULT_SAMPLE_WORKOUT_HISTORY,
 } from '@gymify/game-engine';
 
 export interface OfflineDraftSetRow {
@@ -84,6 +86,7 @@ export interface PersistedOfflineBundle {
   characterProfile?: PersistedCharacterProfile | null;
   availableCharacters?: PersistedCharacterProfile[];
   activeCharacterId?: string | null;
+  workoutHistory?: CompletedWorkoutRecord[];
 }
 
 const STORAGE_KEY = 'gymify_offline_bundle_v1';
@@ -106,6 +109,7 @@ let memoryFallbackBundle: PersistedOfflineBundle = {
   characterProfile: null,
   availableCharacters: [],
   activeCharacterId: null,
+  workoutHistory: DEFAULT_SAMPLE_WORKOUT_HISTORY,
 };
 
 let writeChain: Promise<void> = Promise.resolve();
@@ -206,6 +210,7 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
       characterProfile: null,
       availableCharacters: [],
       activeCharacterId: null,
+      workoutHistory: DEFAULT_SAMPLE_WORKOUT_HISTORY,
     };
   }
   const obj = raw as Partial<PersistedOfflineBundle>;
@@ -232,6 +237,10 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
         : null,
     availableCharacters: Array.isArray(obj.availableCharacters) ? obj.availableCharacters : [],
     activeCharacterId: typeof obj.activeCharacterId === 'string' ? obj.activeCharacterId : null,
+    workoutHistory:
+      Array.isArray(obj.workoutHistory) && obj.workoutHistory.length > 0
+        ? obj.workoutHistory
+        : DEFAULT_SAMPLE_WORKOUT_HISTORY,
   };
 }
 

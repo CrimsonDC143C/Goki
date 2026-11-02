@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import {
   getStoredAuthToken,
   removeStoredAuthToken,
@@ -7,19 +8,28 @@ import {
 
 export function resolveApiBaseUrl(): string {
   let envUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+  const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+
   if (envUrl) {
     // Strip quotes if present (e.g. from .env.local: "http://...")
     envUrl = envUrl.replace(/^["']|["']$/g, '').trim();
-    if ((envUrl.includes('localhost') || envUrl.includes('127.0.0.1')) && Constants?.expoConfig?.hostUri) {
-      const lanHost = Constants.expoConfig.hostUri.split(':')[0];
-      if (lanHost) {
-        return `http://${lanHost}:4000`;
+    const isLocalhost = envUrl.includes('localhost') || envUrl.includes('127.0.0.1');
+
+    if (isLocalhost) {
+      if (Platform.OS !== 'web') {
+        const lanHost = Constants?.expoConfig?.hostUri?.split(':')[0];
+        if (isDev && lanHost) {
+          return `http://${lanHost}:4000`;
+        }
+        // In standalone native release/preview builds, localhost fails with ConnectException.
+        return 'https://gymify-server.onrender.com';
       }
     }
     return envUrl.replace(/\/$/, '');
   }
+
   const hostUri = Constants?.expoConfig?.hostUri;
-  if (hostUri) {
+  if (isDev && hostUri) {
     const lanHost = hostUri.split(':')[0];
     if (lanHost) {
       return `http://${lanHost}:4000`;

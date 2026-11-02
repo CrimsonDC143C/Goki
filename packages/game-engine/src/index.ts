@@ -13,3 +13,4 @@ export * from './ironman-verifier';
 export * from './diagnostics';
 export * from './version';
 export * from './stat-radar';
+export * from './training-history-tracker';

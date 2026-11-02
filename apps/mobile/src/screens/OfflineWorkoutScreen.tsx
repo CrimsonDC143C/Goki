@@ -26,6 +26,7 @@ import { CRIMSON_ONI } from '../theme';
 import { WorkoutCategoryGateway } from '../components/WorkoutCategoryGateway';
 import { DynamicRestTimer } from '../components/DynamicRestTimer';
 import { PresetDesignerModal } from '../components/PresetDesignerModal';
+import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 
 export interface OfflineWorkoutScreenProps {
@@ -88,6 +89,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showPresetDesigner, setShowPresetDesigner] = useState<boolean>(false);
+  const [showTrainingHistory, setShowTrainingHistory] = useState<boolean>(false);
 
   const filteredResistanceExercises = useMemo(() => {
     const q = exerciseSearchQuery.trim().toLowerCase();
@@ -504,9 +506,19 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     <View style={styles.root}>
       {/* Minimalist Utility Header */}
       <View style={styles.topBar}>
-        <Pressable style={styles.backBtn} onPress={onBackToLanding}>
-          <Text style={styles.backBtnText}>← Back</Text>
-        </Pressable>
+        <View style={styles.topBarLeftGroup}>
+          <Pressable style={styles.backBtn} onPress={onBackToLanding}>
+            <Text style={styles.backBtnText}>← Back</Text>
+          </Pressable>
+          <TouchableOpacity
+            style={styles.topBarHistoryBtn}
+            onPress={() => setShowTrainingHistory(true)}
+            testID="offline-history-top-btn"
+            activeOpacity={0.7}
+          >
+            <Text style={styles.topBarHistoryText}>📊 History</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.sessionTimerCenter}>
           <Text style={styles.sessionClock}>{formatClock(sessionElapsedSec)}</Text>
@@ -562,13 +574,23 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           onResetCategory={handleResetCategory}
           onLoadPreset={(p) => loadPresetIntoDraft(p, 'OFFLINE')}
           onOpenPresetDesigner={() => setShowPresetDesigner(true)}
+          onOpenTrainingHistory={() => setShowTrainingHistory(true)}
         />
 
         {/* RESISTANCE TRAINING LOGGING SECTION */}
         {showResistanceUI && (
           <View style={styles.modalitySection}>
             <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeading}>RESISTANCE SETS</Text>
+              <View style={styles.sectionHeadingGroup}>
+                <Text style={styles.sectionHeading}>RESISTANCE SETS</Text>
+                <TouchableOpacity
+                  style={styles.sectionHistoryPill}
+                  onPress={() => setShowTrainingHistory(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.sectionHistoryPillText}>📊 History</Text>
+                </TouchableOpacity>
+              </View>
               <Text style={styles.sectionCountMeta}>
                 {completedSetCount} set{completedSetCount === 1 ? '' : 's'} checked
               </Text>
@@ -950,6 +972,12 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           onDeletePreset={deletePreset}
           onClose={() => setShowPresetDesigner(false)}
         />
+
+        {/* Training History Matrix Page Modal */}
+        <TrainingHistoryScreen
+          visible={showTrainingHistory}
+          onBack={() => setShowTrainingHistory(false)}
+        />
       </ScrollView>
     </View>
   );
@@ -969,6 +997,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#19181D',
     borderBottomWidth: 1,
     borderBottomColor: '#2B2930',
+  },
+  topBarLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  topBarHistoryBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#2D2316',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+  },
+  topBarHistoryText: {
+    color: '#FDE68A',
+    fontSize: 11,
+    fontWeight: '800',
   },
   backBtn: {
     paddingHorizontal: 10,
@@ -1034,6 +1080,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  sectionHeadingGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionHistoryPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#2D2316',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+  },
+  sectionHistoryPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FDE68A',
   },
   sectionHeading: {
     fontSize: 12,

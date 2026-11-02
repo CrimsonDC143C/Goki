@@ -113,7 +113,7 @@ export function createBullMqGameTimerRuntime(params: {
 
   return {
     async scheduleGatheringCompletion({ taskId, characterId, delayMs }) {
-      const jobId = `gather:${taskId}`;
+      const jobId = `gather_${taskId}`;
       const job = await gatheringQueue.add(
         'complete-gathering',
         { taskId, characterId },
@@ -123,7 +123,7 @@ export function createBullMqGameTimerRuntime(params: {
     },
 
     async scheduleDungeonResolution({ dungeonRunId, delayMs }) {
-      const jobId = `dungeon:${dungeonRunId}`;
+      const jobId = `dungeon_${dungeonRunId}`;
       const job = await dungeonQueue.add(
         'resolve-dungeon',
         { dungeonRunId },
@@ -133,7 +133,7 @@ export function createBullMqGameTimerRuntime(params: {
     },
 
     async scheduleTavernRestTransition({ characterId, delayMs }) {
-      const jobId = `tavern-rest:${characterId}`;
+      const jobId = `tavern-rest_${characterId}`;
       // Remove any prior pending 24h Tavern timer for this character so the 24h window resets cleanly
       const existing = await fatigueQueue.getJob(jobId);
       if (existing) {
@@ -148,7 +148,7 @@ export function createBullMqGameTimerRuntime(params: {
     },
 
     async scheduleRaidRollover({ raidInstanceId, delayMs }) {
-      const jobId = `raid:${raidInstanceId}`;
+      const jobId = `raid_${raidInstanceId}`;
       const job = await raidQueue.add(
         'rollover-raid',
         { raidInstanceId },

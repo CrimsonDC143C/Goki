@@ -11,6 +11,7 @@ import { SvgXml } from 'react-native-svg';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { AuthModal } from '../components/AuthModal';
 import { CharacterManagerModal } from '../components/CharacterManagerModal';
+import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { useGame } from '../state/GameContext';
 import { LOOT_CHEST_SVGS, RANK_CREST_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
@@ -51,6 +52,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
 
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [charManagerVisible, setCharManagerVisible] = useState(false);
+  const [showTrainingHistory, setShowTrainingHistory] = useState(false);
 
   useEffect(() => {
     if (!landingToastMessage) return;
@@ -229,7 +231,31 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             </Text>
           </Pressable>
 
-          {/* Button 3: Enter World */}
+          {/* Button 3: Training History */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionCard,
+              styles.historyActionCard,
+              pressed && styles.actionCardPressed,
+            ]}
+            onPress={() => setShowTrainingHistory(true)}
+            testID="action-training-history"
+          >
+            <View style={styles.actionHeaderRow}>
+              <View style={styles.actionTitleCluster}>
+                <Text style={styles.actionIcon}>📊</Text>
+                <Text style={[styles.actionTitle, { color: CRIMSON_ONI.agedGoldBright }]}>
+                  Training History
+                </Text>
+              </View>
+              <Text style={styles.chevronGold}>→</Text>
+            </View>
+            <Text style={styles.actionSubtitle}>
+              Cross-workout exercise progression matrix &amp; past session sets/reps/weight.
+            </Text>
+          </Pressable>
+
+          {/* Button 4: Enter World */}
           <Pressable
             style={({ pressed }) => [
               styles.actionCard,
@@ -275,6 +301,11 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
       <CharacterManagerModal
         visible={charManagerVisible}
         onClose={() => setCharManagerVisible(false)}
+      />
+
+      <TrainingHistoryScreen
+        visible={showTrainingHistory}
+        onBack={() => setShowTrainingHistory(false)}
       />
     </View>
   );
@@ -476,6 +507,11 @@ const styles = StyleSheet.create({
   },
   onlineTitle: {
     color: CRIMSON_ONI.agedGoldBright,
+  },
+  historyActionCard: {
+    backgroundColor: '#201E25',
+    borderColor: CRIMSON_ONI.agedGold,
+    borderLeftWidth: 4,
   },
   enterWorldCard: {
     backgroundColor: CRIMSON_ONI.crimsonDim,

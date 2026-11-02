@@ -33,6 +33,7 @@ import { StaminaRingTimer } from '../components/StaminaRingTimer';
 import { WorkoutCategoryGateway } from '../components/WorkoutCategoryGateway';
 import { DynamicRestTimer } from '../components/DynamicRestTimer';
 import { PresetDesignerModal } from '../components/PresetDesignerModal';
+import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { isEquippableInventoryEntry, useGame } from '../state/GameContext';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { Image } from 'expo-image';
@@ -151,6 +152,7 @@ export const WorkoutLoggerScreen: React.FC = () => {
   // Phase 3 Inline Progression Selection (`LootReview`)
   const [allocStatTab, setAllocStatTab] = useState<HolisticStatType>('STRENGTH');
   const [allocFeedback, setAllocFeedback] = useState<string | null>(null);
+  const [showTrainingHistory, setShowTrainingHistory] = useState(false);
 
   // Micro-animation pulse value for XP / Gold / Boss HP feedback
   const microPulseAnim = useRef(new Animated.Value(1)).current;
@@ -373,6 +375,7 @@ export const WorkoutLoggerScreen: React.FC = () => {
             });
           }}
           onOpenPresetDesigner={() => setShowPresetDesigner(true)}
+          onOpenTrainingHistory={() => setShowTrainingHistory(true)}
         />
 
         {/* Rest, Consistency & Tavern Multiplier Status */}
@@ -578,6 +581,11 @@ export const WorkoutLoggerScreen: React.FC = () => {
           onDeletePreset={deletePreset}
           onClose={() => setShowPresetDesigner(false)}
         />
+
+        <TrainingHistoryScreen
+          visible={showTrainingHistory}
+          onBack={() => setShowTrainingHistory(false)}
+        />
       </ScrollView>
     );
   }
@@ -713,18 +721,28 @@ export const WorkoutLoggerScreen: React.FC = () => {
                   ? `⏭️ Next-Set Preview (Set #${activeSession.setLogs.length + 1})`
                   : `🏋️ Active Set #${activeSession.setLogs.length + 1}`}
               </Text>
-              <Pressable
-                style={[styles.warmupToggle, (isWarmup || setType === 'WARMUP') && styles.warmupToggleActive]}
-                onPress={() => {
-                  const next = !isWarmup;
-                  setIsWarmup(next);
-                  setSetType(next ? 'WARMUP' : 'NORMAL');
-                }}
-              >
-                <Text style={styles.warmupToggleText}>
-                  {isWarmup || setType === 'WARMUP' ? '🔥 Warm-Up Set' : '⚔️ Working Set'}
-                </Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TouchableOpacity
+                  style={styles.sweatHistoryBtn}
+                  onPress={() => setShowTrainingHistory(true)}
+                  testID="online-active-history-btn"
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.sweatHistoryBtnText}>📊 History</Text>
+                </TouchableOpacity>
+                <Pressable
+                  style={[styles.warmupToggle, (isWarmup || setType === 'WARMUP') && styles.warmupToggleActive]}
+                  onPress={() => {
+                    const next = !isWarmup;
+                    setIsWarmup(next);
+                    setSetType(next ? 'WARMUP' : 'NORMAL');
+                  }}
+                >
+                  <Text style={styles.warmupToggleText}>
+                    {isWarmup || setType === 'WARMUP' ? '🔥 Warm-Up Set' : '⚔️ Working Set'}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
 
             {/* Set Type & Superset Grouping Bar */}
@@ -970,6 +988,11 @@ export const WorkoutLoggerScreen: React.FC = () => {
           }}
           onDeletePreset={deletePreset}
           onClose={() => setShowPresetDesigner(false)}
+        />
+
+        <TrainingHistoryScreen
+          visible={showTrainingHistory}
+          onBack={() => setShowTrainingHistory(false)}
         />
       </ScrollView>
     );
@@ -1351,6 +1374,11 @@ export const WorkoutLoggerScreen: React.FC = () => {
           onDeletePreset={deletePreset}
           onClose={() => setShowPresetDesigner(false)}
         />
+
+        <TrainingHistoryScreen
+          visible={showTrainingHistory}
+          onBack={() => setShowTrainingHistory(false)}
+        />
       </ScrollView>
     );
   }
@@ -1680,6 +1708,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
+  },
+  sweatHistoryBtn: {
+    backgroundColor: '#2A241A',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  sweatHistoryBtnText: {
+    color: '#FDE68A',
+    fontSize: 11,
+    fontWeight: '800',
   },
   warmupToggle: {
     backgroundColor: COLORS.bgElevated,
