@@ -141,3 +141,61 @@ export const HUD_URIS = {
 export const CHARACTER_SILHOUETTE_SVG = `<svg viewBox="0 0 120 220" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="silhouette-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#273248" stop-opacity="0.9"></stop><stop offset="1" stop-color="#121722" stop-opacity="0.3"></stop></linearGradient></defs><ellipse cx="60" cy="212" rx="44" ry="5" fill="#8B2637" opacity="0.35"></ellipse><path fill="url(#silhouette-grad)" stroke="#273248" d="M60 8c10 0 17 8 17 18s-7 19-17 19-17-9-17-19S50 8 60 8zM38 50h44c10 0 17 6 19 15l9 52c1 5-6 7-8 2l-11-40-2 44 5 82c0 7-11 7-12 0l-10-72h-4l-10 72c-1 7-12 7-12 0l5-82-2-44-11 40c-2 5-9 3-8-2l9-52c2-9 9-15 19-15z"></path></svg>`;
 
 export const CHARACTER_SILHOUETTE_URI = svgToDataUri(CHARACTER_SILHOUETTE_SVG);
+
+// ============================================================================
+// 7. HARVESTED RASTER IMAGES & APP ICONS
+// ============================================================================
+export const V0_IMAGES = {
+  adventurerPortrait: require('../../assets/images/adventurer-portrait.png'),
+  appleIcon: require('../../assets/images/apple-icon.png'),
+  iconLight32: require('../../assets/images/icon-light-32x32.png'),
+  iconDark32: require('../../assets/images/icon-dark-32x32.png'),
+};
+
+export const V0_APP_ICON_SVG = `<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg"><g clip-path="url(#clip0_v0_appicon)"><rect width="180" height="180" rx="37" fill="#000000"/><g style="transform: scale(95%); transform-origin: center"><path fill="#ffffff" d="M101.141 53H136.632C151.023 53 162.689 64.6662 162.689 79.0573V112.904H148.112V79.0573C148.112 78.7105 148.098 78.3662 148.072 78.0251L112.581 112.898C112.701 112.902 112.821 112.904 112.941 112.904H148.112V126.672H112.941C98.5504 126.672 86.5638 114.891 86.5638 100.5V66.7434H101.141V100.5C101.141 101.15 101.191 101.792 101.289 102.422L137.56 66.7816C137.255 66.7563 136.945 66.7434 136.632 66.7434H101.141V53Z"/><path fill="#ffffff" d="M65.2926 124.136L14 66.7372H34.6355L64.7495 100.436V66.7372H80.1365V118.47C80.1365 126.278 70.4953 129.958 65.2926 124.136Z"/></g></g><defs><clipPath id="clip0_v0_appicon"><rect width="180" height="180" fill="white"/></clipPath></defs></svg>`;
+
+export const V0_APP_ICON_URI = svgToDataUri(V0_APP_ICON_SVG);
+
+// ============================================================================
+// 8. TYPOGRAPHY & WEB FONTS MANIFEST
+// ============================================================================
+export const V0_FONTS = {
+  cinzel: {
+    latin: require('../../assets/fonts/cinzel-latin.woff2'),
+    bold: require('../../assets/fonts/cinzel-bold.woff2'),
+    black: require('../../assets/fonts/cinzel-black.woff2'),
+    black900: require('../../assets/fonts/cinzel-black-900.woff2'),
+    decorative: require('../../assets/fonts/cinzel-decorative.woff2'),
+    latinExt: require('../../assets/fonts/cinzel-latin-ext.woff2'),
+  },
+  inter: {
+    variable: require('../../assets/fonts/inter-variable.woff2'),
+    latin: require('../../assets/fonts/inter-latin.woff2'),
+    latinExt: require('../../assets/fonts/inter-latin-ext.woff2'),
+  },
+};
+
+// ============================================================================
+// 9. V0 DESIGN SYSTEM TOKENS
+// ============================================================================
+export const V0_DESIGN_TOKENS = {
+  colors: {
+    black: '#000000',
+    white: '#FFFFFF',
+    crimson: '#5E1924',
+    crimsonGlow: '#8B2637',
+    gold: '#C69A45',
+    goldBright: '#DFB660',
+    goldMuted: '#A8743A',
+    charcoal: '#1A191C',
+    charcoalCard: '#121722',
+    ghost: '#E8E6E1',
+    border: '#2A0C11',
+    borderNavy: '#273248',
+  },
+  typography: {
+    fontDisplay: 'Cinzel',
+    fontSans: 'Inter',
+  },
+};
+
