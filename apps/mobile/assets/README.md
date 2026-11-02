@@ -19,19 +19,15 @@ apps/mobile/assets/
 │   ├── inter-latin-ext.woff2
 │   ├── inter-latin.woff2
 │   └── inter-variable.woff2
-├── images/                     # Production raster graphics and app icons
-│   ├── adventurer-portrait.png # Full-body Crimson Oni character hero artwork (1024x1024, 1.78 MB)
-│   ├── apple-icon.png          # iOS home screen touch icon (180x180, 2.6 KB)
-│   ├── icon-light-32x32.png    # Light mode favicon (32x32, 566 B)
-│   └── icon-dark-32x32.png     # Dark mode favicon (32x32, 585 B)
+├── images/                     # Production raster graphics
+│   └── adventurer-portrait.png # Full-body Crimson Oni character hero artwork (1024x1024, 1.78 MB)
 ├── sprites/                    # 2D Auto-battler combat sprites & animation sheets
 ├── styles/                     # Tailwind design tokens and compiled CSS
-│   └── v0-design-system.css    # Full v0 stylesheet with design system variables (78.8 KB)
+│   └── v0-design-system.css    # Full design system stylesheet with tokens (78.8 KB)
 └── svg/                        # Scalable Vector Graphics
     ├── chests/                 # Common, Rare, Epic, Mythic animated loot chests
     ├── hud/                    # Filigree borders, stat radar, stamina timer & gathering rings
-    ├── icons/                  # High-density UI action icons (sword, shield, trophy, skull, etc.)
-    │   └── icon.svg            # Official Gymify monochrome / dark geometric app icon
+    ├── icons/                  # 35 RPG & fitness action icons (sword, shield, trophy, skull, etc.)
     ├── modalities/             # 8 Modality badges (Resistance, Cardio, Calisthenics, Yoga, etc.)
     ├── ranks/                  # 7 Adventurer rank crests (Copper -> Mythic)
     ├── stats/                  # 7 Core stat glyphs (STR, END, AGI, DEX, CON, WIS, SPR)
@@ -57,14 +53,13 @@ Harvested Next.js production font subsets for the dual-font design system:
 
 ---
 
-## 2. Raster Artwork & Icons
+## 2. Raster Artwork
 
 | File | Resolution | Format | Role & Implementation |
 |---|---|---|---|
 | `adventurer-portrait.png` | 1024×1024 | PNG (RGBA) | Default hero portrait rendered in `CharacterPortraitFrame.tsx` (`DEFAULT_HERO_PORTRAIT`) |
-| `apple-icon.png` | 180×180 | PNG (RGBA) | High-DPI iOS application icon asset |
-| `icon-light-32x32.png` | 32×32 | PNG (RGBA) | Web/PWA light-theme browser icon |
-| `icon-dark-32x32.png` | 32×32 | PNG (RGBA) | Web/PWA dark-theme browser icon |
+
+> **Note on Scaffold Asset Purge:** Default host/platform artifacts (such as Vercel/v0 favicons and placeholder app icons) were audited and purged, ensuring all bundled assets are exclusively project-relevant artwork and design resources.
 
 ---
 
