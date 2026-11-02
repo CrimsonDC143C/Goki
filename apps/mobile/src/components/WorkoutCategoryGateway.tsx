@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
+import { SvgXml } from 'react-native-svg';
 import {
   WorkoutCategory,
   WORKOUT_CATEGORIES,
   WorkoutCategoryDescriptor,
   WorkoutPresetDefinition,
 } from '@gymify/game-engine';
-import { MODALITY_BADGE_URIS } from '../assets/v0Vault';
+import { MODALITY_BADGE_SVGS } from '../assets/v0Vault';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 
 const CATEGORY_COLORS: Record<WorkoutCategory, string> = {
@@ -16,11 +17,11 @@ const CATEGORY_COLORS: Record<WorkoutCategory, string> = {
   RECOVERY: '#10B981',
 };
 
-const CATEGORY_BADGES: Record<WorkoutCategory, string> = {
-  GYM: MODALITY_BADGE_URIS.resistance,
-  CARDIO: MODALITY_BADGE_URIS.cardio,
-  SPORT: MODALITY_BADGE_URIS.calisthenics,
-  RECOVERY: MODALITY_BADGE_URIS.yogaMobility,
+const CATEGORY_BADGE_SVGS: Record<WorkoutCategory, string> = {
+  GYM: MODALITY_BADGE_SVGS.resistance,
+  CARDIO: MODALITY_BADGE_SVGS.cardio,
+  SPORT: MODALITY_BADGE_SVGS.calisthenics,
+  RECOVERY: MODALITY_BADGE_SVGS.yogaMobility,
 };
 
 export interface WorkoutCategoryGatewayProps {
@@ -78,13 +79,9 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                 }}
               >
                 <View style={styles.cardHeaderRow}>
-                  {CATEGORY_BADGES[cat.key] ? (
+                  {CATEGORY_BADGE_SVGS[cat.key] ? (
                     <View style={[styles.badgeWrap, { borderColor: color }]}>
-                      <Image
-                        source={{ uri: CATEGORY_BADGES[cat.key] }}
-                        style={styles.modalityBadgeIcon}
-                        resizeMode="contain"
-                      />
+                      <SvgXml xml={CATEGORY_BADGE_SVGS[cat.key]} width={28} height={28} />
                     </View>
                   ) : (
                     <Text style={styles.cardIcon}>{cat.icon}</Text>
@@ -175,12 +172,8 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         </TouchableOpacity>
 
         <View style={[styles.activeCategoryPill, { borderColor: activeColor }]}>
-          {CATEGORY_BADGES[activeCatMeta.key] ? (
-            <Image
-              source={{ uri: CATEGORY_BADGES[activeCatMeta.key] }}
-              style={styles.activePillBadgeIcon}
-              resizeMode="contain"
-            />
+          {CATEGORY_BADGE_SVGS[activeCatMeta.key] ? (
+            <SvgXml xml={CATEGORY_BADGE_SVGS[activeCatMeta.key]} width={16} height={16} />
           ) : (
             <Text style={styles.activePillIcon}>{activeCatMeta.icon}</Text>
           )}
@@ -261,12 +254,10 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                         setShowSecondaryPicker(false);
                       }}
                     >
-                      {CATEGORY_BADGES[cat.key] ? (
-                        <Image
-                          source={{ uri: CATEGORY_BADGES[cat.key] }}
-                          style={styles.modalOptionBadgeIcon}
-                          resizeMode="contain"
-                        />
+                      {CATEGORY_BADGE_SVGS[cat.key] ? (
+                        <View style={{ marginRight: 10 }}>
+                          <SvgXml xml={CATEGORY_BADGE_SVGS[cat.key]} width={26} height={26} />
+                        </View>
                       ) : (
                         <Text style={styles.modalOptionIcon}>{cat.icon}</Text>
                       )}

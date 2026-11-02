@@ -1,7 +1,7 @@
 import React from 'react';
 import { Image, ImageSourcePropType, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Defs, LinearGradient, Path, Polygon, Rect, Stop } from 'react-native-svg';
-import { HUD_URIS } from '../assets/v0Vault';
+import Svg, { Circle, Defs, LinearGradient, Path, Polygon, Rect, Stop, SvgXml } from 'react-native-svg';
+import { HUD_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
 
 export interface CharacterPortraitFrameProps {
@@ -86,10 +86,18 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
   return (
     <View style={[styles.heroFrame, { height: frameHeight }]}>
       {/* Ornate Crimson Oni Corner Filigree Accents (v0 Vault) */}
-      <Image source={{ uri: HUD_URIS.cornerFiligreeLarge }} style={[styles.cornerFiligree, styles.cornerTL]} resizeMode="contain" />
-      <Image source={{ uri: HUD_URIS.cornerFiligreeLarge }} style={[styles.cornerFiligree, styles.cornerTR]} resizeMode="contain" />
-      <Image source={{ uri: HUD_URIS.cornerFiligreeLarge }} style={[styles.cornerFiligree, styles.cornerBL]} resizeMode="contain" />
-      <Image source={{ uri: HUD_URIS.cornerFiligreeLarge }} style={[styles.cornerFiligree, styles.cornerBR]} resizeMode="contain" />
+      <View style={[styles.cornerFiligree, styles.cornerTL]} pointerEvents="none">
+        <SvgXml xml={HUD_SVGS.cornerFiligreeLarge} width={32} height={32} />
+      </View>
+      <View style={[styles.cornerFiligree, styles.cornerTR]} pointerEvents="none">
+        <SvgXml xml={HUD_SVGS.cornerFiligreeLarge} width={32} height={32} />
+      </View>
+      <View style={[styles.cornerFiligree, styles.cornerBL]} pointerEvents="none">
+        <SvgXml xml={HUD_SVGS.cornerFiligreeLarge} width={32} height={32} />
+      </View>
+      <View style={[styles.cornerFiligree, styles.cornerBR]} pointerEvents="none">
+        <SvgXml xml={HUD_SVGS.cornerFiligreeLarge} width={32} height={32} />
+      </View>
 
       {resolvedSource ? (
         <Image source={resolvedSource} style={styles.heroImage} resizeMode="contain" />

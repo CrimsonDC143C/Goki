@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SvgXml } from 'react-native-svg';
 import {
   EQUIPMENT_SLOTS,
   EquipmentSlot,
@@ -31,10 +32,10 @@ import {
   useGame,
 } from '../state/GameContext';
 import {
-  HUD_URIS,
-  LOOT_CHEST_URIS,
-  RANK_CREST_URIS,
-  STAT_GLYPH_URIS,
+  HUD_SVGS,
+  LOOT_CHEST_SVGS,
+  RANK_CREST_SVGS,
+  STAT_GLYPH_SVGS,
 } from '../assets/v0Vault';
 import { COLORS, CRIMSON_ONI, RARITY_COLORS } from '../theme';
 
@@ -422,13 +423,11 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             </View>
 
             <View style={styles.guildSubtitleRow}>
-              {RANK_CREST_URIS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_URIS] ? (
-                <Image
-                  source={{
-                    uri: RANK_CREST_URIS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_URIS],
-                  }}
-                  style={styles.headerRankCrest}
-                  resizeMode="contain"
+              {RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS] ? (
+                <SvgXml
+                  xml={RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS]}
+                  width={20}
+                  height={20}
                 />
               ) : null}
               <Text style={styles.guildSubtitle}>
@@ -539,10 +538,10 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           </View>
         </View>
         <View style={styles.radarImageContainer}>
-          <Image
-            source={{ uri: HUD_URIS.statRadar }}
-            style={styles.radarImage}
-            resizeMode="contain"
+          <SvgXml
+            xml={HUD_SVGS.statRadar}
+            width="100%"
+            height={220}
           />
         </View>
       </View>
@@ -557,14 +556,12 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             <View key={meta.key} style={styles.statCard}>
               <View style={styles.statCardTop}>
                 <View style={styles.statTitleCluster}>
-                  {STAT_GLYPH_URIS[meta.abbrev as keyof typeof STAT_GLYPH_URIS] ? (
+                  {STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS] ? (
                     <View style={[styles.statGlyphBox, { borderColor: meta.color }]}>
-                      <Image
-                        source={{
-                          uri: STAT_GLYPH_URIS[meta.abbrev as keyof typeof STAT_GLYPH_URIS],
-                        }}
-                        style={styles.statGlyphImage}
-                        resizeMode="contain"
+                      <SvgXml
+                        xml={STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS]}
+                        width={28}
+                        height={28}
                       />
                     </View>
                   ) : (
@@ -1046,10 +1043,10 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                     CONSOLIDATED POST-WORKOUT SPOILS RECEIPT
                   </Text>
                   <View style={styles.receiptChestContainer}>
-                    <Image
-                      source={{ uri: LOOT_CHEST_URIS.EPIC }}
-                      style={styles.receiptChestImage}
-                      resizeMode="contain"
+                    <SvgXml
+                      xml={LOOT_CHEST_SVGS.EPIC}
+                      width={96}
+                      height={80}
                     />
                   </View>
                   <Text style={styles.receiptMainTitle}>
@@ -1076,13 +1073,11 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                       return (
                         <View key={meta.key} style={styles.receiptStatLine}>
                           <View style={styles.receiptStatLeft}>
-                            {STAT_GLYPH_URIS[meta.abbrev as keyof typeof STAT_GLYPH_URIS] ? (
-                              <Image
-                                source={{
-                                  uri: STAT_GLYPH_URIS[meta.abbrev as keyof typeof STAT_GLYPH_URIS],
-                                }}
-                                style={styles.receiptStatGlyph}
-                                resizeMode="contain"
+                            {STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS] ? (
+                              <SvgXml
+                                xml={STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS]}
+                                width={22}
+                                height={22}
                               />
                             ) : null}
                             <Text style={[styles.receiptStatName, { color: meta.color }]}>

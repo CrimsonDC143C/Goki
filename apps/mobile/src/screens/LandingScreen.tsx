@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Image,
   ImageSourcePropType,
   Pressable,
   ScrollView,
@@ -8,10 +7,11 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SvgXml } from 'react-native-svg';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { AuthModal } from '../components/AuthModal';
 import { useGame } from '../state/GameContext';
-import { LOOT_CHEST_URIS, RANK_CREST_URIS } from '../assets/v0Vault';
+import { LOOT_CHEST_SVGS, RANK_CREST_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
 
 export interface LandingScreenProps {
@@ -137,13 +137,11 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
 
               <View style={styles.nameplateMetaRow}>
                 <View style={styles.guildRankPill}>
-                  {RANK_CREST_URIS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_URIS] ? (
-                    <Image
-                      source={{
-                        uri: RANK_CREST_URIS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_URIS],
-                      }}
-                      style={styles.rankCrestIcon}
-                      resizeMode="contain"
+                  {RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS] ? (
+                    <SvgXml
+                      xml={RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS]}
+                      width={16}
+                      height={16}
                     />
                   ) : null}
                   <Text style={styles.guildRankText}>{adventurerRank} RANK</Text>
@@ -230,10 +228,10 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           >
             {spoilsBadgeLabel && (
               <View style={styles.spoilsReadyBadge}>
-                <Image
-                  source={{ uri: LOOT_CHEST_URIS.MYTHIC }}
-                  style={styles.miniChestIcon}
-                  resizeMode="contain"
+                <SvgXml
+                  xml={LOOT_CHEST_SVGS.MYTHIC}
+                  width={18}
+                  height={15}
                 />
                 <Text style={styles.spoilsReadyBadgeText}>{spoilsBadgeLabel}</Text>
               </View>
