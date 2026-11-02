@@ -10,8 +10,10 @@ export interface CharacterPortraitFrameProps {
    * Renders atmospheric Crimson Oni warrior silhouette artwork when omitted.
    */
   imageSource?: ImageSourcePropType | string | null;
-  variant?: 'hero' | 'avatar';
+  variant?: 'hero' | 'avatar' | 'circle';
   height?: number;
+  isCircle?: boolean;
+  isActive?: boolean;
   children?: React.ReactNode;
 }
 
@@ -19,6 +21,8 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
   imageSource,
   variant = 'hero',
   height,
+  isCircle,
+  isActive,
   children,
 }) => {
   const resolvedSource: ImageSourcePropType | null =
@@ -27,6 +31,66 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
       : imageSource && typeof imageSource !== 'string'
         ? imageSource
         : null;
+
+  if (variant === 'circle' || (variant === 'avatar' && isCircle)) {
+    const size = height ?? 58;
+    return (
+      <View
+        style={[
+          styles.circleOuter,
+          { width: size, height: size, borderRadius: size / 2 },
+          isActive && styles.circleOuterActive,
+        ]}
+      >
+        {resolvedSource ? (
+          <Image source={resolvedSource} style={styles.circleImage} resizeMode="cover" />
+        ) : (
+          <Svg width={size - 4} height={size - 4} viewBox="0 0 100 100">
+            <Defs>
+              <LinearGradient id="oniCircleBg" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor="#351118" />
+                <Stop offset="1" stopColor="#141316" />
+              </LinearGradient>
+            </Defs>
+            <Rect x="0" y="0" width="100" height="100" fill="url(#oniCircleBg)" />
+            <Circle
+              cx="50"
+              cy="44"
+              r="30"
+              fill={CRIMSON_ONI.crimson}
+              fillOpacity={0.45}
+              stroke={CRIMSON_ONI.agedGold}
+              strokeWidth="1.2"
+              strokeOpacity={0.55}
+            />
+            {/* Horned Vanguard Helm Silhouette */}
+            <Path
+              d="M28 42 L18 18 L36 32 Q50 24 64 32 L82 18 L72 42 Z"
+              fill={CRIMSON_ONI.agedGold}
+              fillOpacity={0.85}
+            />
+            <Path
+              d="M32 38 Q50 26 68 38 L66 64 Q50 74 34 64 Z"
+              fill="#2B2930"
+              stroke={CRIMSON_ONI.agedGold}
+              strokeWidth="1.6"
+            />
+            {/* Glowing Crimson Visor */}
+            <Polygon points="38,48 48,51 39,54" fill="#EF5350" />
+            <Polygon points="62,48 52,51 61,54" fill="#EF5350" />
+            {/* Shoulders */}
+            <Path
+              d="M16 96 Q22 70 50 70 Q78 70 84 96 Z"
+              fill={CRIMSON_ONI.crimson}
+              stroke={CRIMSON_ONI.agedGold}
+              strokeWidth="1.5"
+            />
+          </Svg>
+        )}
+        {children}
+      </View>
+    );
+  }
 
   if (variant === 'avatar') {
     const size = height ?? 76;
@@ -295,5 +359,32 @@ const styles = StyleSheet.create({
   avatarImage: {
     width: '100%',
     height: '100%',
+  },
+  circleOuter: {
+    borderWidth: 2,
+    borderColor: CRIMSON_ONI.agedGold,
+    backgroundColor: CRIMSON_ONI.charcoalDeep,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: CRIMSON_ONI.crimson,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.55,
+    shadowRadius: 5,
+    elevation: 6,
+  },
+  circleOuterActive: {
+    borderColor: '#DFB660',
+    borderWidth: 2.5,
+    shadowColor: '#DFB660',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 9,
+    elevation: 9,
+  },
+  circleImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 999,
   },
 });

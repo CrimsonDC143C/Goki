@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   AutoUpdateState,
   autoUpdateManager,
@@ -17,10 +18,14 @@ import {
 import { COLORS, CRIMSON_ONI } from '../theme';
 
 export const UpdateBanner: React.FC = () => {
+  const insets = useSafeAreaInsets();
   const [updateState, setUpdateState] = useState<AutoUpdateState>(() =>
     autoUpdateManager.getState()
   );
   const [isApplying, setIsApplying] = useState(false);
+
+  // Compute tasteful offset from top safe area ensuring clearance from notch, camera, and screen bevel
+  const topOffset = Math.max(insets.top + 16, Platform.OS === 'ios' ? 56 : 48);
 
   useEffect(() => {
     const unsubscribe = autoUpdateManager.subscribe((state) => {
@@ -70,7 +75,7 @@ export const UpdateBanner: React.FC = () => {
     <>
       {/* 1. Downloading OTA Toast */}
       {updateState.status === 'DOWNLOADING_OTA' && (
-        <View style={styles.toastContainer}>
+        <View style={[styles.toastContainer, { top: topOffset }]}>
           <ActivityIndicator size="small" color={COLORS.gold} />
           <Text style={styles.toastText}>📥 Downloading Realm Patch...</Text>
         </View>
@@ -78,7 +83,7 @@ export const UpdateBanner: React.FC = () => {
 
       {/* 2. Ready to Install (Outside Workout) Toast */}
       {updateState.status === 'READY_TO_INSTALL' && (
-        <View style={[styles.toastContainer, styles.toastReady]}>
+        <View style={[styles.toastContainer, { top: topOffset }, styles.toastReady]}>
           <Text style={styles.toastText}>⚡ Realm Patch Downloaded!</Text>
           <Pressable
             style={({ pressed }) => [
@@ -87,6 +92,9 @@ export const UpdateBanner: React.FC = () => {
             ]}
             onPress={() => handleApplyNow(false)}
             disabled={isApplying}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel="Restart app now to install update"
           >
             {isApplying ? (
               <ActivityIndicator size="small" color="#000" />
@@ -99,7 +107,7 @@ export const UpdateBanner: React.FC = () => {
 
       {/* 3. Deferred Workout Pill (Zero Interrupted Sets Guarantee) */}
       {updateState.status === 'WAITING_FOR_WORKOUT' && (
-        <View style={[styles.toastContainer, styles.toastDeferred]}>
+        <View style={[styles.toastContainer, { top: topOffset }, styles.toastDeferred]}>
           <View style={styles.deferredContent}>
             <Text style={styles.deferredTitle}>
               ✨ Update Downloaded — Will install after workout
@@ -115,6 +123,9 @@ export const UpdateBanner: React.FC = () => {
             ]}
             onPress={() => handleApplyNow(true)}
             disabled={isApplying}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Reload app now with workout draft saved"
           >
             {isApplying ? (
               <ActivityIndicator size="small" color={COLORS.textPrimary} />
@@ -130,7 +141,7 @@ export const UpdateBanner: React.FC = () => {
       {/* 4. Up-To-Date Confirmation Toast (Manual Check Feedback) */}
       {updateState.status === 'UP_TO_DATE' && (
         <Pressable
-          style={[styles.toastContainer, styles.toastUpToDate]}
+          style={[styles.toastContainer, { top: topOffset }, styles.toastUpToDate]}
           onPress={() => autoUpdateManager.dismissBanner()}
         >
           <Text style={styles.toastText}>
@@ -231,24 +242,25 @@ export const UpdateBanner: React.FC = () => {
 const styles = StyleSheet.create({
   toastContainer: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 52 : 36,
     left: 16,
     right: 16,
-    zIndex: 9999,
+    maxWidth: 520,
+    alignSelf: 'center',
+    zIndex: 99999,
     backgroundColor: CRIMSON_ONI.charcoalCard,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: CRIMSON_ONI.agedGold,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.65,
+    shadowRadius: 10,
+    elevation: 10,
   },
   toastReady: {
     borderColor: COLORS.success,
@@ -271,6 +283,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.3,
+    flex: 1,
+    marginRight: 10,
   },
   deferredContent: {
     flexDirection: 'column',
@@ -287,28 +301,40 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     backgroundColor: COLORS.gold,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    minHeight: 44,
+    minWidth: 106,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: COLORS.gold,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 4,
   },
   actionButtonText: {
     color: '#000',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   actionButtonSecondary: {
     backgroundColor: CRIMSON_ONI.charcoalElevated,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: CRIMSON_ONI.agedGold,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    minHeight: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   actionButtonSecondaryText: {
     color: CRIMSON_ONI.agedGoldBright,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   buttonPressed: {
     opacity: 0.75,

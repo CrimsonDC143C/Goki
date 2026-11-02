@@ -4,7 +4,9 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { HolisticStatType, StatType, isIntraWorkoutFocusLocked } from '@gymify/game-engine';
 import { BugReportModal } from './src/components/BugReportModal';
+import { CharacterPortraitFrame } from './src/components/CharacterPortraitFrame';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { TopMenuBorderArt } from './src/components/TopMenuBorderArt';
 import { UpdateBanner } from './src/components/UpdateBanner';
 import { autoUpdateManager } from './src/services/AutoUpdateManager';
 import { CharacterProfileScreen } from './src/screens/CharacterProfileScreen';
@@ -34,21 +36,28 @@ export type ActiveTab =
  */
 export const DEFAULT_WORLD_ENTRY_TAB: ActiveTab = 'PROFILE';
 
-const LOCATIONS: Array<{ key: GameLocation; label: string }> = [
-  { key: 'TAVERN', label: '🍺 Tavern' },
-  { key: 'GUILD_HALL', label: '🛡️ Guild Hall' },
-  { key: 'GATHERING_NODE', label: '⛏️ Nodes' },
-  { key: 'DUNGEON', label: '🏰 Dungeon' },
-  { key: 'RAID_SANCTUM', label: '🐉 Raid' },
+export interface LocationOption {
+  key: GameLocation;
+  label: string;
+  name: string;
+  icon: string;
+  desc: string;
+}
+
+const LOCATIONS: Array<LocationOption> = [
+  { key: 'TAVERN', label: '🍺 Tavern', name: 'Tavern', icon: '🍺', desc: 'Rest & Recover' },
+  { key: 'GUILD_HALL', label: '🛡️ Guild Hall', name: 'Guild Hall', icon: '🛡️', desc: 'Bounties & Roster' },
+  { key: 'GATHERING_NODE', label: '⛏️ Nodes', name: 'Gathering Nodes', icon: '⛏️', desc: 'Resource Harvesting' },
+  { key: 'DUNGEON', label: '🏰 Dungeon', name: 'Dungeon', icon: '🏰', desc: 'Delves & Spoils' },
+  { key: 'RAID_SANCTUM', label: '🐉 Raid', name: 'Raid Sanctum', icon: '🐉', desc: 'Epic Boss Battles' },
 ];
 
 const TAB_ITEMS: ReadonlyArray<{ key: ActiveTab; icon: string; label: string }> = [
-  { key: 'PROFILE', icon: '🛡️', label: 'Profile' },
   { key: 'WORKOUT', icon: '🏋️', label: 'Workout' },
   { key: 'TALENTS', icon: '🌳', label: 'Talents' },
-  { key: 'GATHERING', icon: '⛏️', label: '2h Idle' },
-  { key: 'DUNGEON', icon: '🏰', label: '24h Replay' },
-  { key: 'GUILD', icon: '🐉', label: 'Guild & Raid' },
+  { key: 'GATHERING', icon: '⛏️', label: 'Artisan' },
+  { key: 'DUNGEON', icon: '🏰', label: 'Expeditions' },
+  { key: 'GUILD', icon: '🐉', label: 'Guild' },
 ];
 
 interface MainShellProps {
@@ -65,11 +74,10 @@ const MainShell: React.FC<MainShellProps> = ({
   const {
     serverOnline,
     characterName,
+    characterArtUri,
     overallLevel,
-    adventurerRank,
     gold,
     location,
-    stats,
     workoutMachine,
     unclaimedSpoilsCount,
     travelTo,
@@ -82,12 +90,15 @@ const MainShell: React.FC<MainShellProps> = ({
     undefined
   );
   const [bugReportVisible, setBugReportVisible] = useState(false);
+  const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
 
   const focusLocked = isIntraWorkoutFocusLocked(workoutMachine.phase);
   const pendingTargetTab = workoutMachine.activeSession?.pendingFocusOverrideTarget as
     | ActiveTab
     | null
     | undefined;
+
+  const currentLocation = LOCATIONS.find((l) => l.key === location) ?? LOCATIONS[0]!;
 
   const handleTabPress = (nextTab: ActiveTab) => {
     if (nextTab === 'WORKOUT') {
@@ -108,52 +119,97 @@ const MainShell: React.FC<MainShellProps> = ({
       <View style={styles.appFrame}>
         {/* Top RPG Character HUD */}
         <View style={styles.hudContainer}>
+          {/* Top Border Art: Tastefully offsets HUD from top screen edge and frames the center portrait */}
+          <TopMenuBorderArt height={18} />
+
           <View style={styles.hudTopRow}>
+            {/* Left Cluster: Return to Hub + Bug Report Button + Connection Dot */}
             <View style={styles.hudLeftCluster}>
               <Pressable
                 style={styles.landingHubBtn}
                 onPress={onReturnToLanding}
+                accessibilityRole="button"
                 accessibilityLabel="Return to Landing Screen"
               >
                 <Text style={styles.landingHubBtnText}>⛩️ Hub</Text>
               </Pressable>
 
-              <View style={{ flexShrink: 1 }}>
-                <Text style={styles.heroName} numberOfLines={1}>
-                  {characterName}{' '}
-                  <Text style={styles.rankBadge}>
-                    Lv.{overallLevel} [{adventurerRank}]
-                  </Text>
-                </Text>
-                <Text style={styles.statMiniLine}>
-                  STR {stats.STRENGTH.level} • END {stats.ENDURANCE.level} • AGI{' '}
-                  {stats.AGILITY.level} • Phase: {workoutMachine.phase}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.hudRight}>
-              <Text style={styles.goldText}>🪙 {gold}g</Text>
               <Pressable
                 style={styles.hudBugBtn}
                 onPress={() => setBugReportVisible(true)}
-                accessibilityLabel="Report Bug or Feedback"
+                accessibilityRole="button"
+                accessibilityLabel="Report Bug or Feature Suggestion"
               >
                 <Text style={styles.hudBugBtnText}>🐛</Text>
               </Pressable>
-              <Text
+
+              <View
                 style={[
-                  styles.connBadge,
-                  { color: serverOnline ? COLORS.success : COLORS.textMuted },
+                  styles.connDot,
+                  { backgroundColor: serverOnline ? COLORS.success : '#9CA3AF' },
                 ]}
+                accessibilityLabel={serverOnline ? 'Server Online' : 'Engine Live'}
+              />
+            </View>
+
+            {/* Center: Character Portrait Circle (slightly larger than bar, tapping opens Profile) */}
+            <View style={styles.hudCenterPortraitWrap}>
+              <Pressable
+                style={[
+                  styles.hudPortraitPressable,
+                  tab === 'PROFILE' && styles.hudPortraitPressableActive,
+                ]}
+                onPress={() => handleTabPress('PROFILE')}
+                accessibilityRole="button"
+                accessibilityLabel={`Character ${characterName}, Level ${overallLevel}. Tap to view Character Profile.`}
               >
-                {serverOnline ? '● API Live' : '● Engine Live'}
-              </Text>
+                <CharacterPortraitFrame
+                  variant="circle"
+                  height={56}
+                  isCircle
+                  isActive={tab === 'PROFILE'}
+                  imageSource={characterArtUri}
+                />
+                {/* Mini Level badge */}
+                <View style={styles.hudPortraitLevelPill}>
+                  <Text style={styles.hudPortraitLevelText}>Lv.{overallLevel}</Text>
+                </View>
+                {/* Unclaimed spoils notification badge */}
+                {unclaimedSpoilsCount > 0 && (
+                  <View style={styles.hudPortraitSpoilsBadge}>
+                    <Text style={styles.hudPortraitSpoilsText}>!</Text>
+                  </View>
+                )}
+              </Pressable>
+            </View>
+
+            {/* Right Cluster: Gold + Current Location Dropdown */}
+            <View style={styles.hudRightCluster}>
+              <View style={styles.hudGoldPill}>
+                <Text style={styles.goldText}>🪙 {gold}g</Text>
+              </View>
+
+              <Pressable
+                style={[
+                  styles.hudLocationBtn,
+                  locationDropdownOpen && styles.hudLocationBtnActive,
+                ]}
+                onPress={() => setLocationDropdownOpen((prev) => !prev)}
+                accessibilityRole="button"
+                accessibilityLabel={`Current location: ${currentLocation.name}. Tap to travel.`}
+              >
+                <Text style={styles.hudLocationBtnText} numberOfLines={1}>
+                  {currentLocation.icon} {currentLocation.name}
+                </Text>
+                <Text style={styles.hudLocationChevron}>
+                  {locationDropdownOpen ? '▲' : '▼'}
+                </Text>
+              </Pressable>
             </View>
           </View>
 
           {/* Phase 2 Focus Lock replaces Instant Travel Strip during DungeonActive / Resting */}
-          {focusLocked ? (
+          {focusLocked && (
             <View style={styles.focusLockBanner}>
               <Text style={styles.focusLockText}>
                 🔒 FOCUS LOCK ({workoutMachine.phase.toUpperCase()}) • 1.25x Arrival Boon Active
@@ -167,31 +223,69 @@ const MainShell: React.FC<MainShellProps> = ({
                 </Pressable>
               )}
             </View>
-          ) : (
-            <View style={styles.travelStrip}>
-              <Text style={styles.travelLabel}>Instant Travel:</Text>
-              {LOCATIONS.map((loc) => (
-                <Pressable
-                  key={loc.key}
-                  style={[
-                    styles.locChip,
-                    location === loc.key && styles.locChipActive,
-                  ]}
-                  onPress={() => travelTo(loc.key)}
-                >
-                  <Text
-                    style={[
-                      styles.locChipText,
-                      location === loc.key && styles.locChipTextActive,
-                    ]}
-                  >
-                    {loc.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
           )}
         </View>
+
+        {/* Current Location Travel Dropdown Modal */}
+        <Modal
+          visible={locationDropdownOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setLocationDropdownOpen(false)}
+        >
+          <Pressable
+            style={styles.dropdownBackdrop}
+            onPress={() => setLocationDropdownOpen(false)}
+          >
+            <View
+              style={styles.dropdownCard}
+              onStartShouldSetResponder={() => true}
+            >
+              <View style={styles.dropdownHeader}>
+                <Text style={styles.dropdownHeaderTitle}>🗺️ Realm Travel</Text>
+                <Text style={styles.dropdownHeaderSub}>Select destination to transit</Text>
+              </View>
+
+              {LOCATIONS.map((loc) => {
+                const isCurrent = location === loc.key;
+                return (
+                  <Pressable
+                    key={loc.key}
+                    style={({ pressed }) => [
+                      styles.dropdownItem,
+                      isCurrent && styles.dropdownItemActive,
+                      pressed && styles.dropdownItemPressed,
+                    ]}
+                    onPress={() => {
+                      travelTo(loc.key);
+                      setLocationDropdownOpen(false);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Travel to ${loc.name}`}
+                  >
+                    <Text style={styles.dropdownItemIcon}>{loc.icon}</Text>
+                    <View style={styles.dropdownItemCol}>
+                      <Text
+                        style={[
+                          styles.dropdownItemName,
+                          isCurrent && styles.dropdownItemNameActive,
+                        ]}
+                      >
+                        {loc.name}
+                      </Text>
+                      <Text style={styles.dropdownItemDesc}>{loc.desc}</Text>
+                    </View>
+                    {isCurrent && (
+                      <View style={styles.dropdownActiveBadge}>
+                        <Text style={styles.dropdownActiveCheck}>✓</Text>
+                      </View>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Pressable>
+        </Modal>
 
         {/* Active Screen Viewport */}
         <View style={styles.screenBody}>
@@ -220,7 +314,6 @@ const MainShell: React.FC<MainShellProps> = ({
           {TAB_ITEMS.map((item) => {
             const active = tab === item.key;
             const locked = focusLocked && item.key !== 'WORKOUT';
-            const showSpoilsDot = item.key === 'PROFILE' && unclaimedSpoilsCount > 0;
 
             return (
               <Pressable
@@ -232,7 +325,6 @@ const MainShell: React.FC<MainShellProps> = ({
                   <Text style={styles.tabIcon}>
                     {locked ? '🔒' : item.icon}
                   </Text>
-                  {showSpoilsDot && <View style={styles.spoilsDot} />}
                 </View>
                 <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
                   {item.label}
@@ -434,29 +526,33 @@ const styles = StyleSheet.create({
   },
   hudContainer: {
     backgroundColor: COLORS.bgCard,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderBottomWidth: 1.5,
+    borderBottomColor: CRIMSON_ONI.charcoalElevated,
+    paddingHorizontal: 12,
+    paddingTop: 2,
+    paddingBottom: 8,
+    position: 'relative',
+    zIndex: 100,
   },
   hudTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   hudLeftCluster: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 6,
+    justifyContent: 'flex-start',
   },
   landingHubBtn: {
     backgroundColor: CRIMSON_ONI.crimsonDim,
     borderWidth: 1,
     borderColor: CRIMSON_ONI.agedGold,
     borderRadius: 8,
-    paddingHorizontal: 9,
+    paddingHorizontal: 8,
     paddingVertical: 6,
   },
   landingHubBtnText: {
@@ -464,42 +560,208 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
   },
-  heroName: {
-    color: COLORS.textPrimary,
-    fontSize: 15,
-    fontWeight: '900',
+  hudBugBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#26222B',
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.charcoalElevated,
   },
-  rankBadge: {
-    color: COLORS.gold,
+  hudBugBtnText: {
     fontSize: 12,
   },
-  statMiniLine: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    marginTop: 2,
+  connDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginLeft: 2,
   },
-  hudRight: {
-    alignItems: 'flex-end',
+  hudCenterPortraitWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 110,
+  },
+  hudPortraitPressable: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2,
+    marginTop: -4,
+    marginBottom: -4,
+  },
+  hudPortraitPressableActive: {
+    transform: [{ scale: 1.04 }],
+  },
+  hudPortraitLevelPill: {
+    position: 'absolute',
+    bottom: -5,
+    backgroundColor: CRIMSON_ONI.charcoalBase,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    zIndex: 10,
+  },
+  hudPortraitLevelText: {
+    color: COLORS.gold,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  hudPortraitSpoilsBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 17,
+    height: 17,
+    borderRadius: 8.5,
+    backgroundColor: CRIMSON_ONI.agedGoldBright,
+    borderWidth: 1.5,
+    borderColor: CRIMSON_ONI.charcoalDeep,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 12,
+  },
+  hudPortraitSpoilsText: {
+    color: '#000',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  hudRightCluster: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    justifyContent: 'flex-end',
+  },
+  hudGoldPill: {
+    backgroundColor: CRIMSON_ONI.charcoalBase,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
   },
   goldText: {
     color: COLORS.gold,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
   },
-  hudBugBtn: {
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    marginTop: 2,
-    borderRadius: 4,
-    backgroundColor: '#26222B',
+  hudLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: CRIMSON_ONI.charcoalElevated,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    gap: 4,
   },
-  hudBugBtnText: {
+  hudLocationBtnActive: {
+    borderColor: COLORS.gold,
+    backgroundColor: CRIMSON_ONI.crimsonDim,
+  },
+  hudLocationBtnText: {
+    color: CRIMSON_ONI.agedGoldBright,
     fontSize: 11,
-  },
-  connBadge: {
-    fontSize: 10,
     fontWeight: '700',
-    marginTop: 2,
+  },
+  hudLocationChevron: {
+    color: CRIMSON_ONI.agedGold,
+    fontSize: 8,
+    marginLeft: 2,
+  },
+  dropdownBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 72,
+    paddingRight: 12,
+  },
+  dropdownCard: {
+    width: 250,
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderWidth: 1.5,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.75,
+    shadowRadius: 12,
+    elevation: 14,
+  },
+  dropdownHeader: {
+    paddingBottom: 8,
+    marginBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: CRIMSON_ONI.charcoalElevated,
+  },
+  dropdownHeaderTitle: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  dropdownHeaderSub: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    marginTop: 1,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    gap: 8,
+    marginBottom: 3,
+  },
+  dropdownItemActive: {
+    backgroundColor: CRIMSON_ONI.crimsonDim,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+  },
+  dropdownItemPressed: {
+    opacity: 0.75,
+  },
+  dropdownItemIcon: {
+    fontSize: 16,
+  },
+  dropdownItemCol: {
+    flex: 1,
+  },
+  dropdownItemName: {
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dropdownItemNameActive: {
+    color: COLORS.gold,
+    fontWeight: '900',
+  },
+  dropdownItemDesc: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    marginTop: 1,
+  },
+  dropdownActiveBadge: {
+    backgroundColor: COLORS.gold,
+    borderRadius: 10,
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdownActiveCheck: {
+    color: '#000',
+    fontSize: 11,
+    fontWeight: '900',
   },
   focusLockBanner: {
     flexDirection: 'row',
@@ -530,38 +792,6 @@ const styles = StyleSheet.create({
     color: COLORS.bgDeep,
     fontSize: 11,
     fontWeight: '900',
-  },
-  travelStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 8,
-  },
-  travelLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  locChip: {
-    backgroundColor: COLORS.bgElevated,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  locChipActive: {
-    borderColor: COLORS.gold,
-    backgroundColor: COLORS.goldDim,
-  },
-  locChipText: {
-    color: COLORS.textSecondary,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  locChipTextActive: {
-    color: COLORS.gold,
   },
   screenBody: {
     flex: 1,
