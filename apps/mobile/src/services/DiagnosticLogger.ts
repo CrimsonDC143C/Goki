@@ -13,7 +13,14 @@ export { Breadcrumb, BreadcrumbLevel, sanitizeDiagnosticData, BreadcrumbRingBuff
 
 export interface BugReportSubmissionPayload {
   severity?: 'INFO' | 'WARNING' | 'ERROR' | 'FATAL';
-  category?: 'UI_UX' | 'WORKOUT_SYNC' | 'WEARABLE_TELEMETRY' | 'COMBAT_DUNGEON' | 'CRASH_EXCEPTION' | 'OTHER';
+  category?:
+    | 'UI_UX'
+    | 'WORKOUT_SYNC'
+    | 'WEARABLE_TELEMETRY'
+    | 'COMBAT_DUNGEON'
+    | 'CRASH_EXCEPTION'
+    | 'FEATURE_SUGGESTION'
+    | 'OTHER';
   title: string;
   userDescription?: string | null;
   errorMessage?: string | null;

@@ -255,6 +255,30 @@ describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () 
     expect(fatalRes.json().reports).toHaveLength(1);
     expect(fatalRes.json().reports[0].id).toBe('bug_1');
 
+    // 4. Submit and filter FEATURE_SUGGESTION
+    const suggestionRes = await app.inject({
+      method: 'POST',
+      url: '/api/diagnostics/report',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        severity: 'INFO',
+        category: 'FEATURE_SUGGESTION',
+        title: 'Add Guild Boss Replay Speed Slider',
+        userDescription: 'Allow players to watch 24h raid replays at 2x and 4x speed',
+      },
+    });
+    expect(suggestionRes.statusCode).toBe(201);
+    expect(suggestionRes.json().ok).toBe(true);
+
+    const filterSuggestionRes = await app.inject({
+      method: 'GET',
+      url: '/api/diagnostics/reports?category=FEATURE_SUGGESTION',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(filterSuggestionRes.statusCode).toBe(200);
+    const suggBody = filterSuggestionRes.json();
+    expect(suggBody.reports.some((r: any) => r.title === 'Add Guild Boss Replay Speed Slider')).toBe(true);
+
     await app.close();
   });
 

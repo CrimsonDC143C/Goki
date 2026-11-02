@@ -14,6 +14,7 @@ import { diagnosticLogger } from '../services/DiagnosticLogger';
 import { COLORS, CRIMSON_ONI } from '../theme';
 
 export type BugReportCategoryType =
+  | 'FEATURE_SUGGESTION'
   | 'UI_UX'
   | 'WORKOUT_SYNC'
   | 'WEARABLE_TELEMETRY'
@@ -32,6 +33,7 @@ const CATEGORIES: Array<{
   label: string;
   icon: string;
 }> = [
+  { key: 'FEATURE_SUGGESTION', label: 'Feature Suggestion', icon: '💡' },
   { key: 'UI_UX', label: 'UI / Display', icon: '🎨' },
   { key: 'WORKOUT_SYNC', label: 'Workout Sync', icon: '🔄' },
   { key: 'WEARABLE_TELEMETRY', label: 'Wearable Telemetry', icon: '⌚' },
@@ -56,6 +58,8 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
     status: 'success' | 'queued' | 'error';
     message: string;
   } | null>(null);
+
+  const isSuggestion = category === 'FEATURE_SUGGESTION';
 
   const diagnosticBundle = useMemo(() => {
     return {
@@ -89,7 +93,9 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
     if (!title.trim()) {
       setSubmitResult({
         status: 'error',
-        message: 'Please enter a brief summary / title for the issue.',
+        message: isSuggestion
+          ? 'Please enter a summary or title for your feature suggestion.'
+          : 'Please enter a brief summary / title for the issue.',
       });
       return;
     }
@@ -99,7 +105,7 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
 
     try {
       const res = await diagnosticLogger.submitDiagnosticReport({
-        severity: 'WARNING',
+        severity: isSuggestion ? 'INFO' : 'WARNING',
         category,
         title: title.trim(),
         userDescription: description.trim() || undefined,
@@ -113,17 +119,21 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
       if (res.queuedLocally) {
         setSubmitResult({
           status: 'queued',
-          message: 'Offline: Bug report queued locally and will auto-upload when connectivity returns.',
+          message: isSuggestion
+            ? 'Offline: Feature suggestion queued locally and will auto-upload when connectivity returns.'
+            : 'Offline: Bug report queued locally and will auto-upload when connectivity returns.',
         });
       } else if (res.ok) {
         setSubmitResult({
           status: 'success',
-          message: 'Bug report sent directly to developers. Thank you for your feedback!',
+          message: isSuggestion
+            ? 'Feature suggestion sent directly to developers. Thank you for shaping the realm!'
+            : 'Bug report sent directly to developers. Thank you for your feedback!',
         });
       } else {
         setSubmitResult({
           status: 'error',
-          message: res.error || 'Failed to submit bug report.',
+          message: res.error || (isSuggestion ? 'Failed to submit suggestion.' : 'Failed to submit bug report.'),
         });
       }
     } catch (err) {
@@ -156,10 +166,16 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
           {/* Header */}
           <View style={styles.headerRow}>
             <View style={styles.headerLeft}>
-              <Text style={styles.headerIcon}>🐛</Text>
+              <Text style={styles.headerIcon}>{isSuggestion ? '💡' : '🐛'}</Text>
               <View>
-                <Text style={styles.headerTitle}>Report an Issue</Text>
-                <Text style={styles.headerSubtitle}>Transmit feedback &amp; telemetry</Text>
+                <Text style={styles.headerTitle}>
+                  {isSuggestion ? 'Feature Suggestion' : 'Report an Issue'}
+                </Text>
+                <Text style={styles.headerSubtitle}>
+                  {isSuggestion
+                    ? 'Suggest gameplay, training, or QoL ideas'
+                    : 'Transmit feedback & telemetry'}
+                </Text>
               </View>
             </View>
             <Pressable
@@ -188,6 +204,7 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
                       style={[
                         styles.categoryChip,
                         isSelected && styles.categoryChipSelected,
+                        cat.key === 'FEATURE_SUGGESTION' && isSelected && styles.suggestionChipSelected,
                       ]}
                       onPress={() => setCategory(cat.key)}
                     >
@@ -196,6 +213,7 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
                         style={[
                           styles.chipLabel,
                           isSelected && styles.chipLabelSelected,
+                          cat.key === 'FEATURE_SUGGESTION' && isSelected && styles.suggestionChipLabelSelected,
                         ]}
                       >
                         {cat.label}
@@ -208,10 +226,16 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
 
             {/* Title */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Title *</Text>
+              <Text style={styles.inputLabel}>
+                {isSuggestion ? 'Feature Summary *' : 'Title *'}
+              </Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="e.g., Set rest timer didn't vibrate, UI cutoff on small screen..."
+                placeholder={
+                  isSuggestion
+                    ? 'e.g., Add rest-pause set tracking, guild boss replay speed slider...'
+                    : "e.g., Set rest timer didn't vibrate, UI cutoff on small screen..."
+                }
                 placeholderTextColor={CRIMSON_ONI.ashMuted}
                 value={title}
                 onChangeText={setTitle}
@@ -221,10 +245,16 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
 
             {/* Description */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Description (Optional)</Text>
+              <Text style={styles.inputLabel}>
+                {isSuggestion ? 'Details & Motivation (Optional)' : 'Description (Optional)'}
+              </Text>
               <TextInput
                 style={[styles.textInput, styles.textArea]}
-                placeholder="Describe what steps you took, what you expected vs what occurred..."
+                placeholder={
+                  isSuggestion
+                    ? 'Describe how this feature would work, why it helps your training, or RPG balance ideas...'
+                    : 'Describe what steps you took, what you expected vs what occurred...'
+                }
                 placeholderTextColor={CRIMSON_ONI.ashMuted}
                 value={description}
                 onChangeText={setDescription}
@@ -318,12 +348,20 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
             </Pressable>
 
             <Pressable
-              style={[styles.submitBtn, isSubmitting && styles.btnDisabled]}
+              style={[
+                styles.submitBtn,
+                isSuggestion && styles.submitBtnSuggestion,
+                isSubmitting && styles.btnDisabled,
+              ]}
               onPress={() => void handleSubmit()}
               disabled={isSubmitting}
             >
               <Text style={styles.submitBtnText}>
-                {isSubmitting ? 'Transmitting...' : '📜 Send Bug Report'}
+                {isSubmitting
+                  ? 'Transmitting...'
+                  : isSuggestion
+                  ? '💡 Submit Suggestion'
+                  : '📜 Send Bug Report'}
               </Text>
             </Pressable>
           </View>
@@ -418,6 +456,13 @@ const styles = StyleSheet.create({
   categoryChipSelected: {
     backgroundColor: '#5E1924',
     borderColor: '#C69A45',
+  },
+  suggestionChipSelected: {
+    backgroundColor: '#064E3B',
+    borderColor: '#10B981',
+  },
+  suggestionChipLabelSelected: {
+    color: '#6EE7B7',
   },
   chipIcon: {
     fontSize: 14,
@@ -584,6 +629,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 6,
+  },
+  submitBtnSuggestion: {
+    backgroundColor: '#064E3B',
+    borderColor: '#10B981',
   },
   submitBtnText: {
     color: '#FEE2E2',

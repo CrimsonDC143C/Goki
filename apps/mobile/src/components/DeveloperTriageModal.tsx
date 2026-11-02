@@ -14,6 +14,13 @@ import { COLORS, CRIMSON_ONI } from '../theme';
 
 export type TriageStatusFilter = 'ALL' | 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'IGNORED';
 export type TriageSeverityFilter = 'ALL' | 'FATAL' | 'ERROR' | 'WARNING' | 'INFO';
+export type TriageCategoryFilter =
+  | 'ALL'
+  | 'FEATURE_SUGGESTION'
+  | 'BUGS_ONLY'
+  | 'CRASH_EXCEPTION'
+  | 'WORKOUT_SYNC'
+  | 'UI_UX';
 
 export interface BugReportEntry {
   id: string;
@@ -47,6 +54,14 @@ export interface DeveloperTriageModalProps {
 
 const STATUS_FILTERS: TriageStatusFilter[] = ['ALL', 'OPEN', 'INVESTIGATING', 'RESOLVED', 'IGNORED'];
 const SEVERITY_FILTERS: TriageSeverityFilter[] = ['ALL', 'FATAL', 'ERROR', 'WARNING', 'INFO'];
+const CATEGORY_FILTERS: Array<{ key: TriageCategoryFilter; label: string }> = [
+  { key: 'ALL', label: 'All Items' },
+  { key: 'FEATURE_SUGGESTION', label: '💡 Suggestions' },
+  { key: 'BUGS_ONLY', label: '🐛 Bugs Only' },
+  { key: 'CRASH_EXCEPTION', label: '💥 Crashes' },
+  { key: 'WORKOUT_SYNC', label: '🔄 Sync' },
+  { key: 'UI_UX', label: '🎨 UI/UX' },
+];
 
 export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visible, onClose }) => {
   const [reports, setReports] = useState<BugReportEntry[]>([]);
@@ -54,6 +69,7 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<TriageStatusFilter>('ALL');
   const [severityFilter, setSeverityFilter] = useState<TriageSeverityFilter>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<TriageCategoryFilter>('ALL');
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<{ [id: string]: string }>({});
@@ -65,6 +81,9 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
     const queryParams = new URLSearchParams();
     if (statusFilter !== 'ALL') queryParams.set('status', statusFilter);
     if (severityFilter !== 'ALL') queryParams.set('severity', severityFilter);
+    if (categoryFilter !== 'ALL' && categoryFilter !== 'BUGS_ONLY') {
+      queryParams.set('category', categoryFilter);
+    }
     queryParams.set('limit', '50');
 
     try {
@@ -87,7 +106,11 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
       }
 
       const json = await res.json();
-      setReports(json.reports || []);
+      let list = json.reports || [];
+      if (categoryFilter === 'BUGS_ONLY') {
+        list = list.filter((r: BugReportEntry) => r.category !== 'FEATURE_SUGGESTION');
+      }
+      setReports(list);
     } catch (err) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Network error: could not connect to server.'
@@ -95,7 +118,7 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, severityFilter]);
+  }, [statusFilter, severityFilter, categoryFilter]);
 
   useEffect(() => {
     if (visible) {
@@ -228,6 +251,38 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
               </ScrollView>
             </View>
 
+            {/* Category / Type Filters */}
+            <View style={styles.filterRow}>
+              <Text style={styles.filterSectionLabel}>Type:</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+                {CATEGORY_FILTERS.map((cat) => {
+                  const active = categoryFilter === cat.key;
+                  const isSugg = cat.key === 'FEATURE_SUGGESTION';
+                  return (
+                    <Pressable
+                      key={cat.key}
+                      style={[
+                        styles.filterChip,
+                        active && styles.filterChipActive,
+                        isSugg && active && styles.filterChipSuggestionActive,
+                      ]}
+                      onPress={() => setCategoryFilter(cat.key)}
+                    >
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          active && styles.filterChipTextActive,
+                          isSugg && active && styles.filterChipSuggestionText,
+                        ]}
+                      >
+                        {cat.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
             {/* Severity Filters */}
             <View style={styles.filterRow}>
               <Text style={styles.filterSectionLabel}>Severity:</Text>
@@ -281,6 +336,7 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
 
             {reports.map((report) => {
               const isExpanded = expandedReportId === report.id;
+              const isSuggestion = report.category === 'FEATURE_SUGGESTION';
               const sevColor = severityBadgeColor(report.severity);
               const statColor = statusBadgeColor(report.status);
               const isBusy = updatingId === report.id;
@@ -290,7 +346,10 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
                 : 'Unknown device';
 
               return (
-                <View key={report.id} style={styles.reportCard}>
+                <View
+                  key={report.id}
+                  style={[styles.reportCard, isSuggestion && styles.reportCardSuggestion]}
+                >
                   {/* Card Header */}
                   <Pressable
                     style={styles.cardHeader}
@@ -310,8 +369,20 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
                         </Text>
                       </View>
 
-                      <View style={styles.categoryPill}>
-                        <Text style={styles.categoryPillText}>{report.category}</Text>
+                      <View
+                        style={[
+                          styles.categoryPill,
+                          isSuggestion && styles.categoryPillSuggestion,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.categoryPillText,
+                            isSuggestion && styles.categoryPillTextSuggestion,
+                          ]}
+                        >
+                          {isSuggestion ? '💡 Suggestion' : report.category}
+                        </Text>
                       </View>
 
                       <View
@@ -331,15 +402,27 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
                     <Text style={styles.reportTitle}>{report.title}</Text>
 
                     {report.userDescription && (
-                      <Text style={styles.userDescText} numberOfLines={2}>
-                        💬 "{report.userDescription}"
+                      <Text
+                        style={[
+                          styles.userDescText,
+                          isSuggestion && styles.userDescTextSuggestion,
+                        ]}
+                        numberOfLines={isExpanded ? undefined : 3}
+                      >
+                        {isSuggestion ? '💡 ' : '💬 "'}{report.userDescription}{isSuggestion ? '' : '"'}
                       </Text>
                     )}
 
                     <View style={styles.metaRow}>
                       <Text style={styles.metaDeviceText}>📱 {osSnippet}</Text>
                       <Text style={styles.expandToggleText}>
-                        {isExpanded ? '▲ Collapse Scroll' : '▼ Inspect Diagnostic Bundle'}
+                        {isExpanded
+                          ? isSuggestion
+                            ? '▲ Collapse Suggestion'
+                            : '▲ Collapse Scroll'
+                          : isSuggestion
+                          ? '▼ Inspect Suggestion & Details'
+                          : '▼ Inspect Diagnostic Bundle'}
                       </Text>
                     </View>
                   </Pressable>
@@ -562,6 +645,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#5E1924',
     borderColor: '#C69A45',
   },
+  filterChipSuggestionActive: {
+    backgroundColor: '#064E3B',
+    borderColor: '#10B981',
+  },
   filterChipText: {
     fontSize: 10,
     fontWeight: '700',
@@ -569,6 +656,10 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: '#FEE2E2',
+    fontWeight: '900',
+  },
+  filterChipSuggestionText: {
+    color: '#6EE7B7',
     fontWeight: '900',
   },
   listScroll: {
@@ -615,6 +706,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
   },
+  reportCardSuggestion: {
+    backgroundColor: '#101B15',
+    borderColor: '#059669',
+  },
   cardHeader: {
     padding: 14,
     gap: 8,
@@ -641,10 +736,19 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
   },
+  categoryPillSuggestion: {
+    backgroundColor: '#064E3B',
+    borderColor: '#10B981',
+    borderWidth: 1,
+  },
   categoryPillText: {
     fontSize: 10,
     fontWeight: '700',
     color: '#D1D5DB',
+  },
+  categoryPillTextSuggestion: {
+    color: '#6EE7B7',
+    fontWeight: '800',
   },
   timestampText: {
     fontSize: 10,
@@ -660,6 +764,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#D1D5DB',
     fontStyle: 'italic',
+  },
+  userDescTextSuggestion: {
+    color: '#A7F3D0',
+    fontStyle: 'normal',
   },
   metaRow: {
     flexDirection: 'row',

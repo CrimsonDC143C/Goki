@@ -69,18 +69,18 @@ npm run test:e2e      # Run Playwright full-stack E2E tests (auth, offline loggi
 
 Gymify RPG includes a built-in offline-first diagnostic subsystem:
 
-* **Persistent Bug Reports (`packages/database`):** Relational `BugReport` model tracking severity (`INFO`, `WARNING`, `ERROR`, `FATAL`), category (`UI_UX`, `WORKOUT_SYNC`, `WEARABLE_TELEMETRY`, `COMBAT_DUNGEON`, `CRASH_EXCEPTION`, `OTHER`), triage status (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`), sanitized snapshots, breadcrumb ring-buffers, and device metadata.
+* **Persistent Bug Reports (`packages/database`):** Relational `BugReport` model tracking severity (`INFO`, `WARNING`, `ERROR`, `FATAL`), category (`FEATURE_SUGGESTION`, `UI_UX`, `WORKOUT_SYNC`, `WEARABLE_TELEMETRY`, `COMBAT_DUNGEON`, `CRASH_EXCEPTION`, `OTHER`), triage status (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`), sanitized snapshots, breadcrumb ring-buffers, and device metadata.
 * **REST API (`apps/server`):**
   * `POST /api/diagnostics/report`: Accepts reports anonymously or with Bearer JWT, validated via Zod.
   * `GET /api/diagnostics/reports`: Protected endpoint with multi-criteria filtering (`severity`, `category`, `status`, `limit`).
   * `PATCH /api/diagnostics/reports/:id`: Protected endpoint for developer status triage.
-  * **Developer Webhook Forwarding:** Set `DIAGNOSTICS_WEBHOOK_URL` (Discord/Slack incoming webhook) in `.env` to receive real-time color-coded crash alerts.
+  * **Developer Webhook Forwarding:** Set `DIAGNOSTICS_WEBHOOK_URL` (Discord/Slack incoming webhook) in `.env` to receive real-time color-coded crash alerts and emerald-coded `💡 Feature Suggestion` notifications.
   * **Global Fastify Hook:** Automatically persists unhandled 500 server errors to `BugReport`.
 * **Mobile Ring-Buffer & Exception Boundary (`apps/mobile`):**
   * `DiagnosticLogger`: 100-event rolling ring-buffer, recursive credential sanitization (`password`, `jwt`, `bearer`), and offline outbox (`@gymify_bug_report_outbox`) with automatic reconnection flush.
   * `ErrorBoundary`: High-contrast "Encounter Interrupted" crash recovery screen with **Zero Lost Sets Guarantee** and startup crash prompt (`@gymify_pending_crash_report`).
-  * `BugReportModal`: Manual bug reporting interface accessible via the top HUD and Profile screen, complete with an expandable diagnostic JSON viewer and clipboard copy fallback.
-  * `DeveloperTriageModal` ("Developer Sanctum"): In-app live triage UI accessible via `🛠️ Dev Triage` on the Character Profile screen to inspect, filter, copy raw JSON, and transition bug statuses (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`) directly from mobile or web.
+  * `BugReportModal`: User-facing reporting modal with a dedicated **💡 Feature Suggestion** category, tailored placeholders, and dynamic severity (`INFO`).
+  * `DeveloperTriageModal` ("Developer Sanctum"): In-app live triage UI accessible via `🛠️ Dev Triage` on the Character Profile screen to inspect, filter by type (`💡 Suggestions` vs `🐛 Bugs Only`), copy raw JSON, and transition bug statuses (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`) directly from mobile or web.
 
 ---
 

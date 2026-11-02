@@ -11,6 +11,7 @@ const categoryEnum = z.enum([
   'WEARABLE_TELEMETRY',
   'COMBAT_DUNGEON',
   'CRASH_EXCEPTION',
+  'FEATURE_SUGGESTION',
   'OTHER',
 ]);
 const statusEnum = z.enum(['OPEN', 'INVESTIGATING', 'RESOLVED', 'IGNORED']);
@@ -63,6 +64,8 @@ export async function forwardWebhookAlert(
     createdAt?: Date | string;
   }
 ): Promise<void> {
+  const isFeatureSuggestion = report.category === 'FEATURE_SUGGESTION';
+
   const severityEmoji: Record<string, string> = {
     FATAL: '💥 [FATAL]',
     ERROR: '🚨 [ERROR]',
@@ -70,7 +73,9 @@ export async function forwardWebhookAlert(
     INFO: 'ℹ️ [INFO]',
   };
 
-  const tag = severityEmoji[report.severity] ?? '🐛 [BUG]';
+  const tag = isFeatureSuggestion
+    ? '💡 [FEATURE SUGGESTION]'
+    : (severityEmoji[report.severity] ?? '🐛 [BUG]');
 
   const embedColor: Record<string, number> = {
     FATAL: 0xe02424,
@@ -79,17 +84,22 @@ export async function forwardWebhookAlert(
     INFO: 0x3f83f8,
   };
 
+  const color = isFeatureSuggestion ? 0x10b981 : (embedColor[report.severity] ?? 0xf05252);
+  const headline = isFeatureSuggestion
+    ? `💡 **Feature Suggestion: ${report.title}**`
+    : `${tag} **Bug Report: ${report.title}**`;
+
   const payload = {
-    content: `${tag} **Bug Report: ${report.title}**`,
+    content: headline,
     embeds: [
       {
-        title: report.title,
-        description: report.userDescription || 'No user description provided.',
-        color: embedColor[report.severity] ?? 0xf05252,
+        title: isFeatureSuggestion ? `💡 Suggestion: ${report.title}` : report.title,
+        description: report.userDescription || (isFeatureSuggestion ? 'No details provided.' : 'No user description provided.'),
+        color,
         fields: [
           { name: 'Report ID', value: report.id, inline: true },
           { name: 'Severity', value: report.severity, inline: true },
-          { name: 'Category', value: report.category, inline: true },
+          { name: 'Category', value: isFeatureSuggestion ? '💡 Feature Suggestion' : report.category, inline: true },
           { name: 'User ID', value: report.userId || 'Anonymous', inline: true },
           ...(report.errorMessage
             ? [
