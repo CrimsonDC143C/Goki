@@ -1043,14 +1043,21 @@ export function registerWorkoutRoutes(
       }
     }
 
-    // 10B. If verified via wearable hardware telemetry, promote character to IRONMAN_VERIFIED
+    // 10B. If verified via wearable hardware telemetry, tag Ironman mode if account has no existing Ironman character
     let characterGameMode = character.gameMode;
     if (effectiveIsHardwareVerified && character.gameMode !== 'IRONMAN_VERIFIED') {
-      const updatedChar = await db.character.update({
-        where: { id: characterId },
-        data: { gameMode: 'IRONMAN_VERIFIED' },
-      });
-      characterGameMode = updatedChar.gameMode;
+      const existingIronman = typeof db.character.findFirst === 'function'
+        ? await db.character.findFirst({
+            where: { userId: character.userId, gameMode: 'IRONMAN_VERIFIED' },
+          })
+        : null;
+      if (!existingIronman) {
+        const updatedChar = await db.character.update({
+          where: { id: characterId },
+          data: { gameMode: 'IRONMAN_VERIFIED' },
+        });
+        characterGameMode = updatedChar.gameMode;
+      }
     }
 
     return reply.status(201).send({

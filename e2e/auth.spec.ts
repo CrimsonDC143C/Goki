@@ -67,11 +67,35 @@ test.describe('E2E Authentication & Hub Navigation', () => {
     // 6. Assert token is persisted in storage
     const tokenInStorage = await page.evaluate(() => {
       return (
+        window.localStorage.getItem('gymify_auth_jwt_token_v1') ||
         window.localStorage.getItem('gymify_jwt_auth_token_v1') ||
         window.localStorage.getItem('gymify_jwt_token')
       );
     });
 
     expect(tokenInStorage).toBeTruthy();
+  });
+
+  test('opens Hall of Heroes from Landing Screen and displays dual-hero roster capacity', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    // 1. Verify Landing Screen loads
+    await expect(page.getByText(/WORLD OF VERETHOR|IRONBOUND REALMS/i)).toBeVisible();
+
+    // 2. Open Hall of Heroes Modal
+    const manageBtn = page.getByTestId('landing-manage-heroes-btn');
+    await expect(manageBtn).toBeVisible();
+    await manageBtn.click();
+
+    // 3. Verify Hall of Heroes dialog and 2-hero capacity rule
+    await expect(page.getByText('Hall of Heroes')).toBeVisible();
+    await expect(page.getByText(/2 Heroes/i)).toBeVisible();
+    await expect(page.getByText(/up to 2 heroes/i)).toBeVisible();
+
+    // 4. Close dialog
+    await page.getByTestId('char-manager-close-btn').click();
+    await expect(page.getByText('Hall of Heroes')).not.toBeVisible();
   });
 });

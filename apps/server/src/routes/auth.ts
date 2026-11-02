@@ -9,6 +9,8 @@ const registerSchema = z.object({
   username: z.string().min(3).max(32),
   password: z.string().min(6).max(128),
   characterName: z.string().min(2).max(32).optional(),
+  gameMode: z.enum(['STANDARD', 'IRONMAN_VERIFIED']).default('STANDARD').optional(),
+  avatarSpriteId: z.string().default('adventurer_default').optional(),
   timezone: z.string().default('UTC').optional(),
 });
 
@@ -55,11 +57,13 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
     });
 
     const chosenCharacterName = body.characterName?.trim() || `${body.username}'s Hero`;
+    const chosenGameMode = body.gameMode ?? 'STANDARD';
     const character = await db.character.create({
       data: {
         userId: user.id,
         name: chosenCharacterName,
-        gameMode: 'STANDARD',
+        gameMode: chosenGameMode,
+        avatarSpriteId: body.avatarSpriteId ?? 'adventurer_default',
         stats: { create: {} },
         fatigueState: { create: {} },
         equipmentLoadout: { create: {} },
@@ -87,13 +91,14 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
         createdAt: user.createdAt,
       },
       character,
+      characters: [character],
     });
   });
 
   /**
    * POST /api/auth/login
    * Validates credentials against stored bcrypt passwordHash, updates lastLoginAt,
-   * loads character sheet, and returns a signed JWT token.
+   * loads character sheet(s), and returns a signed JWT token.
    */
   app.post('/api/auth/login', async (request, reply) => {
     const body = loginSchema.parse(request.body);
@@ -116,15 +121,17 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       data: { lastLoginAt: new Date() },
     });
 
-    let character = await db.character.findFirst({
-      where: { userId: user.id, gameMode: 'STANDARD' },
+    const characters = await db.character.findMany({
+      where: { userId: user.id },
       include: {
         stats: true,
         fatigueState: true,
         equipmentLoadout: true,
       },
+      orderBy: { createdAt: 'asc' },
     });
 
+    let character = characters[0];
     if (!character) {
       character = await db.character.create({
         data: {
@@ -141,6 +148,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
           equipmentLoadout: true,
         },
       });
+      characters.push(character);
     }
 
     const token = app.jwt.sign({
@@ -159,12 +167,13 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
         lastLoginAt: user.lastLoginAt,
       },
       character,
+      characters,
     });
   });
 
   /**
    * GET /api/auth/me
-   * Protected route: returns the authenticated user session profile & character sheet.
+   * Protected route: returns the authenticated user session profile & character sheet(s).
    */
   app.get('/api/auth/me', { preHandler: [requireAuth] }, async (request, reply) => {
     const { userId } = request.user;
@@ -177,14 +186,17 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       return reply.status(404).send({ error: 'User not found' });
     }
 
-    const character = await db.character.findFirst({
-      where: { userId: user.id, gameMode: 'STANDARD' },
+    const characters = await db.character.findMany({
+      where: { userId: user.id },
       include: {
         stats: true,
         fatigueState: true,
         equipmentLoadout: true,
       },
+      orderBy: { createdAt: 'asc' },
     });
+
+    const character = characters[0] ?? null;
 
     return reply.status(200).send({
       user: {
@@ -195,6 +207,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
         lastLoginAt: user.lastLoginAt,
       },
       character,
+      characters,
     });
   });
 }

@@ -51,12 +51,39 @@ export interface OfflineWorkoutDraft {
   notes: string;
 }
 
+export interface PersistedCharacterProfile {
+  id: string;
+  name: string;
+  gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
+  avatarSpriteId?: string;
+  overallLevel: number;
+  adventurerRank: string;
+  adventurerReputation: number;
+  gold: number;
+  stats: {
+    STRENGTH: { level: number; xp: number; pointsAvailable: number };
+    ENDURANCE: { level: number; xp: number; pointsAvailable: number };
+    AGILITY: { level: number; xp: number; pointsAvailable: number };
+    DEXTERITY?: { level: number; xp: number; pointsAvailable: number };
+    CONSTITUTION?: { level: number; xp: number; pointsAvailable: number };
+    WISDOM?: { level: number; xp: number; pointsAvailable: number };
+    SPIRIT?: { level: number; xp: number; pointsAvailable: number };
+  };
+  inventory?: any[];
+  unlockedTalentRanks?: Record<string, number>;
+  equipmentLoadout?: Record<string, any>;
+  lastSyncedAtMs?: number;
+}
+
 export interface PersistedOfflineBundle {
   offlineDraft: OfflineWorkoutDraft | null;
   queuedOfflineWorkouts: QueuedOfflineWorkoutPayload[];
   unsyncedServerPayloads: QueuedOfflineWorkoutPayload[];
   pendingWorkoutReceipts: WorkoutSpoilsReceipt[];
   customPresets: WorkoutPresetDefinition[];
+  characterProfile?: PersistedCharacterProfile | null;
+  availableCharacters?: PersistedCharacterProfile[];
+  activeCharacterId?: string | null;
 }
 
 const STORAGE_KEY = 'gymify_offline_bundle_v1';
@@ -76,6 +103,9 @@ let memoryFallbackBundle: PersistedOfflineBundle = {
   unsyncedServerPayloads: [],
   pendingWorkoutReceipts: [],
   customPresets: [],
+  characterProfile: null,
+  availableCharacters: [],
+  activeCharacterId: null,
 };
 
 let writeChain: Promise<void> = Promise.resolve();
@@ -173,6 +203,9 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
       unsyncedServerPayloads: [],
       pendingWorkoutReceipts: [],
       customPresets: [],
+      characterProfile: null,
+      availableCharacters: [],
+      activeCharacterId: null,
     };
   }
   const obj = raw as Partial<PersistedOfflineBundle>;
@@ -193,6 +226,12 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
       ? obj.pendingWorkoutReceipts
       : [],
     customPresets: Array.isArray(obj.customPresets) ? obj.customPresets : [],
+    characterProfile:
+      obj.characterProfile && typeof obj.characterProfile === 'object' && obj.characterProfile.name
+        ? obj.characterProfile
+        : null,
+    availableCharacters: Array.isArray(obj.availableCharacters) ? obj.availableCharacters : [],
+    activeCharacterId: typeof obj.activeCharacterId === 'string' ? obj.activeCharacterId : null,
   };
 }
 

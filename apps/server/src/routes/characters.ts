@@ -7,6 +7,7 @@ import {
 } from '@gymify/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { requireAuth } from '../middleware/auth';
 
 const travelSchema = z.object({
   destination: z.enum(['TAVERN', 'GUILD_HALL', 'DUNGEON', 'GATHERING_NODE', 'RAID_SANCTUM']),
@@ -26,7 +27,96 @@ const equipSchema = z.object({
   inventoryItemId: z.string().nullable(),
 });
 
+const createCharacterSchema = z.object({
+  name: z.string().min(2).max(32),
+  gameMode: z.enum(['STANDARD', 'IRONMAN_VERIFIED']).default('STANDARD'),
+  avatarSpriteId: z.string().default('adventurer_default').optional(),
+});
+
 export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient): void {
+  /**
+   * GET /api/characters
+   * Protected route: lists all characters belonging to the authenticated user.
+   * Enforces the account ceiling rule: maximum 2 characters (1 Standard, 1 Ironman).
+   */
+  app.get('/api/characters', { preHandler: [requireAuth] }, async (request, reply) => {
+    const { userId } = request.user;
+
+    const characters = await db.character.findMany({
+      where: { userId },
+      include: {
+        stats: true,
+        fatigueState: true,
+        equipmentLoadout: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return reply.send({ characters });
+  });
+
+  /**
+   * POST /api/characters
+   * Protected route: creates a new character for the authenticated user.
+   * Strict Constraint: Only 2 characters per user account, exactly one per game mode
+   * (one STANDARD manual honesty, one IRONMAN_VERIFIED wearable verified).
+   */
+  app.post('/api/characters', { preHandler: [requireAuth] }, async (request, reply) => {
+    const { userId } = request.user;
+    const body = createCharacterSchema.parse(request.body);
+    const chosenName = body.name.trim();
+
+    // 1. Check existing characters for this account
+    const existingCharacters = await db.character.findMany({
+      where: { userId },
+    });
+
+    if (existingCharacters.length >= 2) {
+      return reply.status(400).send({
+        error:
+          'Account character limit reached. Each user is allowed a maximum of 2 characters: one Standard (Manual Honesty) and one Ironman Verified.',
+      });
+    }
+
+    if (existingCharacters.some((c) => c.gameMode === body.gameMode)) {
+      const modeLabel = body.gameMode === 'STANDARD' ? 'Standard (Manual Honesty)' : 'Ironman Verified';
+      return reply.status(409).send({
+        error: `You already have a character in ${modeLabel} mode. Only one character is permitted per game mode.`,
+      });
+    }
+
+    // 2. Check global name uniqueness
+    const nameTaken = await db.character.findUnique({
+      where: { name: chosenName },
+    });
+
+    if (nameTaken) {
+      return reply.status(409).send({
+        error: 'A character with this name already exists in the realm. Please choose a different name.',
+      });
+    }
+
+    // 3. Create the character with required relational records
+    const character = await db.character.create({
+      data: {
+        userId,
+        name: chosenName,
+        gameMode: body.gameMode,
+        avatarSpriteId: body.avatarSpriteId ?? 'adventurer_default',
+        stats: { create: {} },
+        fatigueState: { create: {} },
+        equipmentLoadout: { create: {} },
+      },
+      include: {
+        stats: true,
+        fatigueState: true,
+        equipmentLoadout: true,
+      },
+    });
+
+    return reply.status(201).send({ character });
+  });
+
   // Fetch full Character sheet with live projected Tavern Rest & Systemic Fatigue state
   app.get('/api/characters/:characterId', async (request, reply) => {
     const { characterId } = z.object({ characterId: z.string() }).parse(request.params);

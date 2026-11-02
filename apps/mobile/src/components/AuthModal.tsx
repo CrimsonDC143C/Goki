@@ -30,6 +30,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [characterName, setCharacterName] = useState('');
+  const [selectedGameMode, setSelectedGameMode] = useState<'STANDARD' | 'IRONMAN_VERIFIED'>('STANDARD');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -50,6 +51,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           username: uName,
           password: password.trim(),
           characterName: characterName.trim() || uName,
+          gameMode: selectedGameMode,
         });
 
         if (!res.ok) {
@@ -213,17 +215,65 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </View>
 
               {mode === 'REGISTER' && (
-                <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Hero / Character Name</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={characterName}
-                    onChangeText={setCharacterName}
-                    placeholder="Character display name (optional)"
-                    placeholderTextColor="#6B7280"
-                    testID="auth-char-input"
-                  />
-                </View>
+                <>
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>Starting Realm & Game Mode</Text>
+                    <View style={styles.modeSelectorRow}>
+                      <Pressable
+                        style={[
+                          styles.modeBtn,
+                          selectedGameMode === 'STANDARD' && styles.modeBtnActiveStandard,
+                        ]}
+                        onPress={() => setSelectedGameMode('STANDARD')}
+                        testID="auth-mode-standard-btn"
+                      >
+                        <Text
+                          style={[
+                            styles.modeBtnTitle,
+                            selectedGameMode === 'STANDARD' && styles.modeBtnTitleActiveStandard,
+                          ]}
+                        >
+                          ⚔️ Standard
+                        </Text>
+                        <Text style={styles.modeBtnDesc}>100% Honesty System</Text>
+                      </Pressable>
+
+                      <Pressable
+                        style={[
+                          styles.modeBtn,
+                          selectedGameMode === 'IRONMAN_VERIFIED' && styles.modeBtnActiveIronman,
+                        ]}
+                        onPress={() => setSelectedGameMode('IRONMAN_VERIFIED')}
+                        testID="auth-mode-ironman-btn"
+                      >
+                        <Text
+                          style={[
+                            styles.modeBtnTitle,
+                            selectedGameMode === 'IRONMAN_VERIFIED' && styles.modeBtnTitleActiveIronman,
+                          ]}
+                        >
+                          🛡️ Ironman
+                        </Text>
+                        <Text style={styles.modeBtnDesc}>Wearable Telemetry</Text>
+                      </Pressable>
+                    </View>
+                    <Text style={styles.modeNoteText}>
+                      * Up to 2 heroes allowed per account (1 Standard, 1 Ironman). You can forge your second hero anytime.
+                    </Text>
+                  </View>
+
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>Hero / Character Name</Text>
+                    <TextInput
+                      style={styles.textInput}
+                      value={characterName}
+                      onChangeText={setCharacterName}
+                      placeholder="Character display name (optional)"
+                      placeholderTextColor="#6B7280"
+                      testID="auth-char-input"
+                    />
+                  </View>
+                </>
               )}
 
               {/* Submit CTA */}
@@ -327,6 +377,51 @@ const styles = StyleSheet.create({
   },
   fieldGroup: {
     marginBottom: 12,
+  },
+  modeSelectorRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 6,
+  },
+  modeBtn: {
+    flex: 1,
+    backgroundColor: COLORS.bgDeep,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  modeBtnActiveStandard: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(245, 184, 65, 0.12)',
+  },
+  modeBtnActiveIronman: {
+    borderColor: '#3B82F6',
+    backgroundColor: 'rgba(59, 130, 246, 0.12)',
+  },
+  modeBtnTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    marginBottom: 2,
+  },
+  modeBtnTitleActiveStandard: {
+    color: COLORS.gold,
+  },
+  modeBtnTitleActiveIronman: {
+    color: '#60A5FA',
+  },
+  modeBtnDesc: {
+    fontSize: 9,
+    color: COLORS.textMuted,
+  },
+  modeNoteText: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    lineHeight: 14,
+    marginTop: 2,
   },
   fieldLabel: {
     fontSize: 11,

@@ -10,6 +10,7 @@ import {
 import { SvgXml } from 'react-native-svg';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { AuthModal } from '../components/AuthModal';
+import { CharacterManagerModal } from '../components/CharacterManagerModal';
 import { useGame } from '../state/GameContext';
 import { LOOT_CHEST_SVGS, RANK_CREST_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
@@ -45,9 +46,11 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
     dismissLandingToast,
     workoutMachine,
     currentUser,
+    gameMode,
   } = useGame();
 
   const [authModalVisible, setAuthModalVisible] = useState(false);
+  const [charManagerVisible, setCharManagerVisible] = useState(false);
 
   useEffect(() => {
     if (!landingToastMessage) return;
@@ -152,6 +155,17 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
               </View>
             </View>
           </CharacterPortraitFrame>
+
+          {/* Quick Roster Switcher / Forger Pill */}
+          <Pressable
+            style={styles.heroManageBtn}
+            onPress={() => setCharManagerVisible(true)}
+            testID="landing-manage-heroes-btn"
+          >
+            <Text style={styles.heroManageBtnText}>
+              {gameMode === 'IRONMAN_VERIFIED' ? '🛡️ Ironman Verified' : '⚔️ Standard Honesty'} • Hall of Heroes (Switch / Forge)
+            </Text>
+          </Pressable>
         </View>
 
         {/* Three Primary Quick-Action Entry Points */}
@@ -257,6 +271,11 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         onClose={() => setAuthModalVisible(false)}
         onSuccess={onEnterWorld}
       />
+
+      <CharacterManagerModal
+        visible={charManagerVisible}
+        onClose={() => setCharManagerVisible(false)}
+      />
     </View>
   );
 };
@@ -339,6 +358,26 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     marginBottom: 16,
+  },
+  heroManageRow: {
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  heroManageBtn: {
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.borderGold,
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  heroManageBtnText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   nameplateBanner: {
     backgroundColor: 'rgba(18, 17, 20, 0.90)',

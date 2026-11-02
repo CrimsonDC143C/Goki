@@ -23,6 +23,7 @@ import {
 } from '@gymify/game-engine';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { BugReportModal } from '../components/BugReportModal';
+import { CharacterManagerModal } from '../components/CharacterManagerModal';
 import { DeveloperTriageModal } from '../components/DeveloperTriageModal';
 import { autoUpdateManager, AutoUpdateState } from '../services/AutoUpdateManager';
 import { audioManager } from '../services/AudioManager';
@@ -169,10 +170,12 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     equipItemToSlot,
     unequipSlot,
     toggleEquipItem,
+    gameMode,
   } = useGame();
 
   const progressionUnlocked = isCharacterProgressionUnlocked(workoutMachine.phase);
 
+  const [charManagerModalVisible, setCharManagerModalVisible] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>('mainHand');
   const [bagFilter, setBagFilter] = useState<BagFilter>('ALL');
   const [gearFeedback, setGearFeedback] = useState<{
@@ -420,6 +423,15 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
               <View style={styles.overallLevelPill}>
                 <Text style={styles.overallLevelText}>Lv.{overallLevel}</Text>
               </View>
+              <Pressable
+                style={styles.heroRosterPill}
+                onPress={() => setCharManagerModalVisible(true)}
+                testID="profile-open-roster-btn"
+              >
+                <Text style={styles.heroRosterPillText}>
+                  {gameMode === 'IRONMAN_VERIFIED' ? '🛡️ Ironman' : '⚔️ Standard'}
+                </Text>
+              </Pressable>
             </View>
 
             <View style={styles.guildSubtitleRow}>
@@ -1230,6 +1242,11 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
         visible={devTriageModalVisible}
         onClose={() => setDevTriageModalVisible(false)}
       />
+
+      <CharacterManagerModal
+        visible={charManagerModalVisible}
+        onClose={() => setCharManagerModalVisible(false)}
+      />
     </ScrollView>
   );
 };
@@ -1324,6 +1341,20 @@ const styles = StyleSheet.create({
     color: CRIMSON_ONI.ghostWhite,
     fontSize: 11,
     fontWeight: '900',
+  },
+  heroRosterPill: {
+    backgroundColor: 'rgba(245, 184, 65, 0.15)',
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  heroRosterPillText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   guildSubtitle: {
     color: CRIMSON_ONI.agedGoldBright,

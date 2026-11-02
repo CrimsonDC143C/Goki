@@ -83,6 +83,7 @@ import {
 import {
   OfflineDraftExerciseBlock,
   OfflineWorkoutDraft,
+  PersistedCharacterProfile,
   PersistedOfflineBundle,
   createDefaultOfflineDraft,
   getMergedPresets,
@@ -109,7 +110,10 @@ import {
   LoginPayload,
   RegisterPayload,
   apiFetch,
+  createCharacterAccount,
+  fetchCharacterSheet,
   fetchCurrentSession,
+  fetchUserCharacters,
   getStoredAuthToken,
   loginAccount,
   logoutAccount,
@@ -395,6 +399,15 @@ interface GameContextValue {
   isLiveSyncConnected: boolean;
   gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
   setGameMode: (mode: 'STANDARD' | 'IRONMAN_VERIFIED') => void;
+  characters: PersistedCharacterProfile[];
+  activeCharacterId: string | null;
+  switchCharacter: (characterId: string) => Promise<boolean>;
+  createCharacter: (
+    name: string,
+    mode: 'STANDARD' | 'IRONMAN_VERIFIED',
+    avatarSpriteId?: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  refreshCharacterSheet: () => Promise<void>;
   login: (credentials: LoginPayload) => Promise<{ ok: boolean; error?: string }>;
   register: (payload: RegisterPayload) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -731,7 +744,16 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const isAuthenticated = Boolean(authToken && currentUser);
   const remoteCharacterIdRef = useRef<string | null>(null);
-  const [characterName] = useState('Aric the Ironbound');
+  const [availableCharacters, setAvailableCharacters] = useState<PersistedCharacterProfile[]>([]);
+  const availableCharactersRef = useRef<PersistedCharacterProfile[]>([]);
+  availableCharactersRef.current = availableCharacters;
+
+  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
+  const activeCharacterIdRef = useRef<string | null>(null);
+  activeCharacterIdRef.current = activeCharacterId;
+
+  const [characterName, setCharacterName] = useState('Aric the Ironbound');
+  const currentProfileRef = useRef<PersistedCharacterProfile | null>(null);
   const [gameMode, setGameMode] = useState<'STANDARD' | 'IRONMAN_VERIFIED'>('STANDARD');
   const [characterArtUri, setCharacterArtUri] = useState<string | null>(null);
   const [adventurerRank, setAdventurerRank] = useState<AdventurerRank>('COPPER');
@@ -1128,11 +1150,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         partial.pendingWorkoutReceipts ?? pendingReceiptsRef.current,
       customPresets:
         partial.customPresets ?? customPresetsRef.current,
+      characterProfile:
+        partial.characterProfile !== undefined ? partial.characterProfile : currentProfileRef.current,
+      availableCharacters:
+        partial.availableCharacters ?? availableCharactersRef.current,
+      activeCharacterId:
+        partial.activeCharacterId !== undefined ? partial.activeCharacterId : activeCharacterIdRef.current,
     };
     void savePersistedOfflineBundle(nextBundle);
   }, []);
 
-  // Hydrate persisted offline draft, queued workouts, and unclaimed spoils on boot
+  // Hydrate persisted offline draft, queued workouts, character profile and unclaimed spoils on boot
   useEffect(() => {
     let active = true;
     (async () => {
@@ -1157,6 +1185,28 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (loaded.customPresets && loaded.customPresets.length > 0) {
         customPresetsRef.current = loaded.customPresets;
         setCustomPresets(loaded.customPresets);
+      }
+      if (loaded.availableCharacters && loaded.availableCharacters.length > 0) {
+        availableCharactersRef.current = loaded.availableCharacters;
+        setAvailableCharacters(loaded.availableCharacters);
+      }
+      if (loaded.activeCharacterId) {
+        activeCharacterIdRef.current = loaded.activeCharacterId;
+        setActiveCharacterId(loaded.activeCharacterId);
+      }
+      if (loaded.characterProfile) {
+        currentProfileRef.current = loaded.characterProfile;
+        const cp = loaded.characterProfile;
+        remoteCharacterIdRef.current = cp.id;
+        setActiveCharacterId(cp.id);
+        setCharacterName(cp.name);
+        setGameMode(cp.gameMode);
+        if (cp.adventurerRank) setAdventurerRank(cp.adventurerRank as AdventurerRank);
+        if (typeof cp.adventurerReputation === 'number') setAdventurerReputation(cp.adventurerReputation);
+        if (typeof cp.gold === 'number') setGold(cp.gold);
+        if (cp.stats) setStats((prev) => ({ ...prev, ...cp.stats }));
+        if (Array.isArray(cp.inventory)) setRawInventory(cp.inventory);
+        if (cp.unlockedTalentRanks) setUnlockedTalentRanks(cp.unlockedTalentRanks);
       }
       setOfflineHydrated(true);
     })();
@@ -1224,40 +1274,307 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLandingToastMessage(null);
   }, []);
 
-  const login = useCallback(async (credentials: LoginPayload) => {
-    const res = await loginAccount(credentials);
-    if (res.ok && res.data) {
-      setAuthTokenState(res.data.token);
-      setCurrentUser(res.data.user);
-      if (res.data.character?.id) {
-        remoteCharacterIdRef.current = res.data.character.id;
+  const applyCharacterToState = useCallback(
+    (char: any, fullSheet?: any) => {
+      if (!char) return;
+      remoteCharacterIdRef.current = char.id;
+      activeCharacterIdRef.current = char.id;
+      setActiveCharacterId(char.id);
+      setCharacterName(char.name || 'Hero');
+      const mode = char.gameMode || 'STANDARD';
+      setGameMode(mode);
+      if (char.adventurerRank) setAdventurerRank(char.adventurerRank);
+      if (typeof char.adventurerReputation === 'number') {
+        setAdventurerReputation(char.adventurerReputation);
       }
-      setServerOnline(true);
-      return { ok: true };
-    }
-    return { ok: false, error: res.error };
-  }, []);
+      if (typeof char.gold === 'number') {
+        setGold(char.gold);
+      }
 
-  const register = useCallback(async (payload: RegisterPayload) => {
-    const res = await registerAccount(payload);
-    if (res.ok && res.data) {
-      setAuthTokenState(res.data.token);
-      setCurrentUser(res.data.user);
-      if (res.data.character?.id) {
-        remoteCharacterIdRef.current = res.data.character.id;
+      const s = char.stats || fullSheet?.character?.stats;
+      const nextStats = {
+        STRENGTH: {
+          level: s?.strengthLevel ?? 1,
+          xp: s?.strengthXp ?? 0,
+          pointsAvailable: s?.strengthTalentPointsAvailable ?? 0,
+        },
+        ENDURANCE: {
+          level: s?.enduranceLevel ?? 1,
+          xp: s?.enduranceXp ?? 0,
+          pointsAvailable: s?.enduranceTalentPointsAvailable ?? 0,
+        },
+        AGILITY: {
+          level: s?.agilityLevel ?? 1,
+          xp: s?.agilityXp ?? 0,
+          pointsAvailable: s?.agilityTalentPointsAvailable ?? 0,
+        },
+        DEXTERITY: {
+          level: char.dexLevel ?? 1,
+          xp: char.dexXp ?? 0,
+          pointsAvailable: 0,
+        },
+        CONSTITUTION: {
+          level: char.conLevel ?? 1,
+          xp: char.conXp ?? 0,
+          pointsAvailable: 0,
+        },
+        WISDOM: {
+          level: char.wisLevel ?? 1,
+          xp: char.wisXp ?? 0,
+          pointsAvailable: 0,
+        },
+        SPIRIT: {
+          level: char.sprLevel ?? 1,
+          xp: char.sprXp ?? 0,
+          pointsAvailable: 0,
+        },
+      };
+      setStats(nextStats);
+
+      if (fullSheet?.character?.fatigueState) {
+        const f = fullSheet.character.fatigueState;
+        setFatigueState({
+          isRestingInTavern: Boolean(f.isRestingInTavern),
+          tavernEnteredAt: f.tavernEnteredAt ? new Date(f.tavernEnteredAt) : null,
+          lastStrenuousWorkoutAt: f.lastStrenuousWorkoutAt ? new Date(f.lastStrenuousWorkoutAt) : null,
+          lastWorkoutAt: f.lastWorkoutAt ? new Date(f.lastWorkoutAt) : null,
+          consecutiveHighIntensityDays: f.consecutiveHighIntensityDays ?? 0,
+          lastHighIntensityDayKey: f.lastHighIntensityDayKey ?? null,
+          systemicFatigueStacks: f.systemicFatigueStacks ?? 0,
+          fatigueScore: f.fatigueScore ?? 0,
+          wellRestedMultiplier: f.wellRestedMultiplier ?? 1.0,
+          activeRecoveryBuffActive: Boolean(f.activeRecoveryBuffActive),
+          activeRecoveryGrantedAt: f.activeRecoveryGrantedAt ? new Date(f.activeRecoveryGrantedAt) : null,
+        });
       }
-      setServerOnline(true);
-      return { ok: true };
+
+      if (Array.isArray(fullSheet?.character?.talentUnlocks)) {
+        const ranks: Record<string, number> = {};
+        for (const u of fullSheet.character.talentUnlocks) {
+          if (u.talentNode?.slug) {
+            ranks[u.talentNode.slug] = u.currentRank;
+          }
+        }
+        setUnlockedTalentRanks(ranks);
+      }
+
+      const charProfile: PersistedCharacterProfile = {
+        id: char.id,
+        name: char.name,
+        gameMode: mode,
+        avatarSpriteId: char.avatarSpriteId || 'adventurer_default',
+        overallLevel: char.overallLevel ?? 1,
+        adventurerRank: char.adventurerRank || 'COPPER',
+        adventurerReputation: char.adventurerReputation ?? 0,
+        gold: char.gold ?? 100,
+        stats: nextStats,
+        lastSyncedAtMs: Date.now(),
+      };
+      currentProfileRef.current = charProfile;
+      persistBundleSnapshot({
+        characterProfile: charProfile,
+        activeCharacterId: char.id,
+      });
+    },
+    [persistBundleSnapshot]
+  );
+
+  const syncRemoteCharacters = useCallback(
+    (primaryChar: any, allChars?: any[]) => {
+      if (!primaryChar && (!allChars || allChars.length === 0)) return;
+      const rawList = allChars && allChars.length > 0 ? allChars : [primaryChar];
+      const mappedProfiles: PersistedCharacterProfile[] = rawList.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        gameMode: c.gameMode,
+        avatarSpriteId: c.avatarSpriteId || 'adventurer_default',
+        overallLevel: c.overallLevel ?? 1,
+        adventurerRank: c.adventurerRank || 'COPPER',
+        adventurerReputation: c.adventurerReputation ?? 0,
+        gold: c.gold ?? 100,
+        stats: {
+          STRENGTH: {
+            level: c.stats?.strengthLevel ?? 1,
+            xp: c.stats?.strengthXp ?? 0,
+            pointsAvailable: c.stats?.strengthTalentPointsAvailable ?? 0,
+          },
+          ENDURANCE: {
+            level: c.stats?.enduranceLevel ?? 1,
+            xp: c.stats?.enduranceXp ?? 0,
+            pointsAvailable: c.stats?.enduranceTalentPointsAvailable ?? 0,
+          },
+          AGILITY: {
+            level: c.stats?.agilityLevel ?? 1,
+            xp: c.stats?.agilityXp ?? 0,
+            pointsAvailable: c.stats?.agilityTalentPointsAvailable ?? 0,
+          },
+          DEXTERITY: { level: c.dexLevel ?? 1, xp: c.dexXp ?? 0, pointsAvailable: 0 },
+          CONSTITUTION: { level: c.conLevel ?? 1, xp: c.conXp ?? 0, pointsAvailable: 0 },
+          WISDOM: { level: c.wisLevel ?? 1, xp: c.wisXp ?? 0, pointsAvailable: 0 },
+          SPIRIT: { level: c.sprLevel ?? 1, xp: c.sprXp ?? 0, pointsAvailable: 0 },
+        },
+      }));
+
+      setAvailableCharacters(mappedProfiles);
+      availableCharactersRef.current = mappedProfiles;
+      persistBundleSnapshot({ availableCharacters: mappedProfiles });
+
+      const currentActiveId = activeCharacterIdRef.current;
+      const targetChar =
+        (currentActiveId && rawList.find((c: any) => c.id === currentActiveId)) ||
+        primaryChar ||
+        rawList[0];
+
+      if (targetChar) {
+        applyCharacterToState(targetChar);
+        void fetchCharacterSheet(targetChar.id).then((res) => {
+          if (res.ok && res.data) {
+            applyCharacterToState(res.data.character, res.data);
+          }
+        });
+      }
+    },
+    [applyCharacterToState, persistBundleSnapshot]
+  );
+
+  const switchCharacter = useCallback(
+    async (characterId: string): Promise<boolean> => {
+      const target = availableCharactersRef.current.find((c) => c.id === characterId);
+      if (!target) return false;
+      applyCharacterToState(target);
+
+      if (serverOnline) {
+        void fetchCharacterSheet(characterId).then((res) => {
+          if (res.ok && res.data) {
+            applyCharacterToState(res.data.character, res.data);
+          }
+        });
+      }
+      return true;
+    },
+    [applyCharacterToState, serverOnline]
+  );
+
+  const createCharacter = useCallback(
+    async (
+      name: string,
+      mode: 'STANDARD' | 'IRONMAN_VERIFIED',
+      avatarSpriteId?: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+      // Enforce the 2-character limit: 1 Standard, 1 Ironman
+      if (availableCharactersRef.current.length >= 2) {
+        return {
+          ok: false,
+          error:
+            'Account character limit reached. Each user is allowed a maximum of 2 characters: one Standard and one Ironman.',
+        };
+      }
+      if (availableCharactersRef.current.some((c) => c.gameMode === mode)) {
+        return {
+          ok: false,
+          error: `You already have a character in ${
+            mode === 'STANDARD' ? 'Standard (Manual Honesty)' : 'Ironman Verified'
+          } mode. Only one character is permitted per game mode.`,
+        };
+      }
+
+      if (serverOnline) {
+        const res = await createCharacterAccount({
+          name,
+          gameMode: mode,
+          avatarSpriteId: avatarSpriteId ?? 'adventurer_default',
+        });
+        if (!res.ok || !res.data?.character) {
+          return { ok: false, error: res.error || 'Failed to forge hero on realm server.' };
+        }
+        const newChar = res.data.character;
+        const nextList = [...availableCharactersRef.current, newChar];
+        syncRemoteCharacters(newChar, nextList);
+        return { ok: true };
+      } else {
+        // Offline hero creation fallback
+        const localChar: PersistedCharacterProfile = {
+          id: `local_char_${Date.now()}`,
+          name,
+          gameMode: mode,
+          avatarSpriteId: avatarSpriteId ?? 'adventurer_default',
+          overallLevel: 1,
+          adventurerRank: 'COPPER',
+          adventurerReputation: 0,
+          gold: 100,
+          stats: {
+            STRENGTH: { level: 1, xp: 0, pointsAvailable: 0 },
+            ENDURANCE: { level: 1, xp: 0, pointsAvailable: 0 },
+            AGILITY: { level: 1, xp: 0, pointsAvailable: 0 },
+            DEXTERITY: { level: 1, xp: 0, pointsAvailable: 0 },
+            CONSTITUTION: { level: 1, xp: 0, pointsAvailable: 0 },
+            WISDOM: { level: 1, xp: 0, pointsAvailable: 0 },
+            SPIRIT: { level: 1, xp: 0, pointsAvailable: 0 },
+          },
+        };
+        const nextList = [...availableCharactersRef.current, localChar];
+        syncRemoteCharacters(localChar, nextList);
+        return { ok: true };
+      }
+    },
+    [serverOnline, syncRemoteCharacters]
+  );
+
+  const refreshCharacterSheet = useCallback(async () => {
+    const charId = remoteCharacterIdRef.current;
+    if (!serverOnline || !charId) return;
+    const res = await fetchCharacterSheet(charId);
+    if (res.ok && res.data) {
+      applyCharacterToState(res.data.character, res.data);
     }
-    return { ok: false, error: res.error };
-  }, []);
+  }, [applyCharacterToState, serverOnline]);
+
+  const login = useCallback(
+    async (credentials: LoginPayload) => {
+      const res = await loginAccount(credentials);
+      if (res.ok && res.data) {
+        setAuthTokenState(res.data.token);
+        setCurrentUser(res.data.user);
+        syncRemoteCharacters(res.data.character, res.data.characters);
+        setServerOnline(true);
+        return { ok: true };
+      }
+      return { ok: false, error: res.error };
+    },
+    [syncRemoteCharacters]
+  );
+
+  const register = useCallback(
+    async (payload: RegisterPayload) => {
+      const res = await registerAccount(payload);
+      if (res.ok && res.data) {
+        setAuthTokenState(res.data.token);
+        setCurrentUser(res.data.user);
+        syncRemoteCharacters(res.data.character, res.data.characters);
+        setServerOnline(true);
+        return { ok: true };
+      }
+      return { ok: false, error: res.error };
+    },
+    [syncRemoteCharacters]
+  );
 
   const logout = useCallback(async () => {
     await logoutAccount();
     setAuthTokenState(null);
     setCurrentUser(null);
     remoteCharacterIdRef.current = null;
-  }, []);
+    activeCharacterIdRef.current = null;
+    setActiveCharacterId(null);
+    setAvailableCharacters([]);
+    availableCharactersRef.current = [];
+    currentProfileRef.current = null;
+    persistBundleSnapshot({
+      characterProfile: null,
+      availableCharacters: [],
+      activeCharacterId: null,
+    });
+  }, [persistBundleSnapshot]);
 
   const ensureRemoteCharacterBootstrapped = useCallback(async (): Promise<string | null> => {
     try {
@@ -1275,10 +1592,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (sessionRes.ok && sessionRes.data) {
           setAuthTokenState(storedToken);
           setCurrentUser(sessionRes.data.user);
-          if (sessionRes.data.character?.id) {
-            remoteCharacterIdRef.current = sessionRes.data.character.id;
-            return sessionRes.data.character.id;
-          }
+          syncRemoteCharacters(sessionRes.data.character, sessionRes.data.characters);
+          return sessionRes.data.character?.id ?? null;
         }
       }
 
@@ -1291,10 +1606,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (loginRes.ok && loginRes.data) {
         setAuthTokenState(loginRes.data.token);
         setCurrentUser(loginRes.data.user);
-        if (loginRes.data.character?.id) {
-          remoteCharacterIdRef.current = loginRes.data.character.id;
-          return loginRes.data.character.id;
-        }
+        syncRemoteCharacters(loginRes.data.character, loginRes.data.characters);
+        return loginRes.data.character?.id ?? null;
       }
 
       // 3. Fallback: If user not yet seeded/registered on backend, register new hero account
@@ -1308,10 +1621,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (regRes.ok && regRes.data) {
         setAuthTokenState(regRes.data.token);
         setCurrentUser(regRes.data.user);
-        if (regRes.data.character?.id) {
-          remoteCharacterIdRef.current = regRes.data.character.id;
-          return regRes.data.character.id;
-        }
+        syncRemoteCharacters(regRes.data.character, regRes.data.characters);
+        return regRes.data.character?.id ?? null;
       }
 
       return null;
@@ -1319,7 +1630,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setServerOnline(false);
       return null;
     }
-  }, []);
+  }, [syncRemoteCharacters]);
 
   // Probe Backend Server Health & Bootstrap Demo Character on launch
   useEffect(() => {
@@ -3564,6 +3875,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isLiveSyncConnected,
     gameMode,
     setGameMode,
+    characters: availableCharacters,
+    activeCharacterId,
+    switchCharacter,
+    createCharacter,
+    refreshCharacterSheet,
     login,
     register,
     logout,

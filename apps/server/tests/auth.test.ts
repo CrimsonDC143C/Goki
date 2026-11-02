@@ -139,6 +139,7 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
       },
       character: {
         findFirst: async () => storedChar,
+        findMany: async () => [storedChar],
       },
     } as unknown as PrismaClient;
 
@@ -214,6 +215,156 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
     expect(meData.user.id).toBe('user_horse_1');
     expect(meData.user.username).toBe('horse_rider');
     expect(meData.character.name).toBe('Shadowfax');
+
+    await app.close();
+  });
+
+  it('enforces character creation constraints: max 2 characters per user (1 Standard, 1 Ironman)', async () => {
+    const memoryCharacters: any[] = [];
+    const testUser = {
+      id: 'user_twomode_1',
+      email: 'dual@gymify.rpg',
+      username: 'dual_champion',
+      passwordHash: 'dummyHash',
+      timezone: 'UTC',
+    };
+
+    // Pre-populate with 1 Standard character
+    memoryCharacters.push({
+      id: 'char_std_1',
+      userId: testUser.id,
+      name: 'Steel Champion',
+      gameMode: 'STANDARD',
+      avatarSpriteId: 'warrior',
+      stats: { strengthLevel: 5 },
+      fatigueState: {},
+      equipmentLoadout: {},
+      createdAt: new Date(),
+    });
+
+    const mockDb = {
+      user: {
+        findUnique: async () => testUser,
+      },
+      character: {
+        findMany: async ({ where }: any) => {
+          if (where?.userId) {
+            return memoryCharacters.filter((c) => c.userId === where.userId);
+          }
+          return memoryCharacters;
+        },
+        findUnique: async ({ where }: any) => {
+          if (where?.name) {
+            return memoryCharacters.find((c) => c.name.toLowerCase() === where.name.toLowerCase()) ?? null;
+          }
+          if (where?.id) {
+            return memoryCharacters.find((c) => c.id === where.id) ?? null;
+          }
+          return null;
+        },
+        create: async ({ data }: any) => {
+          const char = {
+            id: `char_${Date.now()}`,
+            userId: data.userId,
+            name: data.name,
+            gameMode: data.gameMode,
+            avatarSpriteId: data.avatarSpriteId ?? 'adventurer_default',
+            stats: { strengthLevel: 1 },
+            fatigueState: {},
+            equipmentLoadout: {},
+            createdAt: new Date(),
+          };
+          memoryCharacters.push(char);
+          return char;
+        },
+      },
+    } as unknown as PrismaClient;
+
+    const app = await buildServerApp({ db: mockDb });
+    const token = app.jwt.sign({
+      userId: testUser.id,
+      email: testUser.email,
+      username: testUser.username,
+    });
+
+    // 1. GET /api/characters returns the existing Standard character
+    const getRes = await app.inject({
+      method: 'GET',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(getRes.statusCode).toBe(200);
+    const getData = getRes.json();
+    expect(getData.characters).toHaveLength(1);
+    expect(getData.characters[0].name).toBe('Steel Champion');
+    expect(getData.characters[0].gameMode).toBe('STANDARD');
+
+    // 2. Reject creating a second STANDARD character (duplicate game mode)
+    const dupModeRes = await app.inject({
+      method: 'POST',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Another Standard Hero',
+        gameMode: 'STANDARD',
+      },
+    });
+    expect(dupModeRes.statusCode).toBe(409);
+    expect(dupModeRes.json().error).toContain('Only one character is permitted per game mode');
+
+    // 3. Reject creating with an existing character name
+    const dupNameRes = await app.inject({
+      method: 'POST',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Steel Champion',
+        gameMode: 'IRONMAN_VERIFIED',
+      },
+    });
+    expect(dupNameRes.statusCode).toBe(409);
+    expect(dupNameRes.json().error).toContain('already exists');
+
+    // 4. Successfully create the second character as IRONMAN_VERIFIED
+    const createIronmanRes = await app.inject({
+      method: 'POST',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Iron Valkyrie',
+        gameMode: 'IRONMAN_VERIFIED',
+        avatarSpriteId: 'vanguard',
+      },
+    });
+    expect(createIronmanRes.statusCode).toBe(201);
+    const ironmanData = createIronmanRes.json();
+    expect(ironmanData.character.name).toBe('Iron Valkyrie');
+    expect(ironmanData.character.gameMode).toBe('IRONMAN_VERIFIED');
+    expect(ironmanData.character.avatarSpriteId).toBe('vanguard');
+
+    // 5. Account now has 2 characters (1 Standard, 1 Ironman). Attempting a 3rd must be rejected with 400
+    const thirdCharRes = await app.inject({
+      method: 'POST',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Third Forbidden Hero',
+        gameMode: 'STANDARD',
+      },
+    });
+    expect(thirdCharRes.statusCode).toBe(400);
+    expect(thirdCharRes.json().error).toContain('Account character limit reached');
+
+    // 6. Verify GET /api/characters now lists both characters
+    const getFinalRes = await app.inject({
+      method: 'GET',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(getFinalRes.statusCode).toBe(200);
+    const finalData = getFinalRes.json();
+    expect(finalData.characters).toHaveLength(2);
+    expect(finalData.characters.map((c: any) => c.gameMode).sort()).toEqual(['IRONMAN_VERIFIED', 'STANDARD']);
 
     await app.close();
   });

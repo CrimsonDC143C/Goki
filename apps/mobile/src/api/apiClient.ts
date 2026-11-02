@@ -56,6 +56,7 @@ export interface AuthSessionResponse {
   token: string;
   user: AuthUser;
   character: any;
+  characters?: any[];
 }
 
 export interface RegisterPayload {
@@ -63,6 +64,8 @@ export interface RegisterPayload {
   username: string;
   password: string;
   characterName?: string;
+  gameMode?: 'STANDARD' | 'IRONMAN_VERIFIED';
+  avatarSpriteId?: string;
   timezone?: string;
 }
 
@@ -180,7 +183,7 @@ export async function loginAccount(
  */
 export async function fetchCurrentSession(): Promise<{
   ok: boolean;
-  data?: { user: AuthUser; character: any };
+  data?: { user: AuthUser; character: any; characters?: any[] };
   error?: string;
 }> {
   try {
@@ -192,6 +195,83 @@ export async function fetchCurrentSession(): Promise<{
     return { ok: true, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Session verification failed';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Fetches all characters belonging to the authenticated user (`GET /api/characters`).
+ */
+export async function fetchUserCharacters(): Promise<{
+  ok: boolean;
+  data?: { characters: any[] };
+  error?: string;
+}> {
+  try {
+    const res = await apiFetch('/api/characters', { method: 'GET' }, 4000);
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      return { ok: false, error: errJson.error || 'Failed to fetch characters' };
+    }
+    const data = await res.json();
+    return { ok: true, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error loading characters';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Creates a new character for the authenticated account (`POST /api/characters`).
+ * Enforces the 2-character limit: max 1 Standard (manual honesty) and 1 Ironman (wearable verified).
+ */
+export async function createCharacterAccount(payload: {
+  name: string;
+  gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
+  avatarSpriteId?: string;
+}): Promise<{
+  ok: boolean;
+  data?: { character: any };
+  error?: string;
+}> {
+  try {
+    const res = await apiFetch(
+      '/api/characters',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      5000
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error || 'Failed to create character' };
+    }
+    return { ok: true, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error creating character';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Fetches the complete character sheet including projected fatigue, inventory, and equipment.
+ */
+export async function fetchCharacterSheet(characterId: string): Promise<{
+  ok: boolean;
+  data?: any;
+  error?: string;
+}> {
+  try {
+    const res = await apiFetch(`/api/characters/${characterId}`, { method: 'GET' }, 5000);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { ok: false, error: data.error || 'Failed to fetch character sheet' };
+    }
+    const data = await res.json();
+    return { ok: true, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error fetching character sheet';
     return { ok: false, error: message };
   }
 }

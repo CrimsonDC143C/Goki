@@ -128,7 +128,7 @@ Gymify RPG/
 ```
 
 ### Test Suite & Typecheck Health
-* **Vitest Suite:** `10/10` test files passing in `packages/game-engine` (66 tests), `4/4` test files passing in `apps/server` (10 tests). Total: **76 passing tests, 0 failures**.
+* **Vitest Suite:** `11/11` test files passing in `packages/game-engine` (79 tests), `6/6` test files passing in `apps/server` (21 tests). Total: **100 passing tests, 0 failures**.
 * **Playwright E2E Suite:** Automated end-to-end integration covering full-stack authentication, offline workout set logging, and background queue synchronization. Orchestrated via `playwright.config.ts` (multi-process web servers for Fastify and Expo Web), deterministic Prisma database seeding via `global-setup.ts`, and network route interception (`page.route()`) to simulate offline-to-online transitions.
 * **TypeScript:** Strict typechecking passes cleanly across all 4 workspaces (`@gymify/mobile`, `@gymify/server`, `@gymify/database`, `@gymify/game-engine`).
 * **Monorepo Build:** `npm run build` succeeds across all workspaces without bundling errors.
@@ -151,12 +151,23 @@ Gymify RPG/
 3. **Backend API & Queue Layer (`apps/server`):**
    * Fastify application with Zod validation on all workout, character, preset, dungeon, gathering, and raid routes.
    * Production JWT authentication and password hashing via `@fastify/jwt` and `bcryptjs` (`/api/auth/register`, `/api/auth/login`, `/api/auth/me`), route protection with `requireAuth` middleware, and user context attachment.
+   * **Dual-Character Account Constraint & Roster Routes (`/api/characters`):**
+     * Strict account ceiling enforcing exactly 2 characters per user account: one for `STANDARD` mode (100% manual honesty) and one for `IRONMAN_VERIFIED` mode (wearable biometric verified).
+     * `GET /api/characters`: Protected endpoint returning all characters belonging to the authenticated account.
+     * `POST /api/characters`: Protected endpoint allowing users to forge their second hero in the complementary game mode, rejecting duplicate game modes (409) and rejecting creation when account capacity (2 heroes) is reached (400).
    * Real-time bi-directional synchronization via `@fastify/websocket` and `websocketManager` with room multicasting (`raid:{raidId}`, `dungeon:{dungeonId}`), BigInt-safe serialization, and JWT connection authentication (`GET /api/ws/connect`).
-   * Telemetry payload ingestion and server-side biometric re-verification routed dynamically across `verifyTelemetry`, `verifyMindBodyTelemetry`, and `verifyRecoveryTelemetry` on `POST /api/workouts`, setting hardware verification sources (`APPLE_HEALTHKIT`, `GOOGLE_HEALTH_CONNECT`, `WEARABLE_TELEMETRY`), tagging verified stat XP, and promoting character mode to `IRONMAN_VERIFIED`.
+   * Telemetry payload ingestion and server-side biometric re-verification routed dynamically across `verifyTelemetry`, `verifyMindBodyTelemetry`, and `verifyRecoveryTelemetry` on `POST /api/workouts`, setting hardware verification sources (`APPLE_HEALTHKIT`, `GOOGLE_HEALTH_CONNECT`, `WEARABLE_TELEMETRY`), tagging verified stat XP, and tagging verified mode.
    * Pre-serialization hook for converting `BigInt` (raid damage, HP) into JSON-compatible values.
    * Redis + BullMQ runtime with 4 active queues (`gathering-completion`, `dungeon-resolution`, `fatigue-transition`, `raid-rollover`) plus an in-memory no-op fallback for headless testing.
 4. **Mobile & Web Client (`apps/mobile`):**
    * Multi-platform secure token persistence via Expo Secure Store (`expo-secure-store`) with web `localStorage` fallback, automatic JWT restoration on startup, and Bearer token injection on API requests.
+   * **Full Parity Character Hydration & Local Storage Persistence:**
+     * `GameContext` hydrates the active character sheet (`characterName`, `stats`, `adventurerRank`, `adventurerReputation`, `gold`, `overallLevel`, `inventory`, `unlockedTalentRanks`, `fatigueState`) directly from server responses (`/api/auth/me`, `/api/auth/login`, `/api/characters/:id`).
+     * Offline bundle persistence (`offlineStorage.ts`) snapshots the full `PersistedCharacterProfile` and `availableCharacters` to `gymify_offline_bundle_v1.json` (`expo-file-system`), ensuring local RPG stat gains and character customization persist durably across restarts without cell/Wi-Fi connection.
+     * **Hall of Heroes Manager Modal (`CharacterManagerModal.tsx`):**
+       * Accessible directly from the Landing Screen and Character Profile HUD.
+       * Displays both hero slots (Standard Honesty vs. Ironman Verified) with live active status, level, rank, and gold.
+       * Provides an interactive hero forging flow with archetype sprite selection (Juggernaut, Berserker, Vanguard, Warden, Outrider, Assassin) and seamless hero switching.
    * Real-time WebSocket synchronization via `GymifyWebSocketClient` and `useWebSocket` hook featuring auto-reconnect logic with exponential backoff, room subscriptions, and instant live raid UI updates.
    * Hardware wearable integration via `UnifiedWearableService` interfacing with Apple HealthKit (`react-native-health`) and Google Health Connect (`react-native-health-connect`), featuring permission requests, live session BPM polling, intra-workout HUD metrics, fetching OS Activity Classifications, Sleep Stages (Core, Deep, REM, Awake), and Pedometer step data, and payload bundling into the sync queue.
    * High-fidelity audio and 2D sprite asset pipeline utilizing modern `expo-audio` for native sound playback and `expo-image` for hardware-accelerated sprite rendering, orchestrated by the `AudioManager` singleton with procedural synthesizer fallbacks, haptic-synchronized SFX via `sensoryFeedback.ts`, floating damage numbers and hit-flash animations in `AutoBattlerCanvas.tsx`, and a persistent Gym Silence toggle in `CharacterProfileScreen.tsx`.
