@@ -1,3 +1,5 @@
+import { LOOT_CHEST_URIS } from '../../src/assets/v0Vault';
+
 /**
  * Gymify 2D Sprite Asset Manifest
  * Supports drop-in PNG/WebP requires or data URIs with high-performance expo-image rendering.
@@ -163,73 +165,17 @@ export const ENEMY_SPRITES: Record<string, string> = {
 };
 
 export const LOOT_SPRITES: Record<string, string> = {
-  // Common Bronze / Iron Chest
-  chest_common: svgToUri(`
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-      <defs>
-        <linearGradient id="commChest" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#854D0E"/>
-          <stop offset="100%" stop-color="#451A03"/>
-        </linearGradient>
-      </defs>
-      <!-- Chest Body -->
-      <rect x="20" y="44" width="60" height="36" rx="4" fill="url(#commChest)" stroke="#78350F" stroke-width="2"/>
-      <!-- Chest Lid -->
-      <path d="M16 44 Q50 26 84 44 Z" fill="#92400E" stroke="#B45309" stroke-width="2"/>
-      <!-- Iron Bands -->
-      <rect x="32" y="44" width="6" height="36" fill="#6B7280"/>
-      <rect x="62" y="44" width="6" height="36" fill="#6B7280"/>
-      <!-- Lock -->
-      <circle cx="50" cy="52" r="5" fill="#D97706" stroke="#78350F" stroke-width="1.5"/>
-    </svg>
-  `),
+  // Illustrated Common Wooden Chest (v0 Vault)
+  chest_common: LOOT_CHEST_URIS.COMMON,
 
-  // Rare Silver / Mithril Chest with Cyan Glow
-  chest_rare: svgToUri(`
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-      <defs>
-        <linearGradient id="rareChest" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#0284C7"/>
-          <stop offset="100%" stop-color="#082F49"/>
-        </linearGradient>
-      </defs>
-      <!-- Glow Aura -->
-      <circle cx="50" cy="50" r="44" fill="#38BDF8" fill-opacity="0.15"/>
-      <!-- Chest Body -->
-      <rect x="20" y="44" width="60" height="36" rx="4" fill="url(#rareChest)" stroke="#38BDF8" stroke-width="2.5"/>
-      <!-- Chest Lid -->
-      <path d="M16 44 Q50 24 84 44 Z" fill="#0369A1" stroke="#38BDF8" stroke-width="2.5"/>
-      <!-- Silver Bands -->
-      <rect x="30" y="44" width="7" height="36" fill="#CBD5E1"/>
-      <rect x="63" y="44" width="7" height="36" fill="#CBD5E1"/>
-      <!-- Cyan Gemstone Lock -->
-      <polygon points="50,46 56,53 50,60 44,53" fill="#38BDF8" stroke="#FFFFFF" stroke-width="1.5"/>
-    </svg>
-  `),
+  // Illustrated Rare Sapphire Iron Chest (v0 Vault)
+  chest_rare: LOOT_CHEST_URIS.RARE,
 
-  // Epic Gold / Dragonfire Chest with Amber Radiance
-  chest_epic: svgToUri(`
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-      <defs>
-        <linearGradient id="epicChest" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#F59E0B"/>
-          <stop offset="50%" stop-color="#B45309"/>
-          <stop offset="100%" stop-color="#78350F"/>
-        </linearGradient>
-      </defs>
-      <!-- Sunburst Aura -->
-      <polygon points="50,10 54,34 76,20 62,40 88,48 64,58 78,80 54,68 50,92 46,68 22,80 36,58 12,48 38,40 24,20 46,34" fill="#FBBF24" fill-opacity="0.25"/>
-      <!-- Chest Body -->
-      <rect x="18" y="42" width="64" height="40" rx="6" fill="url(#epicChest)" stroke="#FDE68A" stroke-width="3"/>
-      <!-- Crown Lid -->
-      <path d="M14 42 Q50 20 86 42 Z" fill="#D97706" stroke="#FDE68A" stroke-width="3"/>
-      <!-- Gold Bands -->
-      <rect x="30" y="42" width="8" height="40" fill="#FDE68A"/>
-      <rect x="62" y="42" width="8" height="40" fill="#FDE68A"/>
-      <!-- Ruby Core Lock -->
-      <circle cx="50" cy="54" r="7" fill="#EF4444" stroke="#FFFFFF" stroke-width="2"/>
-    </svg>
-  `),
+  // Illustrated Epic Runed Gold Chest (v0 Vault)
+  chest_epic: LOOT_CHEST_URIS.EPIC,
+
+  // Illustrated Mythic Crimson Oni Gilded Chest (v0 Vault)
+  chest_mythic: LOOT_CHEST_URIS.MYTHIC,
 
   // PR / Overload Relic Trophy
   relic_trophy: svgToUri(`
@@ -300,7 +246,8 @@ export function getEnemySpriteUri(isBoss?: boolean, name?: string): string {
  */
 export function getLootChestSpriteUri(tier?: string): string {
   const t = (tier || '').toUpperCase();
-  if (t === 'EPIC' || t === 'MYTHIC') return LOOT_SPRITES.chest_epic ?? LOOT_SPRITES.chest_common ?? '';
+  if (t === 'MYTHIC') return LOOT_SPRITES.chest_mythic ?? LOOT_SPRITES.chest_epic ?? '';
+  if (t === 'EPIC') return LOOT_SPRITES.chest_epic ?? LOOT_SPRITES.chest_common ?? '';
   if (t === 'RARE') return LOOT_SPRITES.chest_rare ?? LOOT_SPRITES.chest_common ?? '';
   return LOOT_SPRITES.chest_common ?? '';
 }

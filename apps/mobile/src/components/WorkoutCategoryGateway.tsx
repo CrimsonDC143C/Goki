@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, Image } from 'react-native';
 import {
   WorkoutCategory,
   WORKOUT_CATEGORIES,
   WorkoutCategoryDescriptor,
   WorkoutPresetDefinition,
 } from '@gymify/game-engine';
+import { MODALITY_BADGE_URIS } from '../assets/v0Vault';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 
 const CATEGORY_COLORS: Record<WorkoutCategory, string> = {
@@ -13,6 +14,13 @@ const CATEGORY_COLORS: Record<WorkoutCategory, string> = {
   CARDIO: '#38BDF8',
   SPORT: '#F59E0B',
   RECOVERY: '#10B981',
+};
+
+const CATEGORY_BADGES: Record<WorkoutCategory, string> = {
+  GYM: MODALITY_BADGE_URIS.resistance,
+  CARDIO: MODALITY_BADGE_URIS.cardio,
+  SPORT: MODALITY_BADGE_URIS.calisthenics,
+  RECOVERY: MODALITY_BADGE_URIS.yogaMobility,
 };
 
 export interface WorkoutCategoryGatewayProps {
@@ -70,7 +78,17 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                 }}
               >
                 <View style={styles.cardHeaderRow}>
-                  <Text style={styles.cardIcon}>{cat.icon}</Text>
+                  {CATEGORY_BADGES[cat.key] ? (
+                    <View style={[styles.badgeWrap, { borderColor: color }]}>
+                      <Image
+                        source={{ uri: CATEGORY_BADGES[cat.key] }}
+                        style={styles.modalityBadgeIcon}
+                        resizeMode="contain"
+                      />
+                    </View>
+                  ) : (
+                    <Text style={styles.cardIcon}>{cat.icon}</Text>
+                  )}
                   <View
                     style={[
                       styles.tagBadge,
@@ -157,7 +175,15 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         </TouchableOpacity>
 
         <View style={[styles.activeCategoryPill, { borderColor: activeColor }]}>
-          <Text style={styles.activePillIcon}>{activeCatMeta.icon}</Text>
+          {CATEGORY_BADGES[activeCatMeta.key] ? (
+            <Image
+              source={{ uri: CATEGORY_BADGES[activeCatMeta.key] }}
+              style={styles.activePillBadgeIcon}
+              resizeMode="contain"
+            />
+          ) : (
+            <Text style={styles.activePillIcon}>{activeCatMeta.icon}</Text>
+          )}
           <Text style={[styles.activePillLabel, { color: activeColor }]}>
             {activeCatMeta.shortTitle}
           </Text>
@@ -235,7 +261,15 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                         setShowSecondaryPicker(false);
                       }}
                     >
-                      <Text style={styles.modalOptionIcon}>{cat.icon}</Text>
+                      {CATEGORY_BADGES[cat.key] ? (
+                        <Image
+                          source={{ uri: CATEGORY_BADGES[cat.key] }}
+                          style={styles.modalOptionBadgeIcon}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <Text style={styles.modalOptionIcon}>{cat.icon}</Text>
+                      )}
                       <View style={styles.modalOptionTextContainer}>
                         <Text style={[styles.modalOptionName, { color }]}>
                           {cat.shortTitle}
@@ -364,6 +398,19 @@ const styles = StyleSheet.create({
   },
   cardIcon: {
     fontSize: 24,
+  },
+  badgeWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    backgroundColor: '#1E1D22',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalityBadgeIcon: {
+    width: 28,
+    height: 28,
   },
   tagBadge: {
     paddingHorizontal: 8,
@@ -497,6 +544,10 @@ const styles = StyleSheet.create({
   activePillIcon: {
     fontSize: 14,
   },
+  activePillBadgeIcon: {
+    width: 16,
+    height: 16,
+  },
   activePillLabel: {
     fontSize: 12,
     fontWeight: '800',
@@ -620,6 +671,11 @@ const styles = StyleSheet.create({
   },
   modalOptionIcon: {
     fontSize: 22,
+    marginRight: 10,
+  },
+  modalOptionBadgeIcon: {
+    width: 26,
+    height: 26,
     marginRight: 10,
   },
   modalOptionTextContainer: {

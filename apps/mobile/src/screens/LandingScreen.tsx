@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Image,
   ImageSourcePropType,
   Pressable,
   ScrollView,
@@ -10,6 +11,7 @@ import {
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { AuthModal } from '../components/AuthModal';
 import { useGame } from '../state/GameContext';
+import { LOOT_CHEST_URIS, RANK_CREST_URIS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
 
 export interface LandingScreenProps {
@@ -135,7 +137,16 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
 
               <View style={styles.nameplateMetaRow}>
                 <View style={styles.guildRankPill}>
-                  <Text style={styles.guildRankText}>🛡️ {adventurerRank} RANK</Text>
+                  {RANK_CREST_URIS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_URIS] ? (
+                    <Image
+                      source={{
+                        uri: RANK_CREST_URIS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_URIS],
+                      }}
+                      style={styles.rankCrestIcon}
+                      resizeMode="contain"
+                    />
+                  ) : null}
+                  <Text style={styles.guildRankText}>{adventurerRank} RANK</Text>
                 </View>
                 <View style={styles.locationPill}>
                   <Text style={styles.locationPillText}>📍 {location}</Text>
@@ -219,7 +230,12 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           >
             {spoilsBadgeLabel && (
               <View style={styles.spoilsReadyBadge}>
-                <Text style={styles.spoilsReadyBadgeText}>✨ {spoilsBadgeLabel}</Text>
+                <Image
+                  source={{ uri: LOOT_CHEST_URIS.MYTHIC }}
+                  style={styles.miniChestIcon}
+                  resizeMode="contain"
+                />
+                <Text style={styles.spoilsReadyBadgeText}>{spoilsBadgeLabel}</Text>
               </View>
             )}
             <View style={styles.actionHeaderRow}>
@@ -366,12 +382,19 @@ const styles = StyleSheet.create({
     marginTop: 7,
   },
   guildRankPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: CRIMSON_ONI.agedGoldDim,
     borderWidth: 1,
     borderColor: CRIMSON_ONI.borderGold,
     borderRadius: 5,
     paddingHorizontal: 8,
     paddingVertical: 3,
+  },
+  rankCrestIcon: {
+    width: 15,
+    height: 15,
   },
   guildRankText: {
     color: CRIMSON_ONI.agedGoldBright,
@@ -428,12 +451,19 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   spoilsReadyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     alignSelf: 'flex-start',
     backgroundColor: CRIMSON_ONI.agedGold,
     borderRadius: 6,
     paddingHorizontal: 9,
     paddingVertical: 3,
     marginBottom: 8,
+  },
+  miniChestIcon: {
+    width: 18,
+    height: 15,
   },
   spoilsReadyBadgeText: {
     color: CRIMSON_ONI.charcoalDeep,

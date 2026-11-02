@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Image,
   ImageSourcePropType,
   Modal,
   Pressable,
@@ -29,6 +30,12 @@ import {
   isEquippableInventoryEntry,
   useGame,
 } from '../state/GameContext';
+import {
+  HUD_URIS,
+  LOOT_CHEST_URIS,
+  RANK_CREST_URIS,
+  STAT_GLYPH_URIS,
+} from '../assets/v0Vault';
 import { COLORS, CRIMSON_ONI, RARITY_COLORS } from '../theme';
 
 export interface CharacterProfileScreenProps {
@@ -414,9 +421,20 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
               </View>
             </View>
 
-            <Text style={styles.guildSubtitle}>
-              🛡️ {adventurerRank} Adventurer • {guildName}
-            </Text>
+            <View style={styles.guildSubtitleRow}>
+              {RANK_CREST_URIS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_URIS] ? (
+                <Image
+                  source={{
+                    uri: RANK_CREST_URIS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_URIS],
+                  }}
+                  style={styles.headerRankCrest}
+                  resizeMode="contain"
+                />
+              ) : null}
+              <Text style={styles.guildSubtitle}>
+                {adventurerRank} Adventurer • {guildName}
+              </Text>
+            </View>
 
             <View style={styles.badgeStrip}>
               <View style={styles.goldBadge}>
@@ -508,6 +526,27 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           <Text style={styles.statsOverallBadgeText}>Overall Lv.{overallLevel}</Text>
         </View>
       </View>
+
+      {/* 7-Stat Attribute Radar Overview (v0 Vault) */}
+      <View style={styles.radarCard}>
+        <View style={styles.radarHeaderRow}>
+          <View>
+            <Text style={styles.radarTitle}>Attribute Radar Synergy</Text>
+            <Text style={styles.radarSubtitle}>Multi-Discipline Fitness Distribution</Text>
+          </View>
+          <View style={styles.radarPill}>
+            <Text style={styles.radarPillText}>7 STAT MATRIX</Text>
+          </View>
+        </View>
+        <View style={styles.radarImageContainer}>
+          <Image
+            source={{ uri: HUD_URIS.statRadar }}
+            style={styles.radarImage}
+            resizeMode="contain"
+          />
+        </View>
+      </View>
+
       <View style={styles.statsStack}>
         {HOLISTIC_STATS.map((meta) => {
           const s = stats[meta.key];
@@ -518,7 +557,19 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             <View key={meta.key} style={styles.statCard}>
               <View style={styles.statCardTop}>
                 <View style={styles.statTitleCluster}>
-                  <Text style={styles.statEmoji}>{meta.emoji}</Text>
+                  {STAT_GLYPH_URIS[meta.abbrev as keyof typeof STAT_GLYPH_URIS] ? (
+                    <View style={[styles.statGlyphBox, { borderColor: meta.color }]}>
+                      <Image
+                        source={{
+                          uri: STAT_GLYPH_URIS[meta.abbrev as keyof typeof STAT_GLYPH_URIS],
+                        }}
+                        style={styles.statGlyphImage}
+                        resizeMode="contain"
+                      />
+                    </View>
+                  ) : (
+                    <Text style={styles.statEmoji}>{meta.emoji}</Text>
+                  )}
                   <View>
                     <Text style={[styles.statLabel, { color: meta.color }]}>
                       {meta.name.toUpperCase()} ({meta.abbrev})
@@ -994,6 +1045,13 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                   <Text style={styles.receiptEyebrow}>
                     CONSOLIDATED POST-WORKOUT SPOILS RECEIPT
                   </Text>
+                  <View style={styles.receiptChestContainer}>
+                    <Image
+                      source={{ uri: LOOT_CHEST_URIS.EPIC }}
+                      style={styles.receiptChestImage}
+                      resizeMode="contain"
+                    />
+                  </View>
                   <Text style={styles.receiptMainTitle}>
                     🏆 Training Spoils Unsealed!
                   </Text>
@@ -1017,9 +1075,20 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                       if (xp === 0 && (!lu || lu.levelsGained === 0)) return null;
                       return (
                         <View key={meta.key} style={styles.receiptStatLine}>
-                          <Text style={[styles.receiptStatName, { color: meta.color }]}>
-                            {meta.emoji} {meta.name} ({meta.abbrev})
-                          </Text>
+                          <View style={styles.receiptStatLeft}>
+                            {STAT_GLYPH_URIS[meta.abbrev as keyof typeof STAT_GLYPH_URIS] ? (
+                              <Image
+                                source={{
+                                  uri: STAT_GLYPH_URIS[meta.abbrev as keyof typeof STAT_GLYPH_URIS],
+                                }}
+                                style={styles.receiptStatGlyph}
+                                resizeMode="contain"
+                              />
+                            ) : null}
+                            <Text style={[styles.receiptStatName, { color: meta.color }]}>
+                              {meta.name} ({meta.abbrev})
+                            </Text>
+                          </View>
                           <View style={{ alignItems: 'flex-end' }}>
                             <Text style={styles.receiptXpGain}>+{xp} XP</Text>
                             {lu && lu.levelsGained > 0 && (
@@ -1267,6 +1336,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 3,
   },
+  guildSubtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 3,
+  },
+  headerRankCrest: {
+    width: 18,
+    height: 18,
+  },
   badgeStrip: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1365,9 +1444,73 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
   },
+  radarCard: {
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.borderGold,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+  },
+  radarHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  radarTitle: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+  },
+  radarSubtitle: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  radarPill: {
+    backgroundColor: CRIMSON_ONI.agedGoldDim,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.borderGold,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  radarPillText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  radarImageContainer: {
+    width: '100%',
+    height: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radarImage: {
+    width: '100%',
+    height: '100%',
+  },
   statsStack: {
     gap: 8,
     marginBottom: 12,
+  },
+  statGlyphBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    backgroundColor: CRIMSON_ONI.charcoalElevated,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  statGlyphImage: {
+    width: 28,
+    height: 28,
   },
   statEmoji: {
     fontSize: 22,
@@ -1864,6 +2007,15 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: 3,
   },
+  receiptChestContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 10,
+  },
+  receiptChestImage: {
+    width: 96,
+    height: 80,
+  },
   receiptSubSummary: {
     color: CRIMSON_ONI.ashGray,
     fontSize: 12,
@@ -1889,6 +2041,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 4,
+  },
+  receiptStatLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  receiptStatGlyph: {
+    width: 22,
+    height: 22,
   },
   receiptStatName: {
     fontSize: 13,

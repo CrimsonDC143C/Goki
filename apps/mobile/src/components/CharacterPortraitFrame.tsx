@@ -1,6 +1,7 @@
 import React from 'react';
 import { Image, ImageSourcePropType, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Path, Polygon, Rect, Stop } from 'react-native-svg';
+import { HUD_URIS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
 
 export interface CharacterPortraitFrameProps {
@@ -84,11 +85,11 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
 
   return (
     <View style={[styles.heroFrame, { height: frameHeight }]}>
-      {/* Ornate Corner Trim Accents */}
-      <View style={[styles.cornerTrim, styles.cornerTL]} />
-      <View style={[styles.cornerTrim, styles.cornerTR]} />
-      <View style={[styles.cornerTrim, styles.cornerBL]} />
-      <View style={[styles.cornerTrim, styles.cornerBR]} />
+      {/* Ornate Crimson Oni Corner Filigree Accents (v0 Vault) */}
+      <Image source={{ uri: HUD_URIS.cornerFiligreeLarge }} style={[styles.cornerFiligree, styles.cornerTL]} resizeMode="contain" />
+      <Image source={{ uri: HUD_URIS.cornerFiligreeLarge }} style={[styles.cornerFiligree, styles.cornerTR]} resizeMode="contain" />
+      <Image source={{ uri: HUD_URIS.cornerFiligreeLarge }} style={[styles.cornerFiligree, styles.cornerBL]} resizeMode="contain" />
+      <Image source={{ uri: HUD_URIS.cornerFiligreeLarge }} style={[styles.cornerFiligree, styles.cornerBR]} resizeMode="contain" />
 
       {resolvedSource ? (
         <Image source={resolvedSource} style={styles.heroImage} resizeMode="contain" />
@@ -249,36 +250,30 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  cornerTrim: {
+  cornerFiligree: {
     position: 'absolute',
-    width: 16,
-    height: 16,
-    borderColor: CRIMSON_ONI.agedGoldBright,
+    width: 32,
+    height: 32,
     zIndex: 5,
   },
   cornerTL: {
-    top: 6,
-    left: 6,
-    borderTopWidth: 2,
-    borderLeftWidth: 2,
+    top: 2,
+    left: 2,
   },
   cornerTR: {
-    top: 6,
-    right: 6,
-    borderTopWidth: 2,
-    borderRightWidth: 2,
-  },
-  cornerBL: {
-    bottom: 6,
-    left: 6,
-    borderBottomWidth: 2,
-    borderLeftWidth: 2,
+    top: 2,
+    right: 2,
+    transform: [{ rotate: '90deg' }],
   },
   cornerBR: {
-    bottom: 6,
-    right: 6,
-    borderBottomWidth: 2,
-    borderRightWidth: 2,
+    bottom: 2,
+    right: 2,
+    transform: [{ rotate: '180deg' }],
+  },
+  cornerBL: {
+    bottom: 2,
+    left: 2,
+    transform: [{ rotate: '270deg' }],
   },
   avatarOuter: {
     borderRadius: 14,
