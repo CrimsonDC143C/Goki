@@ -22,6 +22,7 @@ import {
   xpRequiredForStatLevel,
 } from '@gymify/game-engine';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
+import { AttributeRadarChart } from '../components/AttributeRadarChart';
 import { BugReportModal } from '../components/BugReportModal';
 import { CharacterManagerModal } from '../components/CharacterManagerModal';
 import { DeveloperTriageModal } from '../components/DeveloperTriageModal';
@@ -550,11 +551,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           </View>
         </View>
         <View style={styles.radarImageContainer}>
-          <SvgXml
-            xml={HUD_SVGS.statRadar}
-            width="100%"
-            height={220}
-          />
+          <AttributeRadarChart stats={stats} height={220} />
         </View>
       </View>
 
