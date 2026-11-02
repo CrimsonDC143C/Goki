@@ -1,13 +1,15 @@
 import React from 'react';
 import { Image, ImageSourcePropType, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Defs, LinearGradient, Path, Polygon, Rect, Stop, SvgXml } from 'react-native-svg';
+import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, Polygon, RadialGradient, Rect, Stop, SvgXml } from 'react-native-svg';
 import { HUD_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
+
+export const DEFAULT_HERO_PORTRAIT = require('../../assets/images/adventurer-portrait.png');
 
 export interface CharacterPortraitFrameProps {
   /**
    * Drop-in Layer.ai 2D character illustration / sprite source (URI string or bundled asset).
-   * Renders atmospheric Crimson Oni warrior silhouette artwork when omitted.
+   * Defaults to the official v0 Crimson Oni hero portrait artwork when omitted.
    */
   imageSource?: ImageSourcePropType | string | null;
   variant?: 'hero' | 'avatar' | 'circle';
@@ -26,11 +28,13 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
   children,
 }) => {
   const resolvedSource: ImageSourcePropType | null =
-    typeof imageSource === 'string' && imageSource.trim().length > 0
+    typeof imageSource === 'string' && imageSource.trim().length > 0 && imageSource !== 'silhouette'
       ? { uri: imageSource }
       : imageSource && typeof imageSource !== 'string'
         ? imageSource
-        : null;
+        : imageSource === 'silhouette'
+          ? null
+          : DEFAULT_HERO_PORTRAIT;
 
   if (variant === 'circle' || (variant === 'avatar' && isCircle)) {
     const size = height ?? 58;
@@ -164,128 +168,41 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
       </View>
 
       {resolvedSource ? (
-        <Image source={resolvedSource} style={styles.heroImage} resizeMode="contain" />
-      ) : (
-        <View style={styles.svgBackdropWrap}>
-          <Svg width="100%" height="100%" viewBox="0 0 320 300" preserveAspectRatio="xMidYMid meet">
+        <>
+          <Image source={resolvedSource} style={styles.heroImage} resizeMode="cover" />
+          <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
             <Defs>
-              <LinearGradient id="oniStageGrad" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor="#2A1117" />
-                <Stop offset="0.55" stopColor="#1A191C" />
-                <Stop offset="1" stopColor="#111013" />
-              </LinearGradient>
-              <LinearGradient id="crimsonSunGrad" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor="#8B2637" stopOpacity="0.65" />
-                <Stop offset="1" stopColor="#5E1924" stopOpacity="0.18" />
-              </LinearGradient>
-              <LinearGradient id="bladeSteelGrad" x1="0" y1="0" x2="1" y2="1">
-                <Stop offset="0" stopColor="#E8E6E1" />
-                <Stop offset="1" stopColor="#7A787D" />
+              <LinearGradient id="heroVignette" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor="#090C12" stopOpacity="0" />
+                <Stop offset="0.6" stopColor="#090C12" stopOpacity="0.2" />
+                <Stop offset="1" stopColor="#090C12" stopOpacity="0.85" />
               </LinearGradient>
             </Defs>
-
-            <Rect x="0" y="0" width="320" height="300" fill="url(#oniStageGrad)" />
-
-            {/* Crimson Oni Moon Halo & Runic Ring */}
-            <Circle cx="160" cy="118" r="82" fill="url(#crimsonSunGrad)" />
-            <Circle
-              cx="160"
-              cy="118"
-              r="92"
-              fill="none"
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="1.2"
-              strokeDasharray="6 5"
-              strokeOpacity="0.45"
-            />
-            <Circle
-              cx="160"
-              cy="118"
-              r="72"
-              fill="none"
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="0.9"
-              strokeOpacity="0.3"
-            />
-
-            {/* Full-Body Ironbound Crimson Vanguard Silhouette */}
-            {/* Flowing Crimson Cloak */}
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroVignette)" />
+          </Svg>
+        </>
+      ) : (
+        <View style={styles.svgBackdropWrap}>
+          <Svg width="100%" height="100%" viewBox="0 0 120 220" preserveAspectRatio="xMidYMid meet">
+            <Defs>
+              <LinearGradient id="silhouetteGrad" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor="#273248" stopOpacity="0.9" />
+                <Stop offset="1" stopColor="#121722" stopOpacity="0.3" />
+              </LinearGradient>
+              <RadialGradient id="oniHaloGrad" cx="50%" cy="40%" r="50%">
+                <Stop offset="0" stopColor="#8B2637" stopOpacity="0.45" />
+                <Stop offset="1" stopColor="#090C12" stopOpacity="0" />
+              </RadialGradient>
+            </Defs>
+            <Rect x="0" y="0" width="120" height="220" fill="#0D0F14" />
+            <Circle cx="60" cy="85" r="55" fill="url(#oniHaloGrad)" />
+            <Ellipse cx="60" cy="212" rx="44" ry="5" fill="#8B2637" opacity="0.35" />
             <Path
-              d="M118 96 L82 238 L138 228 L160 242 L182 228 L238 238 L202 96 Z"
-              fill={CRIMSON_ONI.crimson}
-              fillOpacity="0.88"
-              stroke="#3B1018"
-              strokeWidth="1.5"
-            />
-
-            {/* Greatsword Behind Back */}
-            <Polygon
-              points="214,32 224,36 132,232 122,226"
-              fill="url(#bladeSteelGrad)"
-              stroke={CRIMSON_ONI.agedGold}
+              fill="url(#silhouetteGrad)"
+              stroke="#273248"
               strokeWidth="1"
+              d="M60 8c10 0 17 8 17 18s-7 19-17 19-17-9-17-19S50 8 60 8zM38 50h44c10 0 17 6 19 15l9 52c1 5-6 7-8 2l-11-40-2 44 5 82c0 7-11 7-12 0l-10-72h-4l-10 72c-1 7-12 7-12 0l5-82-2-44-11 40c-2 5-9 3-8-2l9-52c2-9 9-15 19-15z"
             />
-            <Polygon
-              points="194,62 232,80 228,87 190,69"
-              fill={CRIMSON_ONI.agedGold}
-            />
-
-            {/* Armored Legs & Sabatons */}
-            <Path
-              d="M138 176 L130 246 L148 246 L156 184 Z"
-              fill="#2B2930"
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="1.2"
-            />
-            <Path
-              d="M182 176 L190 246 L172 246 L164 184 Z"
-              fill="#2B2930"
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="1.2"
-            />
-
-            {/* Torso Hauberk & Pauldrons */}
-            <Path
-              d="M124 96 Q160 84 196 96 L186 178 Q160 188 134 178 Z"
-              fill="#25232A"
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="1.6"
-            />
-            {/* Pauldrons */}
-            <Path
-              d="M102 104 Q118 82 138 96 L130 124 Q110 120 102 104 Z"
-              fill={CRIMSON_ONI.crimson}
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="1.5"
-            />
-            <Path
-              d="M218 104 Q202 82 182 96 L190 124 Q210 120 218 104 Z"
-              fill={CRIMSON_ONI.crimson}
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="1.5"
-            />
-            {/* Chest Crest */}
-            <Polygon
-              points="160,110 172,128 160,148 148,128"
-              fill={CRIMSON_ONI.crimson}
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="1.3"
-            />
-
-            {/* Horned Oni Vanguard Greathelm */}
-            <Path
-              d="M140 62 L124 34 L148 52 Q160 46 172 52 L196 34 L180 62 Z"
-              fill={CRIMSON_ONI.agedGold}
-            />
-            <Path
-              d="M143 58 Q160 48 177 58 L175 88 Q160 96 145 88 Z"
-              fill="#2C2A31"
-              stroke={CRIMSON_ONI.agedGold}
-              strokeWidth="1.5"
-            />
-            {/* Glowing Visor Eyes */}
-            <Polygon points="148,70 157,73 149,75" fill="#FF5C5C" />
-            <Polygon points="172,70 163,73 171,75" fill="#FF5C5C" />
           </Svg>
         </View>
       )}

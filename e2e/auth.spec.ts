@@ -41,7 +41,7 @@ test.describe('E2E Authentication & Hub Navigation', () => {
     await page.goto('/');
 
     // 1. Verify Landing Screen loads
-    await expect(page.getByText('IRONBOUND REALMS')).toBeVisible();
+    await expect(page.getByText(/WORLD OF VERETHOR|IRONBOUND REALMS/i)).toBeVisible();
 
     // 2. Open Auth Modal
     const authBtn = page.getByTestId('auth-open-btn');

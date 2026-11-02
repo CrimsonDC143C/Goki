@@ -88,10 +88,10 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         <View style={styles.brandHeader}>
           <View style={styles.brandBadgeRow}>
             <View style={styles.brandAccentLine} />
-            <Text style={styles.brandEyebrow}>CRIMSON ONI CHRONICLES</Text>
+            <Text style={styles.brandEyebrow}>GYMSCAPE</Text>
             <View style={styles.brandAccentLine} />
           </View>
-          <Text style={styles.brandTitle}>IRONBOUND REALMS</Text>
+          <Text style={styles.brandTitle}>WORLD OF VERETHOR</Text>
           <Text style={styles.brandSubtitle}>Physical Effort Forged Into Legend</Text>
 
           <Pressable
@@ -198,7 +198,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             <View style={styles.actionHeaderRow}>
               <View style={styles.actionTitleCluster}>
                 <Text style={styles.actionIcon}>⚔️</Text>
-                <Text style={styles.actionTitle}>Online Workout</Text>
+                <Text style={[styles.actionTitle, styles.onlineTitle]}>Online Workout</Text>
               </View>
               {hasActiveOnlineSession ? (
                 <View style={styles.crimsonActivePill}>
@@ -207,7 +207,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                   </Text>
                 </View>
               ) : (
-                <Text style={styles.chevronCrimson}>→</Text>
+                <Text style={styles.chevronGold}>→</Text>
               )}
             </View>
             <Text style={styles.actionSubtitle}>
@@ -239,11 +239,11 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             <View style={styles.actionHeaderRow}>
               <View style={styles.actionTitleCluster}>
                 <Text style={styles.actionIcon}>🏰</Text>
-                <Text style={[styles.actionTitle, styles.enterWorldTitle]}>
+                <Text style={styles.actionTitle}>
                   Enter World
                 </Text>
               </View>
-              <Text style={styles.chevronGold}>→</Text>
+              <Text style={styles.chevronCrimson}>→</Text>
             </View>
             <Text style={styles.actionSubtitle}>
               Manage character, gear, dungeons, and guild halls.
@@ -432,18 +432,21 @@ const styles = StyleSheet.create({
     borderColor: CRIMSON_ONI.border,
   },
   onlineActionCard: {
-    backgroundColor: CRIMSON_ONI.crimsonDim,
-    borderColor: CRIMSON_ONI.crimsonGlow,
-  },
-  enterWorldCard: {
     backgroundColor: CRIMSON_ONI.charcoalElevated,
     borderColor: CRIMSON_ONI.agedGold,
   },
+  onlineTitle: {
+    color: CRIMSON_ONI.agedGoldBright,
+  },
+  enterWorldCard: {
+    backgroundColor: CRIMSON_ONI.crimsonDim,
+    borderColor: CRIMSON_ONI.crimsonGlow,
+  },
   enterWorldCardGlowing: {
-    backgroundColor: '#2B2318',
-    borderColor: CRIMSON_ONI.agedGoldBright,
-    shadowColor: CRIMSON_ONI.agedGold,
-    shadowOpacity: 0.35,
+    backgroundColor: '#351118',
+    borderColor: CRIMSON_ONI.crimson,
+    shadowColor: CRIMSON_ONI.crimsonGlow,
+    shadowOpacity: 0.5,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 2 },
     elevation: 5,
