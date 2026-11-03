@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, AppState } from 'react-native';
 import { DynamicRestMode } from '@gymify/game-engine';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { scheduleRestTimerNotification, cancelRestTimerNotification } from '../utils/restNotifications';
@@ -28,9 +28,45 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
   const [secondsRemaining, setSecondsRemaining] = useState<number>(0);
   const completedRef = useRef<boolean>(false);
 
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onSkipRef = useRef(onSkip);
+  onSkipRef.current = onSkip;
+  const onAdjustDeltaRef = useRef(onAdjustDelta);
+  onAdjustDeltaRef.current = onAdjustDelta;
+  const headlineRef = useRef(headline);
+  headlineRef.current = headline;
+
+  // Unmount safety: ensure pending notifications are cancelled if timer leaves tree
+  useEffect(() => {
+    return () => {
+      cancelRestTimerNotification().catch(() => {});
+    };
+  }, []);
+
+  // Wall-clock recovery when returning to foreground after locking phone
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && targetEndTimeMs && !completedRef.current) {
+        const now = Date.now();
+        if (now >= targetEndTimeMs) {
+          completedRef.current = true;
+          setSecondsRemaining(0);
+          triggerSensoryCue('REST_TIMER_EXPIRED');
+          cancelRestTimerNotification().catch(() => {});
+          onCompleteRef.current?.();
+        } else {
+          setSecondsRemaining(Math.max(0, Math.ceil((targetEndTimeMs - now) / 1000)));
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [targetEndTimeMs]);
+
   useEffect(() => {
     if (!targetEndTimeMs || targetEndTimeMs <= Date.now()) {
       setSecondsRemaining(0);
+      cancelRestTimerNotification().catch(() => {});
       return;
     }
 
@@ -38,14 +74,16 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
     const initialSeconds = Math.max(0, Math.ceil((targetEndTimeMs - Date.now()) / 1000));
     setSecondsRemaining(initialSeconds);
 
-    // Schedule local push notification for background wakeups
+    // Schedule local push notification for background wakeups with high-importance channel
     const notifTitle =
       mode === 'SUPERSET_TRANSITION'
         ? '⚡ Superset Transition Ready!'
         : mode === 'DROP_SET_TRANSITION'
         ? '🔥 Drop-Set Ready — Strip Weight!'
         : '⏱️ Rest Over — Next Set Ready!';
-    const notifBody = headline ? `${headline} • Let's crush this set.` : 'Step up and begin your next set.';
+    const notifBody = headlineRef.current
+      ? `${headlineRef.current} • Let's crush this set.`
+      : 'Step up and begin your next set.';
     scheduleRestTimerNotification(initialSeconds, notifTitle, notifBody).catch(() => {});
 
     const interval = setInterval(() => {
@@ -59,9 +97,7 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
           completedRef.current = true;
           triggerSensoryCue('REST_TIMER_EXPIRED');
           cancelRestTimerNotification().catch(() => {});
-          if (onComplete) {
-            onComplete();
-          }
+          onCompleteRef.current?.();
         }
       }
     }, 250);
@@ -69,7 +105,7 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
     return () => {
       clearInterval(interval);
     };
-  }, [targetEndTimeMs, mode, headline, onComplete]);
+  }, [targetEndTimeMs, mode]);
 
   const modeBadge = useMemo(() => {
     switch (mode) {

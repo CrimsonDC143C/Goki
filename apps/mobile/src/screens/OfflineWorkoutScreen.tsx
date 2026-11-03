@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -28,6 +28,7 @@ import { DynamicRestTimer } from '../components/DynamicRestTimer';
 import { PresetDesignerModal } from '../components/PresetDesignerModal';
 import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+import { cancelRestTimerNotification, requestNotificationPermissions } from '../utils/restNotifications';
 
 export interface OfflineWorkoutScreenProps {
   onFinishAndReturn: () => void;
@@ -214,34 +215,52 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     let completedRow: { setType?: SetType; isWarmup?: boolean; rpe?: number | null } | null = null;
     let completedBlock: { exerciseId: string } | null = null;
 
-    updateOfflineDraft((prev) => {
-      const nextBlocks = prev.exerciseBlocks.map((b) => {
-        if (b.blockId !== blockId) return b;
-        completedBlock = b;
-        return {
-          ...b,
-          sets: b.sets.map((s) => {
-            if (s.id === setId) {
-              justCompleted = !s.completed;
-              completedRow = s;
-              return { ...s, completed: !s.completed };
-            }
-            return s;
-          }),
-        };
-      });
+    const nextBlocks = offlineDraft.exerciseBlocks.map((b) => {
+      if (b.blockId !== blockId) return b;
+      completedBlock = b;
       return {
-        ...prev,
-        exerciseBlocks: nextBlocks,
+        ...b,
+        sets: b.sets.map((s) => {
+          if (s.id === setId) {
+            justCompleted = !s.completed;
+            completedRow = s;
+            return { ...s, completed: !s.completed };
+          }
+          return s;
+        }),
       };
     });
 
-    if (justCompleted && completedRow) {
-      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+    updateOfflineDraft((prev) => ({
+      ...prev,
+      exerciseBlocks: nextBlocks,
+    }));
 
-      // Calculate dynamic rest transition & advice
+    // If user unchecked a set, cancel any running rest timer
+    if (!justCompleted) {
+      setRestTargetEndTimeMs(null);
+      cancelRestTimerNotification().catch(() => {});
+      return;
+    }
+
+    if (completedRow) {
+      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+      requestNotificationPermissions().catch(() => {});
+
+      // Check if all sets across all exercises are complete
+      const hasRemainingSets = nextBlocks.some((b) => b.sets.some((s) => !s.completed));
+
+      if (!hasRemainingSets) {
+        // Entire workout completed! Clear timer and play fanfare
+        setRestTargetEndTimeMs(null);
+        cancelRestTimerNotification().catch(() => {});
+        triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
+        return;
+      }
+
+      // Calculate dynamic rest transition & advice on fresh nextBlocks state
       const transition = resolveSetCompletionTransition({
-        blocks: offlineDraft.exerciseBlocks,
+        blocks: nextBlocks,
         completedBlockId: blockId,
         completedSetId: setId,
       });
@@ -483,7 +502,22 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     }));
   };
 
+  const handleRestAdjustDelta = useCallback((delta: number) => {
+    setRestTargetEndTimeMs((prev) => (prev ? prev + delta * 1000 : null));
+  }, []);
+
+  const handleRestSkip = useCallback(() => {
+    setRestTargetEndTimeMs(null);
+    cancelRestTimerNotification().catch(() => {});
+  }, []);
+
+  const handleRestComplete = useCallback(() => {
+    setRestTargetEndTimeMs(null);
+  }, []);
+
   const handleFinishWorkout = () => {
+    setRestTargetEndTimeMs(null);
+    cancelRestTimerNotification().catch(() => {});
     const res = completeOfflineWorkout();
     if (!res.ok) {
       setValidationError(res.error ?? 'Complete at least one set or cardio entry first.');
@@ -551,15 +585,9 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           mode={restMode}
           headline={restHeadline}
           subtext={restSubtext}
-          onAdjustDelta={(delta) => {
-            setRestTargetEndTimeMs((prev) => (prev ? prev + delta * 1000 : null));
-          }}
-          onSkip={() => {
-            setRestTargetEndTimeMs(null);
-          }}
-          onComplete={() => {
-            setRestTargetEndTimeMs(null);
-          }}
+          onAdjustDelta={handleRestAdjustDelta}
+          onSkip={handleRestSkip}
+          onComplete={handleRestComplete}
         />
 
         {/* Workout Category Gateway Step */}

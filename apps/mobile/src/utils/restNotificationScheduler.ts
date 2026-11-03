@@ -38,16 +38,13 @@ export async function initializeRestNotifications(): Promise<void> {
 
   if (!handlerInitialized) {
     Notifications.setNotificationHandler({
-      handleNotification: async () => {
-        const isForeground = AppState.currentState === 'active';
-        return {
-          shouldShowBanner: !isForeground,
-          shouldShowList: !isForeground,
-          shouldPlaySound: !isForeground,
-          shouldSetBadge: false,
-          priority: Notifications.AndroidNotificationPriority.MAX,
-        };
-      },
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        priority: Notifications.AndroidNotificationPriority.MAX,
+      }),
     });
     handlerInitialized = true;
   }
@@ -59,7 +56,7 @@ export async function initializeRestNotifications(): Promise<void> {
         description:
           'Fires the Stamina Recharged cue when intra-workout rest finishes in the background.',
         importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 50, 70, 80],
+        vibrationPattern: [0, 80, 100, 80, 100, 120],
         enableVibrate: true,
         enableLights: true,
         lightColor: '#26A69A',
@@ -129,6 +126,8 @@ function clearWebFallbackTimer(): void {
 export async function scheduleStaminaRechargedNotification(params: {
   endsAtMs: number;
   nextSetPreview?: NextSetPreview | null;
+  title?: string;
+  body?: string;
 }): Promise<boolean> {
   clearWebFallbackTimer();
 
@@ -138,10 +137,12 @@ export async function scheduleStaminaRechargedNotification(params: {
     return false;
   }
 
-  const title = '⚡ Stamina Recharged — Next Set Ready!';
-  const body = params.nextSetPreview
-    ? `Set #${params.nextSetPreview.setNumber}: ${params.nextSetPreview.exerciseName} (${params.nextSetPreview.suggestedWeightKg}kg × ${params.nextSetPreview.suggestedReps}) — Return to Dungeon Focus.`
-    : 'Your stamina ring is 100% restored. Return to Dungeon Focus for your next set!';
+  const title = params.title ?? '⚡ Stamina Recharged — Next Set Ready!';
+  const body =
+    params.body ??
+    (params.nextSetPreview
+      ? `Set #${params.nextSetPreview.setNumber}: ${params.nextSetPreview.exerciseName} (${params.nextSetPreview.suggestedWeightKg}kg × ${params.nextSetPreview.suggestedReps}) — Return to Dungeon Focus.`
+      : 'Your stamina ring is 100% restored. Return to Dungeon Focus for your next set!');
 
   if (Platform.OS === 'web') {
     const g = globalThis as unknown as WebNotificationGlobal;

@@ -31,7 +31,6 @@ import {
 import { wearableService } from '../services/wearableTelemetry';
 import { StaminaRingTimer } from '../components/StaminaRingTimer';
 import { WorkoutCategoryGateway } from '../components/WorkoutCategoryGateway';
-import { DynamicRestTimer } from '../components/DynamicRestTimer';
 import { PresetDesignerModal } from '../components/PresetDesignerModal';
 import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { isEquippableInventoryEntry, useGame } from '../state/GameContext';
@@ -684,19 +683,6 @@ export const WorkoutLoggerScreen: React.FC = () => {
             </Text>
           </Pressable>
         </View>
-
-        {/* Dynamic Rest Timer with Wall-Clock Countdown & Native Phone Alerts */}
-        {phase === 'Resting' && (
-          <DynamicRestTimer
-            targetEndTimeMs={activeSession.restTimer.endsAtMs}
-            totalDurationSeconds={activeSession.restTimer.configuredSeconds}
-            mode="WORKING_REST"
-            headline={activeSession.restTimer.advice?.headline}
-            subtext={activeSession.restTimer.advice?.physiologicalRationale}
-            onAdjustDelta={(delta) => adjustHybridRestTimer({ deltaSeconds: delta })}
-            onSkip={skipHybridRest}
-          />
-        )}
 
         {/* Auto-Rest Integration: Stamina Recharging Ring when in `Resting` state */}
         {phase === 'Resting' && (

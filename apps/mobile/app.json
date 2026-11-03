@@ -30,6 +30,9 @@
     "android": {
       "package": "com.gymify.rpg",
       "permissions": [
+        "android.permission.VIBRATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
         "android.permission.health.READ_HEART_RATE",
         "android.permission.BODY_SENSORS",
         "android.permission.ACTIVITY_RECOGNITION"
