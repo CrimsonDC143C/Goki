@@ -1,5 +1,6 @@
 import { HeartRateZone, StatType, WorkoutSessionType } from './types';
 import { CardioSegmentInput } from './workout-calculator';
+import { STRENGTHLOG_EXERCISES } from './strengthlog-exercise-catalog';
 
 // ============================================================================
 // 1. WORKOUT CATEGORY GATEWAY & SET TYPES
@@ -520,6 +521,149 @@ export interface SeedExerciseDefinition {
   isCompound: boolean;
   baseXpFactor: number;
   description: string;
+  isCustom?: boolean;
+}
+
+export function getExerciseSubcategory(item: {
+  workoutCategory?: WorkoutCategory;
+  muscleGroup?: string;
+  equipmentType?: string;
+  activityType?: string;
+  name?: string;
+}): string {
+  const wCat = item.workoutCategory;
+  const mg = (item.muscleGroup || '').toUpperCase();
+  const eq = (item.equipmentType || '').toUpperCase();
+  const act = (item.activityType || '').toLowerCase();
+  const name = (item.name || '').toLowerCase();
+
+  if (wCat === 'GYM') {
+    if (mg.includes('CHEST') || name.includes('bench press') || name.includes('push-up') || name.includes('chest') || name.includes('dip')) {
+      return 'Chest';
+    }
+    if (
+      mg.includes('BACK') ||
+      mg.includes('POSTERIOR_CHAIN') ||
+      mg.includes('LAT') ||
+      mg.includes('TRAP') ||
+      mg.includes('LOWER_BACK') ||
+      name.includes('pull-up') ||
+      name.includes('pulldown') ||
+      name.includes('deadlift') ||
+      name.includes('row')
+    ) {
+      return 'Back';
+    }
+    if (
+      mg.includes('SHOULDER') ||
+      mg.includes('REAR_DELT') ||
+      mg.includes('FRONT_DELT') ||
+      mg.includes('LATERAL_DELT') ||
+      name.includes('overhead press') ||
+      name.includes('lateral raise') ||
+      name.includes('face pull')
+    ) {
+      return 'Shoulders';
+    }
+    if (
+      mg.includes('LEG') ||
+      mg.includes('QUAD') ||
+      mg.includes('HAMSTRING') ||
+      mg.includes('GLUTE') ||
+      mg.includes('CALV') ||
+      name.includes('squat') ||
+      name.includes('lunge')
+    ) {
+      return 'Legs';
+    }
+    if (
+      mg.includes('BICEP') ||
+      mg.includes('TRICEP') ||
+      mg.includes('ARM') ||
+      mg.includes('FOREARM') ||
+      name.includes('curl') ||
+      name.includes('pushdown') ||
+      name.includes('triceps extension')
+    ) {
+      return 'Arms';
+    }
+    if (
+      mg.includes('CORE') ||
+      mg.includes('AB') ||
+      name.includes('plank') ||
+      name.includes('crunch') ||
+      name.includes('sit-up') ||
+      name.includes('woodchopper') ||
+      name.includes('rollout')
+    ) {
+      return 'Core';
+    }
+    return 'Full Body';
+  }
+
+  if (wCat === 'CARDIO') {
+    if (act.includes('run') || eq.includes('TREADMILL') || name.includes('run') || name.includes('walk')) {
+      return 'Running';
+    }
+    if (act.includes('cycl') || eq.includes('BIKE') || name.includes('cycle') || name.includes('bike')) {
+      return 'Cycling';
+    }
+    if (
+      act.includes('row') ||
+      act.includes('sprint') ||
+      name.includes('ergometer') ||
+      name.includes('skierg') ||
+      name.includes('jump rope') ||
+      name.includes('hiit')
+    ) {
+      return 'HIIT & Conditioning';
+    }
+    if (act.includes('swim') || name.includes('swim') || name.includes('stair') || name.includes('ruck')) {
+      return 'Low Impact';
+    }
+    return 'Cardio Base';
+  }
+
+  if (wCat === 'SPORT') {
+    if (
+      eq.includes('RACQUET') ||
+      name.includes('badminton') ||
+      name.includes('tennis') ||
+      name.includes('pickleball') ||
+      name.includes('squash')
+    ) {
+      return 'Racquet Sports';
+    }
+    if (
+      eq.includes('BAG') ||
+      act.includes('boxing') ||
+      name.includes('bjj') ||
+      name.includes('muay thai') ||
+      name.includes('wrestling') ||
+      name.includes('combat')
+    ) {
+      return 'Combat Sports';
+    }
+    if (name.includes('basketball') || name.includes('soccer') || name.includes('football') || name.includes('climbing') || name.includes('volleyball')) {
+      return 'Court & Field';
+    }
+    return 'Athletic Sports';
+  }
+
+  if (wCat === 'RECOVERY') {
+    if (eq.includes('FOAM') || name.includes('foam') || name.includes('myofascial')) {
+      return 'Myofascial';
+    }
+    if (name.includes('stretch') || name.includes('pnf')) {
+      return 'Stretching';
+    }
+    if (name.includes('walk') || name.includes('plunge') || name.includes('contrast') || name.includes('flush')) {
+      return 'Active Flush';
+    }
+    return 'Mobility';
+  }
+
+  return 'General';
 }
 
 /**
@@ -1011,6 +1155,514 @@ export const DEFAULT_EXERCISE_CATALOG: readonly SeedExerciseDefinition[] = [
     baseXpFactor: 1.0,
     description: 'Myofascial release & joint restoration session accelerating fatigue clearance.',
   },
+
+  // --- Expanded Resistance Training Staples (Push, Pull, Legs, Arms, Core) ---
+  {
+    slug: 'incline_barbell_bench_press',
+    name: 'Incline Barbell Bench Press',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'CHEST',
+    equipmentType: 'BARBELL',
+    isCompound: true,
+    baseXpFactor: 1.15,
+    description: 'Upper-chest clavicular head hypertrophy & heavy barbell pressing.',
+  },
+  {
+    slug: 'pushups',
+    name: 'Push-Ups (Bodyweight / Weighted)',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'CHEST',
+    equipmentType: 'BODYWEIGHT',
+    isCompound: true,
+    baseXpFactor: 1.06,
+    description: 'Fundamental horizontal pushing calisthenic with scapular protraction.',
+  },
+  {
+    slug: 'romanian_deadlift',
+    name: 'Romanian Deadlift (RDL)',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'HAMSTRINGS',
+    equipmentType: 'BARBELL',
+    isCompound: true,
+    baseXpFactor: 1.18,
+    description: 'Lengthened hamstring & glute hinge overload without off-the-floor momentum.',
+  },
+  {
+    slug: 'seated_cable_row',
+    name: 'Seated Cable Row (Close / Wide Grip)',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'BACK',
+    equipmentType: 'DUAL_CABLE',
+    isCompound: true,
+    baseXpFactor: 1.14,
+    description: 'Horizontal cable pull driving mid-back thickness, rhomboids & lat stretch.',
+  },
+  {
+    slug: 'chest_supported_row',
+    name: 'Incline Dumbbell Chest-Supported Row',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'BACK',
+    equipmentType: 'DUMBBELL',
+    isCompound: true,
+    baseXpFactor: 1.14,
+    description: 'Bench-supported upper back & lat pull eliminating axial spinal fatigue.',
+  },
+  {
+    slug: 'lat_pulldown_wide',
+    name: 'Wide-Grip Lat Pulldown',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'BACK',
+    equipmentType: 'DUAL_CABLE',
+    isCompound: true,
+    baseXpFactor: 1.14,
+    description: 'Vertical lat width pull with controlled eccentric stretch.',
+  },
+  {
+    slug: 'reverse_pec_deck',
+    name: 'Reverse Pec Deck / Rear Delt Fly',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'REAR_DELTS',
+    equipmentType: 'MACHINE',
+    isCompound: false,
+    baseXpFactor: 1.02,
+    description: 'Strict rear deltoid and upper back isolation.',
+  },
+  {
+    slug: 'barbell_bicep_curl',
+    name: 'Barbell / EZ-Bar Bicep Curl',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'BICEPS',
+    equipmentType: 'BARBELL',
+    isCompound: false,
+    baseXpFactor: 1.04,
+    description: 'Standing supinated bicep mass builder.',
+  },
+  {
+    slug: 'dumbbell_hammer_curl',
+    name: 'Dumbbell Hammer Curl',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'BICEPS',
+    equipmentType: 'DUMBBELL',
+    isCompound: false,
+    baseXpFactor: 1.02,
+    description: 'Neutral-grip arm curl prioritizing brachialis, brachioradialis & grip stability.',
+  },
+  {
+    slug: 'tricep_rope_pushdown',
+    name: 'Cable Tricep Pushdown (Rope / Straight Bar)',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'TRICEPS',
+    equipmentType: 'DUAL_CABLE',
+    isCompound: false,
+    baseXpFactor: 1.02,
+    description: 'Lateral and medial tricep head lockout isolation.',
+  },
+  {
+    slug: 'skull_crushers',
+    name: 'Lying Triceps Extension / Skull Crushers',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'TRICEPS',
+    equipmentType: 'BARBELL',
+    isCompound: false,
+    baseXpFactor: 1.04,
+    description: 'Deep eccentric elbow flexion stretching the long head of the triceps.',
+  },
+  {
+    slug: 'barbell_front_squat',
+    name: 'Barbell Front Squat',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'LEGS',
+    equipmentType: 'BARBELL',
+    isCompound: true,
+    baseXpFactor: 1.18,
+    description: 'Upright quad-dominant compound squat with anterior rack core stability.',
+  },
+  {
+    slug: 'leg_press',
+    name: '45° Sled Leg Press',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'LEGS',
+    equipmentType: 'MACHINE',
+    isCompound: true,
+    baseXpFactor: 1.16,
+    description: 'High-volume quad and glute pressing without lower back loading.',
+  },
+  {
+    slug: 'lying_leg_curl',
+    name: 'Lying / Seated Leg Curl',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'HAMSTRINGS',
+    equipmentType: 'MACHINE',
+    isCompound: false,
+    baseXpFactor: 1.04,
+    description: 'Direct knee-flexion hamstring isolation protecting anterior cruciate ligaments.',
+  },
+  {
+    slug: 'leg_extension',
+    name: 'Leg Extension',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'QUADS',
+    equipmentType: 'MACHINE',
+    isCompound: false,
+    baseXpFactor: 1.04,
+    description: 'Direct knee-extension rectus femoris and vastus quad isolation.',
+  },
+  {
+    slug: 'standing_calf_raise',
+    name: 'Standing / Seated Calf Raise',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'CALVES',
+    equipmentType: 'MACHINE',
+    isCompound: false,
+    baseXpFactor: 1.02,
+    description: 'Gastrocnemius & soleus ankle plantarflexion strength for sprint propulsion.',
+  },
+  {
+    slug: 'barbell_hip_thrust',
+    name: 'Barbell Hip Thrust / Glute Bridge',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'GLUTES',
+    equipmentType: 'BARBELL',
+    isCompound: true,
+    baseXpFactor: 1.16,
+    description: 'Peak glute contraction horizontal hip extension.',
+  },
+  {
+    slug: 'dumbbell_walking_lunges',
+    name: 'Dumbbell Walking Lunges',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'LEGS',
+    equipmentType: 'DUMBBELL',
+    isCompound: true,
+    baseXpFactor: 1.15,
+    description: 'Dynamic unilateral leg strength, deceleration control & glute power.',
+  },
+  {
+    slug: 'hanging_leg_raise',
+    name: 'Hanging Leg / Knee Raise',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'CORE',
+    equipmentType: 'PULL_UP_DIP_STATION',
+    isCompound: true,
+    baseXpFactor: 1.08,
+    description: 'Strict hanging pelvic posterior tilt targeting lower rectus abdominis.',
+  },
+  {
+    slug: 'cable_woodchopper',
+    name: 'Cable Woodchopper (High-to-Low / Low-to-High)',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'CORE',
+    equipmentType: 'DUAL_CABLE',
+    isCompound: false,
+    baseXpFactor: 1.04,
+    description: 'Diagonal rotational core power transfer across transverse plane.',
+  },
+  {
+    slug: 'ab_wheel_rollout',
+    name: 'Ab Wheel Rollout',
+    category: 'RESISTANCE',
+    workoutCategory: 'GYM',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'CORE',
+    equipmentType: 'BODYWEIGHT',
+    isCompound: true,
+    baseXpFactor: 1.08,
+    description: 'Anti-extension abdominal anterior core strength under lengthened lever.',
+  },
+
+  // --- Expanded Sports Modalities (Racquet, Combat, Field) ---
+  {
+    slug: 'tennis_session',
+    name: 'Tennis (Singles / Rally Play)',
+    category: 'CARDIO',
+    workoutCategory: 'SPORT',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'RACQUET_COURT',
+    activityType: 'tennis',
+    isCompound: true,
+    baseXpFactor: 1.12,
+    description: 'High-energy court coverage, baseline rallies & explosive rotational serves.',
+  },
+  {
+    slug: 'pickleball_session',
+    name: 'Pickleball (Match Play)',
+    category: 'CARDIO',
+    workoutCategory: 'SPORT',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'AGILITY_SPEED',
+    equipmentType: 'RACQUET_COURT',
+    activityType: 'pickleball',
+    isCompound: true,
+    baseXpFactor: 1.10,
+    description: 'Fast-twitch kitchen volleys, split-step footwork & lateral recovery.',
+  },
+  {
+    slug: 'squash_session',
+    name: 'Squash / Racquetball Match',
+    category: 'CARDIO',
+    workoutCategory: 'SPORT',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'RACQUET_COURT',
+    activityType: 'squash',
+    isCompound: true,
+    baseXpFactor: 1.14,
+    description: 'Relentless enclosed court sprints, low lunges & Zone 4 anaerobic stamina.',
+  },
+  {
+    slug: 'basketball_pickup',
+    name: 'Basketball (Full / Half-Court Pickup)',
+    category: 'CARDIO',
+    workoutCategory: 'SPORT',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'COURT',
+    activityType: 'basketball',
+    isCompound: true,
+    baseXpFactor: 1.12,
+    description: 'Fast breaks, defensive slides, vertical rebounding & intermittent sprint intervals.',
+  },
+  {
+    slug: 'soccer_match',
+    name: 'Soccer / Football Match & Drills',
+    category: 'CARDIO',
+    workoutCategory: 'SPORT',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'FIELD',
+    activityType: 'soccer',
+    isCompound: true,
+    baseXpFactor: 1.12,
+    description: 'Sustained field jogging combined with high-speed sprints and kicking deceleration.',
+  },
+  {
+    slug: 'bjj_grappling',
+    name: 'Brazilian Jiu-Jitsu (BJJ / Grappling Sparring)',
+    category: 'CARDIO',
+    workoutCategory: 'SPORT',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'MAT',
+    activityType: 'bjj',
+    isCompound: true,
+    baseXpFactor: 1.16,
+    description: 'Isometric clamping, dynamic scrambles & sustained full-body anaerobic pressure.',
+  },
+  {
+    slug: 'muay_thai_kickboxing',
+    name: 'Muay Thai / Kickboxing (Bag & Pads)',
+    category: 'CARDIO',
+    workoutCategory: 'SPORT',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'ANAEROBIC',
+    equipmentType: 'HEAVY_BAG',
+    activityType: 'kickboxing',
+    isCompound: true,
+    baseXpFactor: 1.15,
+    description: 'High-volume kicks, knees, elbows & rotational power conditioning.',
+  },
+  {
+    slug: 'rock_climbing_bouldering',
+    name: 'Rock Climbing / Bouldering Session',
+    category: 'CARDIO',
+    workoutCategory: 'SPORT',
+    primaryStat: 'STRENGTH',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'WALL',
+    activityType: 'climbing',
+    isCompound: true,
+    baseXpFactor: 1.15,
+    description: 'Finger tendon strength, body tension, core coordination & isometric pulling.',
+  },
+  {
+    slug: 'swimming_laps',
+    name: 'Swimming (Freestyle Laps & Intervals)',
+    category: 'CARDIO',
+    workoutCategory: 'CARDIO',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'POOL',
+    activityType: 'swimming',
+    isCompound: true,
+    baseXpFactor: 1.10,
+    description: 'Zero-impact full-body cardiovascular resistance & breath-control intervals.',
+  },
+
+  // --- Expanded Cardio & Conditioning Modalities ---
+  {
+    slug: 'tempo_run',
+    name: 'Tempo / Threshold Run (Zone 4)',
+    category: 'CARDIO',
+    workoutCategory: 'CARDIO',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'AEROBIC_THRESHOLD',
+    equipmentType: 'NONE',
+    activityType: 'running',
+    isCompound: true,
+    baseXpFactor: 1.08,
+    description: 'Comfortably hard sustained pace driving lactate threshold clearance.',
+  },
+  {
+    slug: 'treadmill_incline_walk',
+    name: 'Treadmill Incline Power Walk (12-3-30)',
+    category: 'CARDIO',
+    workoutCategory: 'CARDIO',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'POSTERIOR_CHAIN',
+    equipmentType: 'TREADMILL',
+    activityType: 'incline_walk',
+    isCompound: true,
+    baseXpFactor: 1.04,
+    description: 'Steep incline walking firing glutes and calves at low joint impact.',
+  },
+  {
+    slug: 'stairmaster_intervals',
+    name: 'Stair Climber / StepMill Intervals',
+    category: 'CARDIO',
+    workoutCategory: 'CARDIO',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'LEGS',
+    equipmentType: 'STAIR_CLIMBER',
+    activityType: 'stairmaster',
+    isCompound: true,
+    baseXpFactor: 1.08,
+    description: 'Continuous vertical stair climbing for leg endurance & Zone 3/4 heart rates.',
+  },
+  {
+    slug: 'jump_rope',
+    name: 'Speed Jump Rope / Double Unders',
+    category: 'CARDIO',
+    workoutCategory: 'CARDIO',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'AGILITY_SPEED',
+    equipmentType: 'JUMP_ROPE',
+    activityType: 'jump_rope',
+    isCompound: true,
+    baseXpFactor: 1.08,
+    description: 'Rhythmic coordination, calf reactivity & high-density conditioning.',
+  },
+  {
+    slug: 'skierg_intervals',
+    name: 'SkiErg Power Intervals',
+    category: 'CARDIO',
+    workoutCategory: 'CARDIO',
+    primaryStat: 'AGILITY',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'SKIERG',
+    activityType: 'skierg',
+    isCompound: true,
+    baseXpFactor: 1.08,
+    description: 'Nordic ski poling motion engaging lats, triceps, abs & posterior chain.',
+  },
+  {
+    slug: 'rucking',
+    name: 'Rucking (Weighted Pack Outdoor Walk)',
+    category: 'CARDIO',
+    workoutCategory: 'CARDIO',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'POSTERIOR_CHAIN',
+    equipmentType: 'BACKPACK',
+    activityType: 'rucking',
+    isCompound: true,
+    baseXpFactor: 1.06,
+    description: 'Weighted backpack walking building postural endurance & aerobic capacity.',
+  },
+
+  // --- Expanded Active Recovery & Stretching Modalities ---
+  {
+    slug: 'full_body_static_stretch',
+    name: 'Full-Body Static Stretching & Joint Decompression',
+    category: 'RECOVERY_MOBILITY',
+    workoutCategory: 'RECOVERY',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'MAT',
+    activityType: 'stretching',
+    isCompound: false,
+    baseXpFactor: 1.0,
+    description: 'Gentle 30-60s holds releasing muscular stiffness and restoring resting length.',
+  },
+  {
+    slug: 'hip_spine_mobility_flow',
+    name: 'Deep Squat, Ankle & Hip Opener Flow',
+    category: 'RECOVERY_MOBILITY',
+    workoutCategory: 'RECOVERY',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'LEGS',
+    equipmentType: 'MAT',
+    activityType: 'recovery_mobility',
+    isCompound: false,
+    baseXpFactor: 1.0,
+    description: 'Cossack squats, 90/90s, and ankle dorsiflexion mobilization.',
+  },
+  {
+    slug: 'pnf_hamstring_glute_stretch',
+    name: 'PNF Hamstring, Quad & Glute Contract-Relax Stretch',
+    category: 'RECOVERY_MOBILITY',
+    workoutCategory: 'RECOVERY',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'LEGS',
+    equipmentType: 'MAT',
+    activityType: 'stretching',
+    isCompound: false,
+    baseXpFactor: 1.0,
+    description: 'Neuromuscular contract-relax stretches deepening active range of motion.',
+  },
+  {
+    slug: 'cold_plunge_contrast',
+    name: 'Cold Plunge & Contrast Hydrotherapy',
+    category: 'RECOVERY_MOBILITY',
+    workoutCategory: 'RECOVERY',
+    primaryStat: 'ENDURANCE',
+    muscleGroup: 'FULL_BODY',
+    equipmentType: 'TUB',
+    activityType: 'recovery',
+    isCompound: false,
+    baseXpFactor: 1.0,
+    description: 'Vascular constriction & dilation protocol relieving delayed-onset muscle soreness.',
+  },
+  ...STRENGTHLOG_EXERCISES,
 ];
 
 // ============================================================================

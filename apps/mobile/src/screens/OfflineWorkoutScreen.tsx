@@ -8,6 +8,7 @@ import {
   View,
   TouchableOpacity,
   Alert,
+  Modal,
 } from 'react-native';
 import {
   HeartRateZone,
@@ -26,6 +27,7 @@ import { CRIMSON_ONI } from '../theme';
 import { WorkoutCategoryGateway } from '../components/WorkoutCategoryGateway';
 import { DynamicRestTimer } from '../components/DynamicRestTimer';
 import { PresetDesignerModal } from '../components/PresetDesignerModal';
+import { ActivityPickerModal } from '../components/ActivityPickerModal';
 import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { cancelRestTimerNotification, requestNotificationPermissions } from '../utils/restNotifications';
@@ -73,6 +75,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     savePreset,
     deletePreset,
     loadPresetIntoDraft,
+    recordRecentActivity,
   } = useGame();
 
   const resistanceExercises = useMemo(
@@ -87,6 +90,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
 
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [openExercisePickerBlockId, setOpenExercisePickerBlockId] = useState<string | null>(null);
+  const [showCardioPicker, setShowCardioPicker] = useState<boolean>(false);
   const [exerciseSearchQuery, setExerciseSearchQuery] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showPresetDesigner, setShowPresetDesigner] = useState<boolean>(false);
@@ -106,6 +110,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   const [restMode, setRestMode] = useState<DynamicRestMode>('WORKING_REST');
   const [restHeadline, setRestHeadline] = useState<string>('');
   const [restSubtext, setRestSubtext] = useState<string>('');
+  const [restCenterModalVisible, setRestCenterModalVisible] = useState<boolean>(false);
 
   // Cardio / Recovery quick entry state
   const [selectedCardioId, setSelectedCardioId] = useState<string>(
@@ -184,6 +189,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           : b
       ),
     }));
+    recordRecentActivity(exerciseId);
     setOpenExercisePickerBlockId(null);
     setExerciseSearchQuery('');
   };
@@ -239,11 +245,15 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     // If user unchecked a set, cancel any running rest timer
     if (!justCompleted) {
       setRestTargetEndTimeMs(null);
+      setRestCenterModalVisible(false);
       cancelRestTimerNotification().catch(() => {});
       return;
     }
 
     if (completedRow) {
+      if (completedBlock) {
+        recordRecentActivity((completedBlock as { exerciseId: string }).exerciseId);
+      }
       triggerSensoryCue('SET_MICRO_REWARD_TICK');
       requestNotificationPermissions().catch(() => {});
 
@@ -253,6 +263,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       if (!hasRemainingSets) {
         // Entire workout completed! Clear timer and play fanfare
         setRestTargetEndTimeMs(null);
+        setRestCenterModalVisible(false);
         cancelRestTimerNotification().catch(() => {});
         triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
         return;
@@ -285,6 +296,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       setRestMode(plan.mode);
       setRestHeadline(plan.headline);
       setRestSubtext(plan.subtext);
+      setRestCenterModalVisible(true);
 
       if (transition.nextSameExerciseSetIsDropSet) {
         triggerSensoryCue('DROP_SET_IMMEDIATE_TICK');
@@ -374,29 +386,39 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   };
 
   const handleAddSetRow = (blockId: string) => {
-    const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    updateOfflineDraft((prev) => ({
-      ...prev,
-      exerciseBlocks: prev.exerciseBlocks.map((b) => {
-        if (b.blockId !== blockId) return b;
-        const lastRow = b.sets[b.sets.length - 1];
-        return {
-          ...b,
-          sets: [
-            ...b.sets,
-            {
-              id: `set_${stamp}`,
-              weightKgStr: lastRow?.weightKgStr ?? '60',
-              repsStr: lastRow?.repsStr ?? '8',
-              isWarmup: false,
-              setType: 'NORMAL',
-              rpe: 8.5,
-              completed: false,
-            },
-          ],
-        };
-      }),
-    }));
+    updateOfflineDraft((prev) => {
+      const targetBlock = prev.exerciseBlocks.find((b) => b.blockId === blockId);
+      const targetSupersetGroup = targetBlock?.supersetGroupId;
+
+      return {
+        ...prev,
+        exerciseBlocks: prev.exerciseBlocks.map((b) => {
+          const shouldAdd =
+            b.blockId === blockId ||
+            (!!targetSupersetGroup && b.supersetGroupId === targetSupersetGroup);
+          if (!shouldAdd) return b;
+
+          const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+          const lastRow = b.sets[b.sets.length - 1];
+          return {
+            ...b,
+            sets: [
+              ...b.sets,
+              {
+                id: `set_${stamp}`,
+                weightKgStr: lastRow?.weightKgStr ?? '60',
+                repsStr: lastRow?.repsStr ?? '8',
+                isWarmup: false,
+                setType: 'NORMAL',
+                rpe: lastRow?.rpe ?? 8.5,
+                completed: false,
+              },
+            ],
+          };
+        }),
+      };
+    });
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
   const handleRemoveSetRow = (blockId: string, setId: string) => {
@@ -492,6 +514,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       setStopwatchRunning(false);
       setStopwatchElapsedSec(0);
     }
+    recordRecentActivity(selectedCardioId);
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
@@ -508,15 +531,18 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
 
   const handleRestSkip = useCallback(() => {
     setRestTargetEndTimeMs(null);
+    setRestCenterModalVisible(false);
     cancelRestTimerNotification().catch(() => {});
   }, []);
 
   const handleRestComplete = useCallback(() => {
     setRestTargetEndTimeMs(null);
+    setRestCenterModalVisible(false);
   }, []);
 
   const handleFinishWorkout = () => {
     setRestTargetEndTimeMs(null);
+    setRestCenterModalVisible(false);
     cancelRestTimerNotification().catch(() => {});
     const res = completeOfflineWorkout();
     if (!res.ok) {
@@ -568,6 +594,24 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
         </Pressable>
       </View>
 
+      {/* Pinned Rest Timer Fixed at Top of Viewable Screen (visible when rest active & minimized from center) */}
+      {restTargetEndTimeMs && !restCenterModalVisible ? (
+        <View style={styles.pinnedRestContainer}>
+          <DynamicRestTimer
+            targetEndTimeMs={restTargetEndTimeMs}
+            totalDurationSeconds={restTotalSeconds}
+            mode={restMode}
+            headline={restHeadline}
+            subtext={restSubtext}
+            onAdjustDelta={handleRestAdjustDelta}
+            onSkip={handleRestSkip}
+            onComplete={handleRestComplete}
+            variant="banner"
+            onTapToFocus={() => setRestCenterModalVisible(true)}
+          />
+        </View>
+      ) : null}
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -577,18 +621,6 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
             <Text style={styles.validationText}>{validationError}</Text>
           </View>
         )}
-
-        {/* Dynamic Rest Timer Bar */}
-        <DynamicRestTimer
-          targetEndTimeMs={restTargetEndTimeMs}
-          totalDurationSeconds={restTotalSeconds}
-          mode={restMode}
-          headline={restHeadline}
-          subtext={restSubtext}
-          onAdjustDelta={handleRestAdjustDelta}
-          onSkip={handleRestSkip}
-          onComplete={handleRestComplete}
-        />
 
         {/* Workout Category Gateway Step */}
         <WorkoutCategoryGateway
@@ -629,128 +661,73 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
               const pickerOpen = openExercisePickerBlockId === block.blockId;
               const supersetInfo = supersetLabels[block.blockId];
               const isGrouped = !!block.supersetGroupId;
+              const nextBlock = offlineDraft.exerciseBlocks[bIdx + 1];
+              const prevBlock = offlineDraft.exerciseBlocks[bIdx - 1];
+              const isLinkedWithNext =
+                isGrouped &&
+                !!nextBlock?.supersetGroupId &&
+                nextBlock.supersetGroupId === block.supersetGroupId;
+              const isLinkedWithPrev =
+                isGrouped &&
+                !!prevBlock?.supersetGroupId &&
+                prevBlock.supersetGroupId === block.supersetGroupId;
 
               return (
-                <View
-                  key={block.blockId}
-                  style={[
-                    styles.exerciseCard,
-                    isGrouped && { borderLeftColor: '#C69A45', borderLeftWidth: 4 },
-                  ]}
-                >
-                  {/* Superset Pill Header */}
-                  {supersetInfo ? (
-                    <View style={styles.supersetBanner}>
-                      <Text style={styles.supersetBannerText}>
-                        ⚡ SUPERSET {supersetInfo.supersetGroupId} ({supersetInfo.memberLabel})
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {/* Exercise Selector Row */}
-                  <View style={styles.exerciseCardHeader}>
-                    <Pressable
-                      style={styles.exerciseSelectorBtn}
-                      onPress={() => {
-                        setExerciseSearchQuery('');
-                        setOpenExercisePickerBlockId(pickerOpen ? null : block.blockId);
-                      }}
-                    >
-                      <Text style={styles.exerciseSelectorText}>
-                        {exMeta?.name ?? block.exerciseName ?? block.exerciseId}
-                      </Text>
-                      <Text style={styles.exerciseSelectorCaret}>{pickerOpen ? '▲' : '▼'}</Text>
-                    </Pressable>
-
-                    <View style={styles.cardHeaderActions}>
-                      <TouchableOpacity
-                        style={[styles.linkSupersetBtn, isGrouped && styles.linkSupersetBtnActive]}
-                        onPress={() => handleToggleSuperset(bIdx)}
-                      >
-                        <Text
-                          style={[
-                            styles.linkSupersetBtnText,
-                            isGrouped && styles.linkSupersetBtnTextActive,
-                          ]}
-                        >
-                          {isGrouped ? 'Linked' : '🔗 Link'}
+                <React.Fragment key={block.blockId}>
+                  <View
+                    style={[
+                      styles.exerciseCard,
+                      isGrouped && { borderLeftColor: '#C69A45', borderLeftWidth: 4 },
+                      isLinkedWithNext && styles.exerciseCardLinkedNext,
+                      isLinkedWithPrev && styles.exerciseCardLinkedPrev,
+                    ]}
+                  >
+                    {/* Superset Pill Header */}
+                    {supersetInfo ? (
+                      <View style={styles.supersetBanner}>
+                        <Text style={styles.supersetBannerText}>
+                          ⚡ SUPERSET {supersetInfo.supersetGroupId} ({supersetInfo.memberLabel})
                         </Text>
-                      </TouchableOpacity>
+                      </View>
+                    ) : null}
 
-                      {offlineDraft.exerciseBlocks.length > 1 && (
-                        <Pressable
-                          style={styles.removeBlockBtn}
-                          onPress={() => handleRemoveExerciseBlock(block.blockId)}
+                    {/* Exercise Selector Row */}
+                    <View style={styles.exerciseCardHeader}>
+                      <Pressable
+                        style={styles.exerciseSelectorBtn}
+                        onPress={() => setOpenExercisePickerBlockId(block.blockId)}
+                      >
+                        <Text style={styles.exerciseSelectorText}>
+                          {exMeta?.name ?? block.exerciseName ?? block.exerciseId}
+                        </Text>
+                        <Text style={styles.exerciseSelectorCaret}>🔍 ▼</Text>
+                      </Pressable>
+
+                      <View style={styles.cardHeaderActions}>
+                        <TouchableOpacity
+                          style={[styles.linkSupersetBtn, isGrouped && styles.linkSupersetBtnActive]}
+                          onPress={() => handleToggleSuperset(bIdx)}
                         >
-                          <Text style={styles.removeBlockBtnText}>✕</Text>
-                        </Pressable>
-                      )}
-                    </View>
-                  </View>
-
-                  {pickerOpen && (
-                    <View style={styles.exercisePickerContainer}>
-                      <View style={styles.exerciseSearchRow}>
-                        <TextInput
-                          style={styles.exerciseSearchInput}
-                          placeholder="Filter exercises..."
-                          placeholderTextColor="#6B7280"
-                          value={exerciseSearchQuery}
-                          onChangeText={setExerciseSearchQuery}
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                        />
-                        {exerciseSearchQuery.length > 0 && (
-                          <TouchableOpacity
-                            style={styles.exerciseSearchClearBtn}
-                            onPress={() => setExerciseSearchQuery('')}
+                          <Text
+                            style={[
+                              styles.linkSupersetBtnText,
+                              isGrouped && styles.linkSupersetBtnTextActive,
+                            ]}
                           >
-                            <Text style={styles.exerciseSearchClearText}>✕</Text>
-                          </TouchableOpacity>
+                            {isGrouped ? 'Superset' : '🔗 Link'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        {offlineDraft.exerciseBlocks.length > 1 && (
+                          <Pressable
+                            style={styles.removeBlockBtn}
+                            onPress={() => handleRemoveExerciseBlock(block.blockId)}
+                          >
+                            <Text style={styles.removeBlockBtnText}>✕</Text>
+                          </Pressable>
                         )}
                       </View>
-
-                      <ScrollView
-                        style={styles.exercisePickerScroll}
-                        contentContainerStyle={styles.exercisePickerScrollContent}
-                        nestedScrollEnabled={true}
-                        keyboardShouldPersistTaps="handled"
-                        showsVerticalScrollIndicator={true}
-                      >
-                        {filteredResistanceExercises.length === 0 ? (
-                          <View style={styles.exerciseNoResults}>
-                            <Text style={styles.exerciseNoResultsText}>
-                              No exercises found matching "{exerciseSearchQuery}"
-                            </Text>
-                          </View>
-                        ) : (
-                          filteredResistanceExercises.map((option) => {
-                            const active = option.id === block.exerciseId;
-                            return (
-                              <TouchableOpacity
-                                key={option.id}
-                                style={[
-                                  styles.exerciseOptionPill,
-                                  active && styles.exerciseOptionPillActive,
-                                ]}
-                                onPress={() => handleSelectExercise(block.blockId, option.id)}
-                              >
-                                <Text
-                                  style={[
-                                    styles.exerciseOptionText,
-                                    active && styles.exerciseOptionTextActive,
-                                  ]}
-                                >
-                                  {option.name}
-                                </Text>
-                                {active && <Text style={styles.exerciseOptionCheck}>✓</Text>}
-                              </TouchableOpacity>
-                            );
-                          })
-                        )}
-                      </ScrollView>
                     </View>
-                  )}
 
                   {/* Table Column Headers */}
                   <View style={styles.setTableHeader}>
@@ -868,8 +845,20 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
                     <Text style={styles.addSetRowText}>+ Add Set</Text>
                   </Pressable>
                 </View>
-              );
-            })}
+
+                {/* Superset Connecting Bridge between linked exercises */}
+                {isLinkedWithNext ? (
+                  <View style={styles.supersetBridge}>
+                    <View style={styles.supersetBridgeLine} />
+                    <View style={styles.supersetBridgeBadge}>
+                      <Text style={styles.supersetBridgeText}>⚡ SUPERSET LINK</Text>
+                    </View>
+                    <View style={styles.supersetBridgeTrail} />
+                  </View>
+                ) : null}
+              </React.Fragment>
+            );
+          })}
 
             <Pressable style={styles.addExerciseBlockBtn} onPress={handleAddExerciseBlock}>
               <Text style={styles.addExerciseBlockText}>+ Add Exercise</Text>
@@ -890,16 +879,46 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
             </View>
 
             <View style={styles.cardioCard}>
-              <View style={styles.cardioSelectRow}>
+              <View style={styles.cardioSelectHeader}>
                 <Text style={styles.cardioLabel}>Activity:</Text>
+                <TouchableOpacity
+                  style={styles.cardioBrowseBtn}
+                  onPress={() => setShowCardioPicker(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.cardioBrowseBtnText}>🔍 Browse / Add Modality</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.cardioSelectedBanner}
+                onPress={() => setShowCardioPicker(true)}
+                activeOpacity={0.8}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardioSelectedName}>
+                    {cardioExercises.find((c) => c.id === selectedCardioId)?.name ?? selectedCardioId}
+                  </Text>
+                  <Text style={styles.cardioSelectedSub}>
+                    {cardioExercises.find((c) => c.id === selectedCardioId)?.equipmentType || 'Activity'} • Tap to search or add custom
+                  </Text>
+                </View>
+                <Text style={styles.cardioSelectedChangeIcon}>🔍</Text>
+              </TouchableOpacity>
+
+              <View style={styles.cardioSelectRow}>
+                <Text style={styles.cardioQuickLabel}>Quick:</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-                  {cardioExercises.map((c) => {
+                  {cardioExercises.slice(0, 10).map((c) => {
                     const active = c.id === selectedCardioId;
                     return (
                       <Pressable
                         key={c.id}
                         style={[styles.cardioPill, active && styles.cardioPillActive]}
-                        onPress={() => setSelectedCardioId(c.id)}
+                        onPress={() => {
+                          setSelectedCardioId(c.id);
+                          recordRecentActivity(c.id);
+                        }}
                       >
                         <Text style={[styles.cardioPillText, active && styles.cardioPillTextActive]}>
                           {c.name}
@@ -1007,6 +1026,76 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           onBack={() => setShowTrainingHistory(false)}
         />
       </ScrollView>
+
+      {/* Resistance Exercise Picker Modal */}
+      <ActivityPickerModal
+        visible={openExercisePickerBlockId !== null}
+        onClose={() => setOpenExercisePickerBlockId(null)}
+        onSelectExercise={(item) => {
+          if (openExercisePickerBlockId) {
+            handleSelectExercise(openExercisePickerBlockId, item.id);
+          }
+        }}
+        currentExerciseId={
+          openExercisePickerBlockId
+            ? offlineDraft.exerciseBlocks.find((b) => b.blockId === openExercisePickerBlockId)?.exerciseId
+            : null
+        }
+        targetWorkoutCategory="GYM"
+        title="Select Resistance Exercise"
+      />
+
+      {/* Cardio / Sport / Recovery Activity Picker Modal */}
+      <ActivityPickerModal
+        visible={showCardioPicker}
+        onClose={() => setShowCardioPicker(false)}
+        onSelectExercise={(item) => {
+          setSelectedCardioId(item.id);
+          recordRecentActivity(item.id);
+        }}
+        currentExerciseId={selectedCardioId}
+        targetWorkoutCategory={
+          activeCategory === 'SPORT' ? 'SPORT' : activeCategory === 'RECOVERY' ? 'RECOVERY' : 'CARDIO'
+        }
+        title={
+          activeCategory === 'SPORT'
+            ? 'Select Sport Modality'
+            : activeCategory === 'RECOVERY'
+            ? 'Select Recovery & Mobility'
+            : 'Select Cardio Training'
+        }
+      />
+
+      {/* Center Rest Timer Popup Modal (proc'd on set completion) */}
+      <Modal
+        visible={!!(restTargetEndTimeMs && restCenterModalVisible)}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setRestCenterModalVisible(false)}
+      >
+        <Pressable
+          style={styles.restModalBackdrop}
+          onPress={() => setRestCenterModalVisible(false)}
+        >
+          <Pressable
+            style={styles.restModalCard}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <DynamicRestTimer
+              targetEndTimeMs={restTargetEndTimeMs}
+              totalDurationSeconds={restTotalSeconds}
+              mode={restMode}
+              headline={restHeadline}
+              subtext={restSubtext}
+              onAdjustDelta={handleRestAdjustDelta}
+              onSkip={handleRestSkip}
+              onComplete={handleRestComplete}
+              variant="hero"
+              onMinimize={() => setRestCenterModalVisible(false)}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -1139,6 +1228,24 @@ const styles = StyleSheet.create({
     color: '#7A787D',
     fontWeight: '700',
   },
+  pinnedRestContainer: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: '#16151A',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2B2930',
+  },
+  restModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(7, 6, 10, 0.82)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  restModalCard: {
+    width: '100%',
+    maxWidth: 420,
+  },
   exerciseCard: {
     backgroundColor: '#1C1B20',
     borderColor: '#36343C',
@@ -1146,6 +1253,53 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 12,
     marginBottom: 12,
+  },
+  exerciseCardLinkedNext: {
+    marginBottom: 0,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 6,
+  },
+  exerciseCardLinkedPrev: {
+    marginTop: 0,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 6,
+  },
+  supersetBridge: {
+    height: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+    paddingLeft: 12,
+    marginVertical: 0,
+  },
+  supersetBridgeLine: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    backgroundColor: '#C69A45',
+  },
+  supersetBridgeBadge: {
+    backgroundColor: '#35250E',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  supersetBridgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FDE68A',
+    letterSpacing: 0.5,
+  },
+  supersetBridgeTrail: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#3D3118',
+    marginLeft: 8,
+    marginRight: 8,
   },
   supersetBanner: {
     backgroundColor: '#382810',
@@ -1453,10 +1607,62 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
+  cardioSelectHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  cardioBrowseBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#2D2316',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+  },
+  cardioBrowseBtnText: {
+    color: '#FDE68A',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  cardioSelectedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#232128',
+    borderColor: '#38BDF8',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  cardioSelectedName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  cardioSelectedSub: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  cardioSelectedChangeIcon: {
+    fontSize: 14,
+    marginLeft: 8,
+  },
   cardioSelectRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
+  },
+  cardioQuickLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#8A8890',
+    marginRight: 6,
+    alignSelf: 'center',
   },
   cardioLabel: {
     fontSize: 11,

@@ -22,6 +22,8 @@ import {
   SeedExerciseDefinition,
 } from '@gymify/game-engine';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+import { ActivityPickerModal } from './ActivityPickerModal';
+import { ExerciseCatalogItem } from '../state/GameContext';
 
 const SET_TYPE_COLORS: Record<SetType, string> = {
   NORMAL: '#9CA3AF',
@@ -88,13 +90,14 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
     }
   }, [editingPreset, visible]);
 
-  const handleAddExercise = (exercise: SeedExerciseDefinition) => {
+  const handleAddExercise = (exercise: ExerciseCatalogItem | SeedExerciseDefinition) => {
+    const slug = 'id' in exercise ? exercise.id : exercise.slug;
     if (targetBlockIndex !== null) {
       // Swapping exercise
       setBlocks((prev) =>
         prev.map((b, idx) =>
           idx === targetBlockIndex
-            ? { ...b, exerciseSlug: exercise.slug, exerciseName: exercise.name }
+            ? { ...b, exerciseSlug: slug, exerciseName: exercise.name }
             : b
         )
       );
@@ -103,7 +106,7 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
       // Adding new block
       const newBlock: WorkoutPresetExerciseBlock = {
         blockId: `blk_${Date.now()}_${blocks.length + 1}`,
-        exerciseSlug: exercise.slug,
+        exerciseSlug: slug,
         exerciseName: exercise.name,
         sets: [
           {
@@ -138,22 +141,29 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
   };
 
   const handleAddSet = (blockIndex: number) => {
-    setBlocks((prev) =>
-      prev.map((block, idx) => {
-        if (idx !== blockIndex) return block;
+    setBlocks((prev) => {
+      const targetBlock = prev[blockIndex];
+      const targetSupersetGroup = targetBlock?.supersetGroupId;
+
+      return prev.map((block, idx) => {
+        const shouldAdd =
+          idx === blockIndex ||
+          (!!targetSupersetGroup && block.supersetGroupId === targetSupersetGroup);
+        if (!shouldAdd) return block;
+
         const lastSet = block.sets[block.sets.length - 1];
         const newSet: WorkoutPresetSetTemplate = {
           targetWeightKg: lastSet ? lastSet.targetWeightKg : 20,
           targetReps: lastSet ? lastSet.targetReps : 8,
           setType: 'NORMAL',
-          targetRpe: 8.5,
+          targetRpe: lastSet?.targetRpe ?? 8.5,
         };
         return {
           ...block,
           sets: [...block.sets, newSet],
         };
-      })
-    );
+      });
+    });
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
@@ -346,45 +356,58 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
 
             {blocks.map((block: WorkoutPresetExerciseBlock, bIdx: number) => {
               const isGrouped = !!block.supersetGroupId;
-              return (
-                <View
-                  key={`${block.exerciseSlug}_${bIdx}`}
-                  style={[
-                    styles.blockCard,
-                    isGrouped && { borderLeftColor: '#C69A45', borderLeftWidth: 4 },
-                  ]}
-                >
-                  <View style={styles.blockTopRow}>
-                    <View style={styles.blockTitleContainer}>
-                      {isGrouped ? (
-                        <View style={styles.supersetTag}>
-                          <Text style={styles.supersetTagText}>
-                            Superset {block.supersetGroupId}
-                          </Text>
-                        </View>
-                      ) : null}
-                      <Text style={styles.blockExerciseName}>
-                        {block.exerciseName || block.exerciseSlug}
-                      </Text>
-                    </View>
+              const nextBlock = blocks[bIdx + 1];
+              const prevBlock = blocks[bIdx - 1];
+              const isLinkedWithNext =
+                isGrouped &&
+                !!nextBlock?.supersetGroupId &&
+                nextBlock.supersetGroupId === block.supersetGroupId;
+              const isLinkedWithPrev =
+                isGrouped &&
+                !!prevBlock?.supersetGroupId &&
+                prevBlock.supersetGroupId === block.supersetGroupId;
 
-                    <View style={styles.blockActions}>
-                      <TouchableOpacity
-                        style={[
-                          styles.supersetToggleBtn,
-                          isGrouped && styles.supersetToggleBtnActive,
-                        ]}
-                        onPress={() => handleToggleSuperset(bIdx)}
-                      >
-                        <Text
-                          style={[
-                            styles.supersetToggleText,
-                            isGrouped && styles.supersetToggleTextActive,
-                          ]}
-                        >
-                          {isGrouped ? 'Linked Superset' : '🔗 Link Superset'}
+              return (
+                <React.Fragment key={`${block.exerciseSlug}_${bIdx}`}>
+                  <View
+                    style={[
+                      styles.blockCard,
+                      isGrouped && { borderLeftColor: '#C69A45', borderLeftWidth: 4 },
+                      isLinkedWithNext && styles.blockCardLinkedNext,
+                      isLinkedWithPrev && styles.blockCardLinkedPrev,
+                    ]}
+                  >
+                    <View style={styles.blockTopRow}>
+                      <View style={styles.blockTitleContainer}>
+                        {isGrouped ? (
+                          <View style={styles.supersetTag}>
+                            <Text style={styles.supersetTagText}>
+                              Superset {block.supersetGroupId}
+                            </Text>
+                          </View>
+                        ) : null}
+                        <Text style={styles.blockExerciseName}>
+                          {block.exerciseName || block.exerciseSlug}
                         </Text>
-                      </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.blockActions}>
+                        <TouchableOpacity
+                          style={[
+                            styles.supersetToggleBtn,
+                            isGrouped && styles.supersetToggleBtnActive,
+                          ]}
+                          onPress={() => handleToggleSuperset(bIdx)}
+                        >
+                          <Text
+                            style={[
+                              styles.supersetToggleText,
+                              isGrouped && styles.supersetToggleTextActive,
+                            ]}
+                          >
+                            {isGrouped ? 'Superset' : '🔗 Link'}
+                          </Text>
+                        </TouchableOpacity>
 
                       <TouchableOpacity
                         style={styles.removeBlockBtn}
@@ -505,8 +528,20 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
                     <Text style={styles.addSetRowText}>+ Add Set</Text>
                   </TouchableOpacity>
                 </View>
-              );
-            })}
+
+                {/* Superset Connecting Bridge between linked exercises */}
+                {isLinkedWithNext ? (
+                  <View style={styles.supersetBridge}>
+                    <View style={styles.supersetBridgeLine} />
+                    <View style={styles.supersetBridgeBadge}>
+                      <Text style={styles.supersetBridgeText}>⚡ SUPERSET LINK</Text>
+                    </View>
+                    <View style={styles.supersetBridgeTrail} />
+                  </View>
+                ) : null}
+              </React.Fragment>
+            );
+          })}
           </ScrollView>
 
           {/* Footer Actions */}
@@ -537,45 +572,17 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          {/* Exercise Picker Sub-Modal */}
-          <Modal
+          {/* Exercise Picker Modal */}
+          <ActivityPickerModal
             visible={showExercisePicker}
-            animationType="slide"
-            transparent
-            onRequestClose={() => setShowExercisePicker(false)}
-          >
-            <View style={styles.pickerOverlay}>
-              <View style={styles.pickerCard}>
-                <View style={styles.pickerHeader}>
-                  <Text style={styles.pickerTitle}>Catalog Equipment & Exercises</Text>
-                  <TouchableOpacity
-                    style={styles.closeBtn}
-                    onPress={() => setShowExercisePicker(false)}
-                  >
-                    <Text style={styles.closeBtnText}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView style={styles.pickerList}>
-                  {DEFAULT_EXERCISE_CATALOG.map((ex: SeedExerciseDefinition) => (
-                    <TouchableOpacity
-                      key={ex.slug}
-                      style={styles.pickerItem}
-                      onPress={() => handleAddExercise(ex)}
-                    >
-                      <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={styles.pickerItemName}>{ex.name}</Text>
-                        <Text style={styles.pickerItemMeta}>
-                          {ex.equipmentType} • {ex.workoutCategory} • {ex.isCompound ? 'Compound' : 'Isolation'}
-                        </Text>
-                      </View>
-                      <Text style={styles.pickerItemAddText}>+ Add</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            </View>
-          </Modal>
+            onClose={() => {
+              setShowExercisePicker(false);
+              setTargetBlockIndex(null);
+            }}
+            onSelectExercise={(item) => handleAddExercise(item)}
+            targetWorkoutCategory={category}
+            title="Add Routine Exercise / Activity"
+          />
         </View>
       </View>
     </Modal>
@@ -706,6 +713,53 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 12,
     marginBottom: 12,
+  },
+  blockCardLinkedNext: {
+    marginBottom: 0,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 6,
+  },
+  blockCardLinkedPrev: {
+    marginTop: 0,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 6,
+  },
+  supersetBridge: {
+    height: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+    paddingLeft: 12,
+    marginVertical: 0,
+  },
+  supersetBridgeLine: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 4,
+    backgroundColor: '#C69A45',
+  },
+  supersetBridgeBadge: {
+    backgroundColor: '#35250E',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  supersetBridgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FDE68A',
+    letterSpacing: 0.5,
+  },
+  supersetBridgeTrail: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#3D3118',
+    marginLeft: 8,
+    marginRight: 8,
   },
   blockTopRow: {
     flexDirection: 'row',

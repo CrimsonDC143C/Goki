@@ -73,6 +73,7 @@ import {
   transitionHybridWorkoutState,
   validateEquipmentRequirements,
   DEFAULT_EXERCISE_CATALOG,
+  SeedExerciseDefinition,
   MAX_GATHERING_DURATION_MS,
   MIN_GATHERING_DURATION_MS,
   WorkoutCategory,
@@ -147,8 +148,15 @@ export interface ExerciseCatalogItem {
   id: string;
   name: string;
   category: 'RESISTANCE' | 'CARDIO' | 'RECOVERY_MOBILITY';
+  workoutCategory?: WorkoutCategory;
   primaryStat: StatType;
   baseXpFactor: number;
+  muscleGroup?: string;
+  equipmentType?: string;
+  activityType?: string;
+  isCompound?: boolean;
+  isCustom?: boolean;
+  description?: string;
 }
 
 export interface InventoryEntry {
@@ -420,6 +428,21 @@ interface GameContextValue {
   login: (credentials: LoginPayload) => Promise<{ ok: boolean; error?: string }>;
   register: (payload: RegisterPayload) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
+  customExercises: SeedExerciseDefinition[];
+  addCustomExercise: (input: {
+    name: string;
+    workoutCategory: WorkoutCategory;
+    category?: 'RESISTANCE' | 'CARDIO' | 'RECOVERY_MOBILITY';
+    primaryStat?: StatType;
+    muscleGroup?: string;
+    equipmentType?: string;
+    activityType?: string;
+    isCompound?: boolean;
+    description?: string;
+  }) => SeedExerciseDefinition;
+  deleteCustomExercise: (exerciseId: string) => void;
+  recentActivityIds: string[];
+  recordRecentActivity: (activityId: string) => void;
 }
 
 const STARTER_EXERCISES: ExerciseCatalogItem[] = [
@@ -427,19 +450,26 @@ const STARTER_EXERCISES: ExerciseCatalogItem[] = [
     id: catItem.slug,
     name: catItem.name,
     category: catItem.category,
+    workoutCategory: catItem.workoutCategory,
     primaryStat: catItem.primaryStat,
     baseXpFactor: catItem.baseXpFactor,
+    muscleGroup: catItem.muscleGroup,
+    equipmentType: catItem.equipmentType,
+    activityType: catItem.activityType,
+    isCompound: catItem.isCompound,
+    isCustom: catItem.isCustom,
+    description: catItem.description,
   })),
-  { id: 'bench_press', name: 'Barbell Bench Press', category: 'RESISTANCE' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.1 },
-  { id: 'barbell_squat', name: 'Barbell Back Squat', category: 'RESISTANCE' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.15 },
-  { id: 'deadlift', name: 'Barbell Deadlift', category: 'RESISTANCE' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.2 },
-  { id: 'overhead_press', name: 'Standing Overhead Press', category: 'RESISTANCE' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.1 },
-  { id: 'weighted_pullup', name: 'Weighted Pull-Up', category: 'RESISTANCE' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.1 },
-  { id: 'zone2_run', name: 'Aerobic Run (Zone 2 Base)', category: 'CARDIO' as const, primaryStat: 'ENDURANCE' as const, baseXpFactor: 1.05 },
-  { id: 'indoor_cycle', name: 'Stationary / Road Cycling', category: 'CARDIO' as const, primaryStat: 'ENDURANCE' as const, baseXpFactor: 1.0 },
-  { id: 'hiit_rower', name: 'Rowing Ergometer HIIT', category: 'CARDIO' as const, primaryStat: 'AGILITY' as const, baseXpFactor: 1.05 },
-  { id: 'sprint_intervals', name: 'Track / Assault Bike Sprints', category: 'CARDIO' as const, primaryStat: 'AGILITY' as const, baseXpFactor: 1.1 },
-  { id: 'mobility_yoga', name: 'Mobility & Restoration Yoga', category: 'RECOVERY_MOBILITY' as const, primaryStat: 'ENDURANCE' as const, baseXpFactor: 1.0 },
+  { id: 'bench_press', name: 'Barbell Bench Press', category: 'RESISTANCE' as const, workoutCategory: 'GYM' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.15, muscleGroup: 'CHEST', equipmentType: 'BARBELL', isCompound: true },
+  { id: 'barbell_squat', name: 'Barbell Back Squat', category: 'RESISTANCE' as const, workoutCategory: 'GYM' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.18, muscleGroup: 'LEGS', equipmentType: 'BARBELL', isCompound: true },
+  { id: 'deadlift', name: 'Barbell Deadlift', category: 'RESISTANCE' as const, workoutCategory: 'GYM' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.2, muscleGroup: 'POSTERIOR_CHAIN', equipmentType: 'BARBELL', isCompound: true },
+  { id: 'overhead_press', name: 'Standing Overhead Press', category: 'RESISTANCE' as const, workoutCategory: 'GYM' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.15, muscleGroup: 'SHOULDERS', equipmentType: 'BARBELL', isCompound: true },
+  { id: 'weighted_pullup', name: 'Weighted Pull-Up', category: 'RESISTANCE' as const, workoutCategory: 'GYM' as const, primaryStat: 'STRENGTH' as const, baseXpFactor: 1.18, muscleGroup: 'BACK', equipmentType: 'PULL_UP_DIP_STATION', isCompound: true },
+  { id: 'zone2_run', name: 'Aerobic Run (Zone 2 Base)', category: 'CARDIO' as const, workoutCategory: 'CARDIO' as const, primaryStat: 'ENDURANCE' as const, baseXpFactor: 1.05, muscleGroup: 'AEROBIC', equipmentType: 'NONE', isCompound: true },
+  { id: 'indoor_cycle', name: 'Stationary / Road Cycling', category: 'CARDIO' as const, workoutCategory: 'CARDIO' as const, primaryStat: 'ENDURANCE' as const, baseXpFactor: 1.0, muscleGroup: 'AEROBIC', equipmentType: 'BIKE', isCompound: true },
+  { id: 'hiit_rower', name: 'Rowing Ergometer HIIT', category: 'CARDIO' as const, workoutCategory: 'CARDIO' as const, primaryStat: 'AGILITY' as const, baseXpFactor: 1.05, muscleGroup: 'FULL_BODY', equipmentType: 'ERGOMETER', isCompound: true },
+  { id: 'sprint_intervals', name: 'Track / Assault Bike Sprints', category: 'CARDIO' as const, workoutCategory: 'CARDIO' as const, primaryStat: 'AGILITY' as const, baseXpFactor: 1.1, muscleGroup: 'ANAEROBIC', equipmentType: 'NONE', isCompound: true },
+  { id: 'mobility_yoga', name: 'Mobility & Restoration Yoga', category: 'RECOVERY_MOBILITY' as const, workoutCategory: 'RECOVERY' as const, primaryStat: 'ENDURANCE' as const, baseXpFactor: 1.0, muscleGroup: 'FULL_BODY', equipmentType: 'MAT', isCompound: false },
 ].filter((item, index, arr) => arr.findIndex((i) => i.id === item.id) === index);
 
 const EXERCISE_NAME_BY_ID: Record<string, string> = Object.fromEntries(
@@ -1118,6 +1148,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     []
   );
   const [customPresets, setCustomPresets] = useState<WorkoutPresetDefinition[]>([]);
+  const [customExercises, setCustomExercises] = useState<SeedExerciseDefinition[]>([]);
+  const [recentActivityIds, setRecentActivityIds] = useState<string[]>([]);
   const [workoutHistory, setWorkoutHistory] = useState<CompletedWorkoutRecord[]>(
     DEFAULT_SAMPLE_WORKOUT_HISTORY
   );
@@ -1148,6 +1180,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   pendingReceiptsRef.current = pendingWorkoutReceipts;
   const customPresetsRef = useRef<WorkoutPresetDefinition[]>(customPresets);
   customPresetsRef.current = customPresets;
+  const customExercisesRef = useRef<SeedExerciseDefinition[]>(customExercises);
+  customExercisesRef.current = customExercises;
+  const recentActivityIdsRef = useRef<string[]>(recentActivityIds);
+  recentActivityIdsRef.current = recentActivityIds;
   const workoutHistoryRef = useRef<CompletedWorkoutRecord[]>(workoutHistory);
   workoutHistoryRef.current = workoutHistory;
   const isSyncingOfflineRef = useRef(false);
@@ -1164,6 +1200,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         partial.pendingWorkoutReceipts ?? pendingReceiptsRef.current,
       customPresets:
         partial.customPresets ?? customPresetsRef.current,
+      customExercises:
+        partial.customExercises ?? customExercisesRef.current,
+      recentActivityIds:
+        partial.recentActivityIds ?? recentActivityIdsRef.current,
       workoutHistory:
         partial.workoutHistory ?? workoutHistoryRef.current,
       characterProfile:
@@ -1216,6 +1256,25 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (loaded.customPresets && loaded.customPresets.length > 0) {
         customPresetsRef.current = loaded.customPresets;
         setCustomPresets(loaded.customPresets);
+      }
+      if (loaded.customExercises && loaded.customExercises.length > 0) {
+        customExercisesRef.current = loaded.customExercises;
+        setCustomExercises(loaded.customExercises);
+      }
+      if (loaded.recentActivityIds && loaded.recentActivityIds.length > 0) {
+        recentActivityIdsRef.current = loaded.recentActivityIds;
+        setRecentActivityIds(loaded.recentActivityIds);
+      } else if (loaded.workoutHistory && loaded.workoutHistory.length > 0) {
+        const derived: string[] = [];
+        for (const record of loaded.workoutHistory) {
+          for (const ex of record.exercises) {
+            if (!derived.includes(ex.exerciseId)) {
+              derived.push(ex.exerciseId);
+            }
+          }
+        }
+        recentActivityIdsRef.current = derived.slice(0, 15);
+        setRecentActivityIds(derived.slice(0, 15));
       }
       if (loaded.availableCharacters && loaded.availableCharacters.length > 0) {
         availableCharactersRef.current = loaded.availableCharacters;
@@ -1294,6 +1353,118 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     },
     [persistBundleSnapshot, serverOnline]
+  );
+
+  const exercises = useMemo<ExerciseCatalogItem[]>(() => {
+    const defaultMap = new Map<string, ExerciseCatalogItem>();
+    for (const item of STARTER_EXERCISES) {
+      defaultMap.set(item.id, item);
+    }
+    for (const cust of customExercises) {
+      defaultMap.set(cust.slug, {
+        id: cust.slug,
+        name: cust.name,
+        category: cust.category,
+        workoutCategory: cust.workoutCategory,
+        primaryStat: cust.primaryStat,
+        baseXpFactor: cust.baseXpFactor,
+        muscleGroup: cust.muscleGroup,
+        equipmentType: cust.equipmentType,
+        activityType: cust.activityType,
+        isCompound: cust.isCompound,
+        isCustom: true,
+        description: cust.description,
+      });
+    }
+    return Array.from(defaultMap.values());
+  }, [customExercises]);
+
+  const recordRecentActivity = useCallback(
+    (activityId: string) => {
+      if (!activityId) return;
+      setRecentActivityIds((prev) => {
+        const filtered = prev.filter((id) => id !== activityId);
+        const next = [activityId, ...filtered].slice(0, 30);
+        recentActivityIdsRef.current = next;
+        persistBundleSnapshot({ recentActivityIds: next });
+        return next;
+      });
+    },
+    [persistBundleSnapshot]
+  );
+
+  const addCustomExercise = useCallback(
+    (input: {
+      name: string;
+      workoutCategory: WorkoutCategory;
+      category?: 'RESISTANCE' | 'CARDIO' | 'RECOVERY_MOBILITY';
+      primaryStat?: StatType;
+      muscleGroup?: string;
+      equipmentType?: string;
+      activityType?: string;
+      isCompound?: boolean;
+      description?: string;
+    }): SeedExerciseDefinition => {
+      const stamp = Date.now();
+      const slug = `custom_${input.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '')}_${stamp.toString(36).slice(-4)}`;
+
+      const newDef: SeedExerciseDefinition = {
+        slug,
+        name: input.name.trim(),
+        category:
+          input.category ||
+          (input.workoutCategory === 'GYM'
+            ? 'RESISTANCE'
+            : input.workoutCategory === 'RECOVERY'
+            ? 'RECOVERY_MOBILITY'
+            : 'CARDIO'),
+        workoutCategory: input.workoutCategory,
+        primaryStat:
+          input.primaryStat ||
+          (input.workoutCategory === 'GYM'
+            ? 'STRENGTH'
+            : input.workoutCategory === 'SPORT'
+            ? 'AGILITY'
+            : 'ENDURANCE'),
+        muscleGroup: input.muscleGroup || (input.workoutCategory === 'GYM' ? 'FULL_BODY' : 'AEROBIC'),
+        equipmentType: input.equipmentType || 'CUSTOM',
+        activityType: input.activityType || input.workoutCategory.toLowerCase(),
+        isCompound: input.isCompound ?? true,
+        baseXpFactor: (input.isCompound ?? true) ? 1.15 : 1.02,
+        description: input.description || `Custom user-defined ${input.workoutCategory} activity.`,
+        isCustom: true,
+      };
+
+      setCustomExercises((prev) => {
+        const next = [...prev, newDef];
+        customExercisesRef.current = next;
+        persistBundleSnapshot({ customExercises: next });
+        return next;
+      });
+
+      recordRecentActivity(slug);
+      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+      return newDef;
+    },
+    [persistBundleSnapshot, recordRecentActivity]
+  );
+
+  const deleteCustomExercise = useCallback(
+    (exerciseId: string) => {
+      setCustomExercises((prev) => {
+        const next = prev.filter((e) => e.slug !== exerciseId);
+        customExercisesRef.current = next;
+        persistBundleSnapshot({ customExercises: next });
+        return next;
+      });
+      setRecentActivityIds((prev) => {
+        const next = prev.filter((id) => id !== exerciseId);
+        recentActivityIdsRef.current = next;
+        persistBundleSnapshot({ recentActivityIds: next });
+        return next;
+      });
+    },
+    [persistBundleSnapshot]
   );
 
   // Auto-dismiss Landing Screen toast after 4.5 seconds
@@ -2559,10 +2730,32 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setOfflineDraft(freshDraft);
     setLandingToastMessage('Workout saved. Spoils waiting in the world.');
 
+    // Collect completed activity IDs and bump to recent activities
+    const touchedActivityIds: string[] = [];
+    for (const b of draft.exerciseBlocks) {
+      if (!touchedActivityIds.includes(b.exerciseId)) {
+        touchedActivityIds.push(b.exerciseId);
+      }
+    }
+    for (const c of draft.cardioEntries) {
+      if (!touchedActivityIds.includes(c.exerciseId)) {
+        touchedActivityIds.push(c.exerciseId);
+      }
+    }
+
+    let nextRecentIds = recentActivityIdsRef.current;
+    if (touchedActivityIds.length > 0) {
+      const remaining = recentActivityIdsRef.current.filter((id) => !touchedActivityIds.includes(id));
+      nextRecentIds = [...touchedActivityIds, ...remaining].slice(0, 30);
+      recentActivityIdsRef.current = nextRecentIds;
+      setRecentActivityIds(nextRecentIds);
+    }
+
     persistBundleSnapshot({
       offlineDraft: null,
       queuedOfflineWorkouts: nextQueue,
       workoutHistory: nextHistory,
+      recentActivityIds: nextRecentIds,
     });
 
     // Silently attempt server sync in the background (with zero RPG popups)
@@ -3973,7 +4166,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fatigueState: projectedFatigue,
     nextWorkoutMultiplier,
     combatPenalties,
-    exercises: STARTER_EXERCISES,
+    exercises,
+    customExercises,
+    addCustomExercise,
+    deleteCustomExercise,
+    recentActivityIds,
+    recordRecentActivity,
     historicalPRs,
     workoutsLoggedCount,
     consistencyStreak,

@@ -20,7 +20,7 @@ const CATEGORY_COLORS: Record<WorkoutCategory, string> = {
 const CATEGORY_BADGE_SVGS: Record<WorkoutCategory, string> = {
   GYM: MODALITY_BADGE_SVGS.resistance,
   CARDIO: MODALITY_BADGE_SVGS.cardio,
-  SPORT: MODALITY_BADGE_SVGS.calisthenics,
+  SPORT: MODALITY_BADGE_SVGS.sport,
   RECOVERY: MODALITY_BADGE_SVGS.yogaMobility,
 };
 
@@ -82,8 +82,8 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
               >
                 <View style={styles.cardHeaderRow}>
                   {CATEGORY_BADGE_SVGS[cat.key] ? (
-                    <View style={[styles.badgeWrap, { borderColor: color }]}>
-                      <SvgXml xml={CATEGORY_BADGE_SVGS[cat.key]} width={28} height={28} />
+                    <View style={styles.badgeWrap}>
+                      <SvgXml xml={CATEGORY_BADGE_SVGS[cat.key]} width={42} height={42} />
                     </View>
                   ) : (
                     <Text style={styles.cardIcon}>{cat.icon}</Text>
@@ -189,7 +189,7 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
 
         <View style={[styles.activeCategoryPill, { borderColor: activeColor }]}>
           {CATEGORY_BADGE_SVGS[activeCatMeta.key] ? (
-            <SvgXml xml={CATEGORY_BADGE_SVGS[activeCatMeta.key]} width={16} height={16} />
+            <SvgXml xml={CATEGORY_BADGE_SVGS[activeCatMeta.key]} width={18} height={18} />
           ) : (
             <Text style={styles.activePillIcon}>{activeCatMeta.icon}</Text>
           )}
@@ -285,8 +285,8 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                       }}
                     >
                       {CATEGORY_BADGE_SVGS[cat.key] ? (
-                        <View style={{ marginRight: 10 }}>
-                          <SvgXml xml={CATEGORY_BADGE_SVGS[cat.key]} width={26} height={26} />
+                        <View style={styles.modalBadgeWrap}>
+                          <SvgXml xml={CATEGORY_BADGE_SVGS[cat.key]} width={32} height={32} />
                         </View>
                       ) : (
                         <Text style={styles.modalOptionIcon}>{cat.icon}</Text>
@@ -421,11 +421,15 @@ const styles = StyleSheet.create({
     fontSize: 24,
   },
   badgeWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
-    backgroundColor: '#1E1D22',
-    borderWidth: 1,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBadgeWrap: {
+    width: 34,
+    height: 34,
+    marginRight: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
