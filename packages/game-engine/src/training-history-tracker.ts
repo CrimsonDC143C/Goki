@@ -25,6 +25,8 @@ export interface CompletedExerciseEntry {
 
 export interface CompletedWorkoutRecord {
   id: string;
+  /** Silent identifier attaching the historical workout to the character it was completed on. */
+  characterId?: string | null;
   source: 'ONLINE' | 'OFFLINE';
   performedAtIso: string;
   durationSeconds: number;
@@ -1201,6 +1203,30 @@ export function evaluatePostWorkoutSummary(params: {
     totalTonnageKg,
     streakCount,
   };
+}
+
+/**
+ * Filters historical workouts down to only those completed on the specified character.
+ * Workouts without a matching `characterId` (such as starter sample workouts or workouts
+ * completed on previous/deleted characters) remain stored in global Training History for
+ * fitness tracking, but do not count toward this character's RPG progression or Guild Quests.
+ */
+export function filterWorkoutsForCharacter(
+  workouts: readonly CompletedWorkoutRecord[],
+  characterId: string | null | undefined
+): CompletedWorkoutRecord[] {
+  if (!characterId) return [];
+  return workouts.filter((w) => w.characterId === characterId);
+}
+
+/**
+ * Counts how many historical workouts were completed on the specified character.
+ */
+export function countWorkoutsForCharacter(
+  workouts: readonly CompletedWorkoutRecord[],
+  characterId: string | null | undefined
+): number {
+  return filterWorkoutsForCharacter(workouts, characterId).length;
 }
 
 // ============================================================================

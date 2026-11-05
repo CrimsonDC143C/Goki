@@ -81,6 +81,8 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
         stats: true,
         fatigueState: true,
         equipmentLoadout: true,
+        bountyCompletions: { include: { bounty: true } },
+        _count: { select: { workoutLogs: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -396,6 +398,8 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
           take: 1,
         },
         guildMembership: { include: { guild: true } },
+        bountyCompletions: { include: { bounty: true } },
+        _count: { select: { workoutLogs: true } },
       },
     });
 

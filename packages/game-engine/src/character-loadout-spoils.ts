@@ -351,6 +351,8 @@ export interface QueuedOfflineSetInput {
 export interface QueuedOfflineWorkoutPayload {
   queueId: string;
   sessionId: string;
+  /** Silent identifier attaching the queued offline workout to the character it was completed on. */
+  characterId?: string | null;
   performedAtIso: string;
   durationSeconds: number;
   workoutType: WorkoutSessionType;
@@ -373,6 +375,8 @@ export interface QueuedOfflineWorkoutPayload {
 export interface WorkoutSpoilsReceipt {
   receiptId: string;
   sessionId: string;
+  /** Silent identifier attaching the spoils receipt to the character it was completed on. */
+  characterId?: string | null;
   performedAtIso: string;
   workoutType: WorkoutSessionType;
   durationSeconds: number;
@@ -503,6 +507,7 @@ function mergeLootDrops(drops: readonly LootDrop[]): LootDrop[] {
  */
 export function buildWorkoutSpoilsReceipt(params: {
   receiptId: string;
+  characterId?: string | null;
   performedAtIso: string;
   workoutType: WorkoutSessionType;
   rewardPayload: RewardPayload;
@@ -527,6 +532,7 @@ export function buildWorkoutSpoilsReceipt(params: {
   return {
     receiptId: params.receiptId,
     sessionId: rewardPayload.sessionId,
+    characterId: params.characterId ?? null,
     performedAtIso: params.performedAtIso,
     workoutType: params.workoutType,
     durationSeconds: rewardPayload.durationSeconds,

@@ -12,6 +12,8 @@ import {
   buildExerciseProgressionCards,
   buildSessionLogCards,
   evaluatePostWorkoutSummary,
+  filterWorkoutsForCharacter,
+  countWorkoutsForCharacter,
   DEFAULT_SAMPLE_WORKOUT_HISTORY,
   CompletedWorkoutRecord,
   CompletedSetEntry,
@@ -450,6 +452,67 @@ describe('Training History Tracker', () => {
       expect(maintainedSummary.encouragingMessage).toContain('5-session streak');
       expect(maintainedSummary.improvements).toHaveLength(0);
       expect(maintainedSummary.streakCount).toBe(5);
+    });
+  });
+
+  describe('filterWorkoutsForCharacter & countWorkoutsForCharacter', () => {
+    const charAWorkout1: CompletedWorkoutRecord = {
+      id: 'wk_char_a_1',
+      characterId: 'char_a',
+      source: 'OFFLINE',
+      performedAtIso: '2026-11-01T10:00:00Z',
+      durationSeconds: 1800,
+      exercises: [],
+    };
+    const charAWorkout2: CompletedWorkoutRecord = {
+      id: 'wk_char_a_2',
+      characterId: 'char_a',
+      source: 'ONLINE',
+      performedAtIso: '2026-11-02T10:00:00Z',
+      durationSeconds: 2100,
+      exercises: [],
+    };
+    const charBWorkout1: CompletedWorkoutRecord = {
+      id: 'wk_char_b_1',
+      characterId: 'char_b',
+      source: 'OFFLINE',
+      performedAtIso: '2026-11-03T10:00:00Z',
+      durationSeconds: 2400,
+      exercises: [],
+    };
+
+    const combinedHistory: CompletedWorkoutRecord[] = [
+      ...DEFAULT_SAMPLE_WORKOUT_HISTORY,
+      charAWorkout1,
+      charAWorkout2,
+      charBWorkout1,
+    ];
+
+    it('keeps all historical and sample workouts intact for the global Training History matrix while isolating progression per characterId', () => {
+      // Global Training History matrix still sees all workouts (including deleted/other characters & samples)
+      const fullMatrix = buildTrainingHistoryMatrix(combinedHistory);
+      expect(fullMatrix.columns.length).toBe(combinedHistory.length);
+
+      // Character A only counts its 2 completed workouts
+      expect(filterWorkoutsForCharacter(combinedHistory, 'char_a')).toEqual([
+        charAWorkout1,
+        charAWorkout2,
+      ]);
+      expect(countWorkoutsForCharacter(combinedHistory, 'char_a')).toBe(2);
+
+      // Character B only counts its 1 completed workout
+      expect(filterWorkoutsForCharacter(combinedHistory, 'char_b')).toEqual([
+        charBWorkout1,
+      ]);
+      expect(countWorkoutsForCharacter(combinedHistory, 'char_b')).toBe(1);
+
+      // Newly created Character C starts at 0 workouts despite historical records existing
+      expect(filterWorkoutsForCharacter(combinedHistory, 'char_c_new')).toEqual([]);
+      expect(countWorkoutsForCharacter(combinedHistory, 'char_c_new')).toBe(0);
+
+      // Null or undefined characterId returns 0
+      expect(filterWorkoutsForCharacter(combinedHistory, null)).toEqual([]);
+      expect(countWorkoutsForCharacter(combinedHistory, undefined)).toBe(0);
     });
   });
 });

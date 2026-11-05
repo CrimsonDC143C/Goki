@@ -71,6 +71,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   onBackToLanding,
 }) => {
   const {
+    activeCharacterId,
     exercises,
     offlineDraft,
     updateOfflineDraft,
@@ -678,6 +679,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     const nowMs = Date.now();
     const currentWorkout: CompletedWorkoutRecord = {
       id: `offline_hist_${nowMs}`,
+      characterId: activeCharacterId ?? null,
       source: 'OFFLINE',
       performedAtIso: new Date(nowMs).toISOString(),
       durationSeconds: sessionElapsedSec,

@@ -78,6 +78,10 @@ export interface PersistedCharacterProfile {
   inventory?: any[];
   unlockedTalentRanks?: Record<string, number>;
   equipmentLoadout?: Record<string, any>;
+  workoutsLoggedCount?: number;
+  completedBountySlugs?: string[];
+  consistencyStreak?: number;
+  historicalPRs?: Record<string, any>;
   lastSyncedAtMs?: number;
 }
 

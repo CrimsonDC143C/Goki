@@ -86,6 +86,8 @@ import {
   CompletedExerciseEntry,
   CompletedSetEntry,
   DEFAULT_SAMPLE_WORKOUT_HISTORY,
+  filterWorkoutsForCharacter,
+  countWorkoutsForCharacter,
   BASE_EQUIPPABLE_ITEMS,
   BASE_EQUIPPABLE_ITEM_BY_SLUG,
   ITEM_TIER_CONFIG,
@@ -823,6 +825,60 @@ async function fetchWithTimeout(
   return await apiFetch(url, init, timeoutMs);
 }
 
+const DEFAULT_LOCAL_CHARACTER_ID = 'local_starter_hero';
+
+const DEFAULT_GUILD_BOUNTIES: GuildBountyItem[] = [
+  {
+    slug: 'trial_of_iron',
+    title: 'Rank-Up Trial: Copper -> Iron',
+    description: 'Log 3 workouts & clear a 24h Dungeon Expedition to advance to IRON Rank.',
+    isRankUpTrial: true,
+    requiredRank: 'COPPER',
+    unlocksRank: 'IRON',
+    goldReward: 350,
+    reputationReward: 250,
+    completed: false,
+  },
+  {
+    slug: 'trial_of_bronze',
+    title: 'Rank-Up Trial: Iron -> Bronze',
+    description: 'Achieve IRON Rank and reach Combined Core Stat Level 15.',
+    isRankUpTrial: true,
+    requiredRank: 'IRON',
+    unlocksRank: 'BRONZE',
+    goldReward: 700,
+    reputationReward: 500,
+    completed: false,
+  },
+  {
+    slug: 'weekly_zone2_patrol',
+    title: 'Guild Bounty: Outrider Perimeter Patrol',
+    description: 'Complete an aerobic endurance workout or idle gathering task.',
+    isRankUpTrial: false,
+    requiredRank: 'COPPER',
+    goldReward: 200,
+    reputationReward: 120,
+    completed: false,
+  },
+];
+
+function buildBountiesForCharacter(
+  rank: AdventurerRank,
+  completedSlugs: string[] = []
+): GuildBountyItem[] {
+  const completedSet = new Set(completedSlugs);
+  if (isAdventurerRankSufficient(rank, 'IRON')) {
+    completedSet.add('trial_of_iron');
+  }
+  if (isAdventurerRankSufficient(rank, 'BRONZE')) {
+    completedSet.add('trial_of_bronze');
+  }
+  return DEFAULT_GUILD_BOUNTIES.map((b) => ({
+    ...b,
+    completed: completedSet.has(b.slug),
+  }));
+}
+
 const GameContext = createContext<GameContextValue | null>(null);
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -835,8 +891,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const availableCharactersRef = useRef<PersistedCharacterProfile[]>([]);
   availableCharactersRef.current = availableCharacters;
 
-  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
-  const activeCharacterIdRef = useRef<string | null>(null);
+  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(
+    DEFAULT_LOCAL_CHARACTER_ID
+  );
+  const activeCharacterIdRef = useRef<string | null>(DEFAULT_LOCAL_CHARACTER_ID);
   activeCharacterIdRef.current = activeCharacterId;
 
   const [characterName, setCharacterName] = useState('Aric the Ironbound');
@@ -909,8 +967,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     },
   });
 
-  const [workoutsLoggedCount, setWorkoutsLoggedCount] = useState(2);
-  const [consistencyStreak, setConsistencyStreak] = useState(2);
+  const [remoteCharacterWorkoutsCount, setRemoteCharacterWorkoutsCount] = useState(0);
+  const [consistencyStreak, setConsistencyStreak] = useState(0);
   const [resilienceShields, setResilienceShields] = useState(0);
   const [lastWorkoutResult, setLastWorkoutResult] = useState<WorkoutEvaluationResult | null>(null);
   const [workoutMachine, setWorkoutMachine] = useState<HybridWorkoutMachineState>(() =>
@@ -1100,40 +1158,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ];
   });
 
-  const [bounties, setBounties] = useState<GuildBountyItem[]>([
-    {
-      slug: 'trial_of_iron',
-      title: 'Rank-Up Trial: Copper -> Iron',
-      description: 'Log 3 workouts & clear a 24h Dungeon Expedition to advance to IRON Rank.',
-      isRankUpTrial: true,
-      requiredRank: 'COPPER',
-      unlocksRank: 'IRON',
-      goldReward: 350,
-      reputationReward: 250,
-      completed: false,
-    },
-    {
-      slug: 'trial_of_bronze',
-      title: 'Rank-Up Trial: Iron -> Bronze',
-      description: 'Achieve IRON Rank and reach Combined Core Stat Level 15.',
-      isRankUpTrial: true,
-      requiredRank: 'IRON',
-      unlocksRank: 'BRONZE',
-      goldReward: 700,
-      reputationReward: 500,
-      completed: false,
-    },
-    {
-      slug: 'weekly_zone2_patrol',
-      title: 'Guild Bounty: Outrider Perimeter Patrol',
-      description: 'Complete an aerobic endurance workout or idle gathering task.',
-      isRankUpTrial: false,
-      requiredRank: 'COPPER',
-      goldReward: 200,
-      reputationReward: 120,
-      completed: false,
-    },
-  ]);
+  const [bounties, setBounties] = useState<GuildBountyItem[]>(() =>
+    buildBountiesForCharacter('COPPER', [])
+  );
 
   // ==========================================================================
   // OFFLINE WORKOUT PERSISTENCE, SILENT SYNC & DEFERRED RECEIPTS STATE
@@ -1157,6 +1184,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [workoutHistory, setWorkoutHistory] = useState<CompletedWorkoutRecord[]>(
     DEFAULT_SAMPLE_WORKOUT_HISTORY
   );
+
+  // Only workouts silently tagged with the active character's `characterId` count towards its progression
+  const workoutsLoggedCount = useMemo(() => {
+    if (!activeCharacterId) return 0;
+    const localHistoryCount = countWorkoutsForCharacter(workoutHistory, activeCharacterId);
+    return Math.max(localHistoryCount, remoteCharacterWorkoutsCount);
+  }, [activeCharacterId, workoutHistory, remoteCharacterWorkoutsCount]);
+
   const [landingToastMessage, setLandingToastMessage] = useState<string | null>(null);
   const [offlineHydrated, setOfflineHydrated] = useState(false);
 
@@ -1233,8 +1268,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const recordWorkoutHistory = useCallback((record: CompletedWorkoutRecord) => {
+    const taggedRecord: CompletedWorkoutRecord = {
+      ...record,
+      characterId:
+        record.characterId !== undefined
+          ? record.characterId
+          : (activeCharacterIdRef.current ??
+              remoteCharacterIdRef.current ??
+              currentProfileRef.current?.id ??
+              null),
+    };
     setWorkoutHistory((prev) => {
-      const next = [record, ...prev.filter((r) => r.id !== record.id)];
+      const next = [taggedRecord, ...prev.filter((r) => r.id !== taggedRecord.id)];
       workoutHistoryRef.current = next;
       persistBundleSnapshot({ workoutHistory: next });
       return next;
@@ -1312,6 +1357,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (loaded.activeCharacterId) {
         activeCharacterIdRef.current = loaded.activeCharacterId;
         setActiveCharacterId(loaded.activeCharacterId);
+      } else if (
+        !loaded.characterProfile &&
+        (!loaded.availableCharacters || loaded.availableCharacters.length === 0) &&
+        loaded.deletedCharacters &&
+        loaded.deletedCharacters.length > 0
+      ) {
+        activeCharacterIdRef.current = null;
+        setActiveCharacterId(null);
       }
       if (loaded.workoutHistory && loaded.workoutHistory.length > 0) {
         workoutHistoryRef.current = loaded.workoutHistory;
@@ -1321,12 +1374,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentProfileRef.current = loaded.characterProfile;
         const cp = loaded.characterProfile;
         remoteCharacterIdRef.current = cp.id;
+        activeCharacterIdRef.current = cp.id;
         setActiveCharacterId(cp.id);
         setCharacterName(cp.name);
         setGameMode(cp.gameMode);
         const apper = cp.appearanceId || cp.avatarSpriteId || 'oni_warlord';
         setAppearanceId(apper);
-        if (cp.adventurerRank) setAdventurerRank(cp.adventurerRank as AdventurerRank);
+        const hydratedRank = (cp.adventurerRank || 'COPPER') as AdventurerRank;
+        setAdventurerRank(hydratedRank);
         if (typeof cp.adventurerReputation === 'number') setAdventurerReputation(cp.adventurerReputation);
         if (typeof cp.gold === 'number') setGold(cp.gold);
         if (cp.stats) setStats((prev) => ({ ...prev, ...cp.stats }));
@@ -1334,6 +1389,16 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (cp.unlockedTalentRanks) setUnlockedTalentRanks(cp.unlockedTalentRanks);
         if (cp.equipmentLoadout && typeof cp.equipmentLoadout === 'object') {
           setEquipmentLoadout((prev) => ({ ...prev, ...cp.equipmentLoadout }));
+        }
+        setRemoteCharacterWorkoutsCount(cp.workoutsLoggedCount ?? 0);
+        setBounties(buildBountiesForCharacter(hydratedRank, cp.completedBountySlugs ?? []));
+        if (typeof cp.consistencyStreak === 'number') {
+          consistencyStreakRef.current = cp.consistencyStreak;
+          setConsistencyStreak(cp.consistencyStreak);
+        }
+        if (cp.historicalPRs && typeof cp.historicalPRs === 'object') {
+          historicalPRsRef.current = cp.historicalPRs;
+          setHistoricalPRs(cp.historicalPRs);
         }
       }
       setOfflineHydrated(true);
@@ -1558,19 +1623,34 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const applyCharacterToState = useCallback(
     (char: any, fullSheet?: any) => {
       if (!char) return;
+      const prevActiveId = activeCharacterIdRef.current;
+      const isSwitchingCharacter = Boolean(prevActiveId && prevActiveId !== char.id);
+
       remoteCharacterIdRef.current = char.id;
       activeCharacterIdRef.current = char.id;
       setActiveCharacterId(char.id);
       setCharacterName(char.name || 'Hero');
       const mode = char.gameMode || 'STANDARD';
       setGameMode(mode);
-      if (char.adventurerRank) setAdventurerRank(char.adventurerRank);
-      if (typeof char.adventurerReputation === 'number') {
-        setAdventurerReputation(char.adventurerReputation);
-      }
+
+      const resolvedRank = (char.adventurerRank || 'COPPER') as AdventurerRank;
+      setAdventurerRank(resolvedRank);
+      const resolvedRep =
+        typeof char.adventurerReputation === 'number' ? char.adventurerReputation : 0;
+      setAdventurerReputation(resolvedRep);
+
       if (typeof char.gold === 'number') {
         setGold(char.gold);
         goldRef.current = char.gold;
+      }
+
+      if (isSwitchingCharacter) {
+        setActiveDungeonRun(null);
+        activeDungeonRunRef.current = null;
+        setActiveGathering(null);
+        setLastWorkoutResult(null);
+        setLastHybridConsolidation(null);
+        setResilienceShields(0);
       }
 
       const nextStats = extractNormalizedStats(char, fullSheet);
@@ -1597,6 +1677,57 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const existingLocal =
         availableCharactersRef.current.find((loc) => loc.id === char.id) ||
         (currentProfileRef.current?.id === char.id ? currentProfileRef.current : null);
+
+      // Resolve character-scoped workout count, bounty completions, streak, and PR baselines
+      const serverWorkoutLogsCount =
+        fullSheet?.character?._count?.workoutLogs ?? char._count?.workoutLogs;
+      const persistedWorkoutsCount =
+        typeof serverWorkoutLogsCount === 'number'
+          ? serverWorkoutLogsCount
+          : (char.workoutsLoggedCount ?? existingLocal?.workoutsLoggedCount ?? 0);
+      const localCharHistoryCount = countWorkoutsForCharacter(workoutHistoryRef.current, char.id);
+      const effectiveWorkoutsCount = Math.max(localCharHistoryCount, persistedWorkoutsCount);
+      setRemoteCharacterWorkoutsCount(effectiveWorkoutsCount);
+
+      const serverBountyCompletions =
+        fullSheet?.character?.bountyCompletions ?? char.bountyCompletions;
+      const completedBountySet = new Set<string>([
+        ...(Array.isArray(char.completedBountySlugs) ? char.completedBountySlugs : []),
+        ...(Array.isArray(existingLocal?.completedBountySlugs)
+          ? existingLocal.completedBountySlugs
+          : []),
+      ]);
+      if (Array.isArray(serverBountyCompletions)) {
+        for (const bc of serverBountyCompletions) {
+          const slug = bc?.bounty?.slug ?? bc?.bountySlug ?? bc?.bountyId;
+          if (typeof slug === 'string' && slug) {
+            completedBountySet.add(slug);
+          }
+        }
+      }
+      if (isAdventurerRankSufficient(resolvedRank, 'IRON')) {
+        completedBountySet.add('trial_of_iron');
+      }
+      if (isAdventurerRankSufficient(resolvedRank, 'BRONZE')) {
+        completedBountySet.add('trial_of_bronze');
+      }
+      const resolvedCompletedBounties = Array.from(completedBountySet);
+      setBounties(buildBountiesForCharacter(resolvedRank, resolvedCompletedBounties));
+
+      const resolvedStreak =
+        fullSheet?.character?.fatigueState?.consistencyStreakSessions ??
+        char.consistencyStreak ??
+        existingLocal?.consistencyStreak ??
+        localCharHistoryCount;
+      consistencyStreakRef.current = resolvedStreak;
+      setConsistencyStreak(resolvedStreak);
+
+      const resolvedPRs: Record<string, HistoricalExercisePR> =
+        char.historicalPRs ??
+        existingLocal?.historicalPRs ??
+        (isSwitchingCharacter ? {} : historicalPRsRef.current);
+      historicalPRsRef.current = resolvedPRs;
+      setHistoricalPRs(resolvedPRs);
 
       let resolvedUnlockedTalents: Record<string, number> = {};
       if (Array.isArray(fullSheet?.character?.talentUnlocks)) {
@@ -1704,13 +1835,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         appearanceId: resolvedAppearance,
         avatarSpriteId: resolvedAppearance,
         overallLevel: char.overallLevel ?? 1,
-        adventurerRank: char.adventurerRank || 'COPPER',
-        adventurerReputation: char.adventurerReputation ?? 0,
+        adventurerRank: resolvedRank,
+        adventurerReputation: resolvedRep,
         gold: char.gold ?? 100,
         stats: nextStats,
         inventory: resolvedInventory,
         unlockedTalentRanks: resolvedUnlockedTalents,
         equipmentLoadout: resolvedEquipmentLoadout ?? equipmentLoadoutRef.current,
+        workoutsLoggedCount: effectiveWorkoutsCount,
+        completedBountySlugs: resolvedCompletedBounties,
+        consistencyStreak: resolvedStreak,
+        historicalPRs: resolvedPRs,
         lastSyncedAtMs: Date.now(),
       };
       currentProfileRef.current = charProfile;
@@ -1754,6 +1889,26 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ? localChar.appearanceId
             : c.appearanceId || c.avatarSpriteId || 'oni_warlord';
 
+        const serverWorkoutCount = c._count?.workoutLogs;
+        const localWorkoutCount = countWorkoutsForCharacter(workoutHistoryRef.current, c.id);
+        const resolvedWorkoutCount = Math.max(
+          localWorkoutCount,
+          typeof serverWorkoutCount === 'number'
+            ? serverWorkoutCount
+            : (localChar?.workoutsLoggedCount ?? c.workoutsLoggedCount ?? 0)
+        );
+
+        const completedBountySet = new Set<string>([
+          ...(Array.isArray(localChar?.completedBountySlugs) ? localChar.completedBountySlugs : []),
+          ...(Array.isArray(c.completedBountySlugs) ? c.completedBountySlugs : []),
+        ]);
+        if (Array.isArray(c.bountyCompletions)) {
+          for (const bc of c.bountyCompletions) {
+            const slug = bc?.bounty?.slug ?? bc?.bountySlug ?? bc?.bountyId;
+            if (typeof slug === 'string' && slug) completedBountySet.add(slug);
+          }
+        }
+
         return {
           id: c.id,
           name: c.name,
@@ -1769,8 +1924,19 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           inventory: localChar?.inventory ?? c.inventory,
           unlockedTalentRanks: localChar?.unlockedTalentRanks ?? c.unlockedTalentRanks,
           equipmentLoadout: localChar?.equipmentLoadout ?? c.equipmentLoadout,
+          workoutsLoggedCount: resolvedWorkoutCount,
+          completedBountySlugs: Array.from(completedBountySet),
+          consistencyStreak: localChar?.consistencyStreak ?? c.consistencyStreak ?? resolvedWorkoutCount,
+          historicalPRs: localChar?.historicalPRs ?? c.historicalPRs ?? {},
         };
       });
+
+      const wasInitialUnbootstrappedHero =
+        activeCharacterIdRef.current === DEFAULT_LOCAL_CHARACTER_ID &&
+        availableCharactersRef.current.length === 0 &&
+        deletedCharactersRef.current.length === 0 &&
+        locallyPermanentlyErasedIdsRef.current.size === 0 &&
+        (!Array.isArray(remoteDeleted) || remoteDeleted.length === 0);
 
       setAvailableCharacters(mappedProfiles);
       availableCharactersRef.current = mappedProfiles;
@@ -1801,16 +1967,33 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setDeletedCharacters(nextDeleted);
       deletedCharactersRef.current = nextDeleted;
 
-      persistBundleSnapshot({
-        availableCharacters: mappedProfiles,
-        deletedCharacters: nextDeleted,
-      });
-
       const currentActiveId = activeCharacterIdRef.current;
       const targetChar =
         (currentActiveId && mappedProfiles.find((c) => c.id === currentActiveId)) ||
         (primaryChar && mappedProfiles.find((c) => c.id === primaryChar.id)) ||
         mappedProfiles[0];
+
+      // If workouts were logged during the brief initial boot window before the first character ID resolved,
+      // attach them to that initial character ID.
+      let updatedHistory: CompletedWorkoutRecord[] | undefined = undefined;
+      if (wasInitialUnbootstrappedHero && targetChar && targetChar.id !== DEFAULT_LOCAL_CHARACTER_ID) {
+        const hasDefaultTagged = workoutHistoryRef.current.some(
+          (w) => w.characterId === DEFAULT_LOCAL_CHARACTER_ID
+        );
+        if (hasDefaultTagged) {
+          updatedHistory = workoutHistoryRef.current.map((w) =>
+            w.characterId === DEFAULT_LOCAL_CHARACTER_ID ? { ...w, characterId: targetChar.id } : w
+          );
+          workoutHistoryRef.current = updatedHistory;
+          setWorkoutHistory(updatedHistory);
+        }
+      }
+
+      persistBundleSnapshot({
+        availableCharacters: mappedProfiles,
+        deletedCharacters: nextDeleted,
+        ...(updatedHistory ? { workoutHistory: updatedHistory } : {}),
+      });
 
       if (targetChar) {
         applyCharacterToState(targetChar);
@@ -1876,7 +2059,15 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             avatarSpriteId: chosenAppearance,
           });
           if (res.ok && res.data?.character) {
-            const newChar = res.data.character;
+            const newChar = {
+              ...res.data.character,
+              workoutsLoggedCount: 0,
+              completedBountySlugs: [],
+              consistencyStreak: 0,
+              historicalPRs: {},
+              unlockedTalentRanks: {},
+            };
+            activeCharacterIdRef.current = newChar.id;
             const nextList = [...availableCharactersRef.current, newChar];
             syncRemoteCharacters(newChar, nextList);
             return { ok: true };
@@ -1913,7 +2104,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           WISDOM: { level: 1, xp: 0, pointsAvailable: 0 },
           SPIRIT: { level: 1, xp: 0, pointsAvailable: 0 },
         },
+        unlockedTalentRanks: {},
+        workoutsLoggedCount: 0,
+        completedBountySlugs: [],
+        consistencyStreak: 0,
+        historicalPRs: {},
       };
+      activeCharacterIdRef.current = localChar.id;
       const nextList = [...availableCharactersRef.current, localChar];
       syncRemoteCharacters(localChar, nextList);
       return { ok: true };
@@ -1993,6 +2190,24 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const nextAvailable = availableCharactersRef.current.filter((c) => c.id !== targetCharacterId);
         const nextDeleted = deletedCharactersRef.current.filter((c) => c.id !== targetCharacterId);
 
+        // Preserve all `workoutHistory` records for Training History, but purge unclaimed RPG queues/spoils
+        // belonging to the permanently erased character so they cannot apply to a new character.
+        const filteredQueue = queuedOfflineRef.current.filter(
+          (q) => q.characterId !== targetCharacterId
+        );
+        const filteredUnsynced = unsyncedServerRef.current.filter(
+          (q) => q.characterId !== targetCharacterId
+        );
+        const filteredReceipts = pendingReceiptsRef.current.filter(
+          (r) => r.characterId !== targetCharacterId
+        );
+        queuedOfflineRef.current = filteredQueue;
+        unsyncedServerRef.current = filteredUnsynced;
+        pendingReceiptsRef.current = filteredReceipts;
+        setQueuedOfflineWorkouts(filteredQueue);
+        setUnsyncedServerPayloads(filteredUnsynced);
+        setPendingWorkoutReceipts(filteredReceipts);
+
         setAvailableCharacters(nextAvailable);
         availableCharactersRef.current = nextAvailable;
         setDeletedCharacters(nextDeleted);
@@ -2007,6 +2222,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             activeCharacterIdRef.current = null;
             currentProfileRef.current = null;
             remoteCharacterIdRef.current = null;
+            setRemoteCharacterWorkoutsCount(0);
+            setAdventurerRank('COPPER');
+            setAdventurerReputation(0);
+            setBounties(buildBountiesForCharacter('COPPER', []));
+            consistencyStreakRef.current = 0;
+            setConsistencyStreak(0);
+            historicalPRsRef.current = {};
+            setHistoricalPRs({});
+            setResilienceShields(0);
+            setActiveDungeonRun(null);
+            activeDungeonRunRef.current = null;
+            setActiveGathering(null);
           }
         }
 
@@ -2015,6 +2242,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           deletedCharacters: nextDeleted,
           activeCharacterId: activeCharacterIdRef.current,
           characterProfile: currentProfileRef.current,
+          queuedOfflineWorkouts: filteredQueue,
+          unsyncedServerPayloads: filteredUnsynced,
+          pendingWorkoutReceipts: filteredReceipts,
         });
 
         if (serverOnline && !targetCharacterId.startsWith('local_')) {
@@ -2060,6 +2290,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           activeCharacterIdRef.current = null;
           currentProfileRef.current = null;
           remoteCharacterIdRef.current = null;
+          setRemoteCharacterWorkoutsCount(0);
+          setAdventurerRank('COPPER');
+          setAdventurerReputation(0);
+          setBounties(buildBountiesForCharacter('COPPER', []));
+          consistencyStreakRef.current = 0;
+          setConsistencyStreak(0);
+          historicalPRsRef.current = {};
+          setHistoricalPRs({});
+          setResilienceShields(0);
+          setActiveDungeonRun(null);
+          activeDungeonRunRef.current = null;
+          setActiveGathering(null);
         }
       }
 
@@ -2540,10 +2782,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (charId && unsyncedServerRef.current.length > 0) {
           const remainingUnsynced: QueuedOfflineWorkoutPayload[] = [];
           for (const item of unsyncedServerRef.current) {
+            if (
+              item.characterId &&
+              (locallyPermanentlyErasedIdsRef.current.has(item.characterId) ||
+                deletedCharactersRef.current.some((d) => d.id === item.characterId))
+            ) {
+              continue;
+            }
+            const targetSyncCharId =
+              item.characterId && !item.characterId.startsWith('local_')
+                ? item.characterId
+                : charId;
             try {
               const dominantZone = item.cardioSegments[0]?.averageHrZone;
               const res = await fetchWithTimeout(
-                `${API_BASE_URL}/api/characters/${charId}/workouts`,
+                `${API_BASE_URL}/api/characters/${targetSyncCharId}/workouts`,
                 {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -2637,6 +2890,28 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         let serverReachableNow = Boolean(charId);
 
         for (const queued of orderedQueue) {
+          // Drop queued RPG payloads belonging to deleted characters (the workout log itself is already preserved in workoutHistory)
+          if (
+            queued.characterId &&
+            (locallyPermanentlyErasedIdsRef.current.has(queued.characterId) ||
+              deletedCharactersRef.current.some((d) => d.id === queued.characterId))
+          ) {
+            continue;
+          }
+
+          // If this workout was completed on a different character than the currently active one,
+          // keep it queued for that character rather than applying its RPG progression to the current character
+          const currentActiveId = activeCharacterIdRef.current;
+          if (
+            queued.characterId &&
+            currentActiveId &&
+            queued.characterId !== currentActiveId &&
+            queued.characterId !== DEFAULT_LOCAL_CHARACTER_ID
+          ) {
+            stillQueued.push(queued);
+            continue;
+          }
+
           const performedAt = new Date(queued.performedAtIso);
           const dominantZone = queued.cardioSegments[0]?.averageHrZone;
           let handledByServer = false;
@@ -2814,6 +3089,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 newReceipts.push(
                   buildWorkoutSpoilsReceipt({
                     receiptId: `receipt_${queued.queueId}`,
+                    characterId: queued.characterId ?? activeCharacterIdRef.current ?? charId,
                     performedAtIso: queued.performedAtIso,
                     workoutType: queued.workoutType,
                     rewardPayload: patchedPayload,
@@ -2967,6 +3243,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           newReceipts.push(
             buildWorkoutSpoilsReceipt({
               receiptId: `receipt_${queued.queueId}`,
+              characterId: queued.characterId ?? activeCharacterIdRef.current ?? charId,
               performedAtIso: queued.performedAtIso,
               workoutType: queued.workoutType,
               rewardPayload: rp,
@@ -2995,16 +3272,33 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             goldRef.current += addedGold;
             setGold((g) => g + addedGold);
           }
-          if (addedWorkouts > 0) setWorkoutsLoggedCount((c) => c + addedWorkouts);
+          if (addedWorkouts > 0) {
+            setRemoteCharacterWorkoutsCount((c) =>
+              Math.max(
+                countWorkoutsForCharacter(workoutHistoryRef.current, activeCharacterIdRef.current),
+                c
+              )
+            );
+          }
           if (addedShields > 0) setResilienceShields((s) => s + addedShields);
           if (collectedDrops.length > 0) addDropsToInventory(collectedDrops);
 
           if (currentProfileRef.current) {
+            const charWorkoutCount = countWorkoutsForCharacter(
+              workoutHistoryRef.current,
+              currentProfileRef.current.id
+            );
             const updatedProfile: PersistedCharacterProfile = {
               ...currentProfileRef.current,
               stats: runningStats,
               gold: goldRef.current,
               inventory: rawInventoryRef.current,
+              workoutsLoggedCount: Math.max(
+                charWorkoutCount,
+                currentProfileRef.current.workoutsLoggedCount ?? 0
+              ),
+              consistencyStreak: runningStreak,
+              historicalPRs: runningPRs,
               lastSyncedAtMs: Date.now(),
             };
             currentProfileRef.current = updatedProfile;
@@ -3169,10 +3463,16 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     const defaultRaid = raidsRef.current[0] ?? null;
+    const ownerCharacterId =
+      activeCharacterIdRef.current ??
+      remoteCharacterIdRef.current ??
+      currentProfileRef.current?.id ??
+      DEFAULT_LOCAL_CHARACTER_ID;
 
     const payload: QueuedOfflineWorkoutPayload = {
       queueId: `q_${nowMs}_${Math.random().toString(36).slice(2, 6)}`,
       sessionId: draft.sessionId || `offline_${nowMs}`,
+      characterId: ownerCharacterId,
       performedAtIso: new Date(nowMs).toISOString(),
       durationSeconds: elapsedSec,
       workoutType,
@@ -3218,6 +3518,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const offlineRecord: CompletedWorkoutRecord = {
       id: `offline_hist_${nowMs}`,
+      characterId: ownerCharacterId,
       source: 'OFFLINE',
       performedAtIso: new Date(nowMs).toISOString(),
       durationSeconds: elapsedSec,
@@ -3234,6 +3535,25 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const nextHistory = [offlineRecord, ...workoutHistoryRef.current];
     workoutHistoryRef.current = nextHistory;
     setWorkoutHistory(nextHistory);
+
+    const nextCharWorkoutsCount = countWorkoutsForCharacter(nextHistory, ownerCharacterId);
+    setRemoteCharacterWorkoutsCount((prev) => Math.max(prev, nextCharWorkoutsCount));
+    if (currentProfileRef.current && currentProfileRef.current.id === ownerCharacterId) {
+      const updatedProfile: PersistedCharacterProfile = {
+        ...currentProfileRef.current,
+        workoutsLoggedCount: Math.max(
+          nextCharWorkoutsCount,
+          currentProfileRef.current.workoutsLoggedCount ?? 0
+        ),
+        lastSyncedAtMs: Date.now(),
+      };
+      currentProfileRef.current = updatedProfile;
+      const nextAvail = availableCharactersRef.current.map((c) =>
+        c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+      );
+      availableCharactersRef.current = nextAvail;
+      setAvailableCharacters(nextAvail);
+    }
 
     queuedOfflineRef.current = nextQueue;
     offlineDraftRef.current = freshDraft;
@@ -3268,6 +3588,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       queuedOfflineWorkouts: nextQueue,
       workoutHistory: nextHistory,
       recentActivityIds: nextRecentIds,
+      characterProfile: currentProfileRef.current,
+      availableCharacters: availableCharactersRef.current,
     });
 
     // Silently attempt server sync in the background (with zero RPG popups)
@@ -3276,19 +3598,40 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { ok: true };
   }, [persistBundleSnapshot, syncOfflineWorkouts]);
 
+  const activeCharacterPendingReceipts = useMemo(
+    () =>
+      pendingWorkoutReceipts.filter(
+        (r) => !r.characterId || r.characterId === activeCharacterId
+      ),
+    [pendingWorkoutReceipts, activeCharacterId]
+  );
+
+  const activeCharacterQueuedWorkouts = useMemo(
+    () =>
+      queuedOfflineWorkouts.filter(
+        (q) => !q.characterId || q.characterId === activeCharacterId
+      ),
+    [queuedOfflineWorkouts, activeCharacterId]
+  );
+
   const claimPendingSpoils = useCallback(() => {
-    pendingReceiptsRef.current = [];
-    setPendingWorkoutReceipts([]);
-    persistBundleSnapshot({ pendingWorkoutReceipts: [] });
+    const currentId = activeCharacterIdRef.current;
+    const remaining = pendingReceiptsRef.current.filter(
+      (r) => Boolean(r.characterId && currentId && r.characterId !== currentId)
+    );
+    pendingReceiptsRef.current = remaining;
+    setPendingWorkoutReceipts(remaining);
+    persistBundleSnapshot({ pendingWorkoutReceipts: remaining });
     triggerSensoryCue('CHEST_OPEN_REVEAL');
   }, [persistBundleSnapshot]);
 
   const consolidatedSpoils = useMemo(
-    () => consolidateSpoilsReceipts(pendingWorkoutReceipts),
-    [pendingWorkoutReceipts]
+    () => consolidateSpoilsReceipts(activeCharacterPendingReceipts),
+    [activeCharacterPendingReceipts]
   );
 
-  const unclaimedSpoilsCount = pendingWorkoutReceipts.length + queuedOfflineWorkouts.length;
+  const unclaimedSpoilsCount =
+    activeCharacterPendingReceipts.length + activeCharacterQueuedWorkouts.length;
 
   const projectedFatigue = useMemo(
     () => evaluateFatigueStateAtTime(fatigueState, new Date()),
@@ -3537,9 +3880,61 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       setFatigueState(fatigueTransition.nextState);
+      historicalPRsRef.current = evaluation.updatedPRs;
       setHistoricalPRs(evaluation.updatedPRs);
       setLastWorkoutResult(evaluation);
-      setWorkoutsLoggedCount((c) => c + 1);
+
+      const ownerCharacterId =
+        activeCharacterIdRef.current ??
+        remoteCharacterIdRef.current ??
+        currentProfileRef.current?.id ??
+        DEFAULT_LOCAL_CHARACTER_ID;
+
+      const manualExercisesMap = new Map<
+        string,
+        { exerciseId: string; exerciseName: string; sets: CompletedSetEntry[] }
+      >();
+      params.sets.forEach((s, idx) => {
+        const exMeta = STARTER_EXERCISES.find((e) => e.id === s.exerciseId);
+        let group = manualExercisesMap.get(s.exerciseId);
+        if (!group) {
+          group = {
+            exerciseId: s.exerciseId,
+            exerciseName: exMeta?.name ?? s.exerciseId,
+            sets: [],
+          };
+          manualExercisesMap.set(s.exerciseId, group);
+        }
+        group.sets.push({
+          setNumber: idx + 1,
+          weightKg: s.weightKg,
+          reps: s.reps,
+          isWarmup: s.isWarmup ?? false,
+        });
+      });
+
+      const manualDurationSec = params.cardioSegments.reduce(
+        (acc, c) => acc + c.durationSeconds,
+        0
+      );
+      const manualRecord: CompletedWorkoutRecord = {
+        id: `manual_hist_${now.getTime()}_${Math.random().toString(36).slice(2, 6)}`,
+        characterId: ownerCharacterId,
+        source: 'ONLINE',
+        performedAtIso: now.toISOString(),
+        durationSeconds: Math.max(60, manualDurationSec),
+        workoutCategory: params.workoutType === 'RESISTANCE' ? 'GYM' : 'CARDIO',
+        workoutType: params.workoutType,
+        presetName: 'Manual Workout Log',
+        exercises: Array.from(manualExercisesMap.values()),
+      };
+      const nextHistory = [manualRecord, ...workoutHistoryRef.current];
+      workoutHistoryRef.current = nextHistory;
+      setWorkoutHistory(nextHistory);
+
+      const nextCharWorkoutsCount = countWorkoutsForCharacter(nextHistory, ownerCharacterId);
+      setRemoteCharacterWorkoutsCount((prev) => Math.max(prev, nextCharWorkoutsCount));
+      persistBundleSnapshot({ workoutHistory: nextHistory });
 
       setStats((prev) => {
         const strP = applyStatXpProgression(
@@ -3649,7 +4044,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return { evaluation, injectedBuffs, raidEnergy };
     },
-    [fatigueState, historicalPRs, addDropsToInventory]
+    [fatigueState, historicalPRs, addDropsToInventory, persistBundleSnapshot]
   );
 
   const unlockTalentNode = useCallback(
@@ -4197,17 +4592,56 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      setBounties((prev) =>
-        prev.map((b) => (b.slug === bountySlug ? { ...b, completed: true } : b))
+      const nextBounties = bounties.map((b) =>
+        b.slug === bountySlug ? { ...b, completed: true } : b
       );
-      setGold((g) => g + bounty.goldReward);
-      setAdventurerReputation((r) => r + bounty.reputationReward);
+      setBounties(nextBounties);
+
+      const nextGold = goldRef.current + bounty.goldReward;
+      goldRef.current = nextGold;
+      setGold(nextGold);
+
+      const nextRep = adventurerReputation + bounty.reputationReward;
+      setAdventurerReputation(nextRep);
+
+      const nextRank =
+        bounty.isRankUpTrial && bounty.unlocksRank ? bounty.unlocksRank : adventurerRank;
       if (bounty.isRankUpTrial && bounty.unlocksRank) {
         setAdventurerRank(bounty.unlocksRank);
       }
+
+      const completedSlugs = nextBounties.filter((b) => b.completed).map((b) => b.slug);
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          gold: nextGold,
+          adventurerReputation: nextRep,
+          adventurerRank: nextRank,
+          completedBountySlugs: completedSlugs,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+        persistBundleSnapshot({
+          characterProfile: updatedProfile,
+          availableCharacters: nextAvail,
+        });
+      }
+
+      const charId = remoteCharacterIdRef.current;
+      if (serverOnline && charId && !charId.startsWith('local_')) {
+        apiFetch(`/api/characters/${charId}/bounties/${bountySlug}/complete`, {
+          method: 'POST',
+        }).catch(() => {});
+      }
+
       return { ok: true };
     },
-    [adventurerRank, bounties, stats, workoutsLoggedCount]
+    [adventurerRank, adventurerReputation, bounties, persistBundleSnapshot, serverOnline, stats, workoutsLoggedCount]
   );
 
   // Auto-dismiss Phase 1 Arrival Boon banner in < 2 seconds (1,600ms)
@@ -4512,11 +4946,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const payload = nextMachine.activeSession.rewardPayload;
       const evalResult = payload.workoutEvaluation;
 
+      const ownerCharacterId =
+        activeCharacterIdRef.current ??
+        remoteCharacterIdRef.current ??
+        currentProfileRef.current?.id ??
+        DEFAULT_LOCAL_CHARACTER_ID;
+
       setWorkoutMachine(nextMachine);
       setFatigueState(fatigueTransition.nextState);
+      historicalPRsRef.current = evalResult.updatedPRs;
       setHistoricalPRs(evalResult.updatedPRs);
       setLastWorkoutResult(evalResult);
-      setWorkoutsLoggedCount((c) => c + 1);
+      consistencyStreakRef.current = nextStreak;
       setConsistencyStreak(nextStreak);
       if (payload.resilienceBonus.triggered) {
         setResilienceShields((s) => s + 1);
@@ -4675,6 +5116,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const onlineRecord: CompletedWorkoutRecord = {
         id: `online_hist_${now.getTime()}`,
+        characterId: ownerCharacterId,
         source: 'ONLINE',
         performedAtIso: now.toISOString(),
         durationSeconds: payload.durationSeconds,
@@ -4687,8 +5129,33 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const nextHistory = [onlineRecord, ...workoutHistoryRef.current];
       workoutHistoryRef.current = nextHistory;
       setWorkoutHistory(nextHistory);
+
+      const nextCharWorkoutsCount = countWorkoutsForCharacter(nextHistory, ownerCharacterId);
+      setRemoteCharacterWorkoutsCount((prev) => Math.max(prev, nextCharWorkoutsCount));
+
+      if (currentProfileRef.current && currentProfileRef.current.id === ownerCharacterId) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          workoutsLoggedCount: Math.max(
+            nextCharWorkoutsCount,
+            currentProfileRef.current.workoutsLoggedCount ?? 0
+          ),
+          consistencyStreak: nextStreak,
+          historicalPRs: evalResult.updatedPRs,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+      }
+
       persistBundleSnapshot({
         workoutHistory: nextHistory,
+        characterProfile: currentProfileRef.current,
+        availableCharacters: availableCharactersRef.current,
       });
 
       return { ok: true };

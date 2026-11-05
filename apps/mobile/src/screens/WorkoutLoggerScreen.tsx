@@ -210,6 +210,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   onFinishAndReturn,
 }) => {
   const {
+    activeCharacterId,
     exercises,
     historicalPRs,
     workoutMachine,
@@ -1061,6 +1062,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     const nowMs = Date.now();
     const currentWorkout: CompletedWorkoutRecord = {
       id: `online_hist_${nowMs}`,
+      characterId: activeCharacterId ?? null,
       source: 'ONLINE',
       performedAtIso: new Date(nowMs).toISOString(),
       durationSeconds: sessionElapsedSec,

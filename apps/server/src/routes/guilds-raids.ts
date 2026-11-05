@@ -112,6 +112,19 @@ export function registerGuildAndRaidRoutes(
       return reply.status(400).send({ error: 'Bounty already completed by this character.' });
     }
 
+    const reqs = (bounty.requirements ?? {}) as { workoutsLogged?: number };
+    const minWorkouts = reqs.workoutsLogged ?? (bounty.slug === 'trial_of_iron' ? 3 : 0);
+    if (minWorkouts > 0 && typeof (db as any).workoutLog?.count === 'function') {
+      const charWorkoutCount = await db.workoutLog.count({
+        where: { characterId },
+      });
+      if (charWorkoutCount < minWorkouts) {
+        return reply.status(400).send({
+          error: `Log at least ${minWorkouts} total workouts first (currently ${charWorkoutCount}/${minWorkouts}).`,
+        });
+      }
+    }
+
     await db.characterBountyCompletion.create({
       data: { characterId, bountyId: bounty.id },
     });
