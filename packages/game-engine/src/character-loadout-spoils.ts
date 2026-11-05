@@ -2,7 +2,8 @@ import { DungeonWorkoutBuff } from './auto-battler-sim';
 import { getSystemicFatigueCombatPenalties } from './fatigue-manager';
 import { LootChestTier, RewardPayload } from './hybrid-reward-protocol';
 import { HeartRateSample, SleepStageSample } from './ironman-verifier';
-import { DEFAULT_TALENT_TREES, TalentTreeDefinition, aggregateTalentModifiers } from './talent-engine';
+import { DEFAULT_TALENT_TREES, TalentTreeDefinition, aggregateTalentModifiers, CombatModifiers } from './talent-engine';
+import { PrimaryStatBonuses } from './item-affix-engine';
 import {
   CoreStatBlock,
   EquipmentStatBonuses,
@@ -217,6 +218,8 @@ export interface DerivedCombatAttributes {
 export function calculateDerivedCombatStats(params: {
   coreStats: CoreStatBlock;
   equipmentBonuses?: EquipmentStatBonuses;
+  equipmentPrimaryStats?: PrimaryStatBonuses;
+  uniqueItemModifiers?: Partial<CombatModifiers>;
   unlockedTalentRanks?: Record<string, number>;
   systemicFatigueStacks?: number;
   talentTrees?: readonly TalentTreeDefinition[];
@@ -224,45 +227,93 @@ export function calculateDerivedCombatStats(params: {
   const trees = params.talentTrees ?? DEFAULT_TALENT_TREES;
   const talents = aggregateTalentModifiers(params.unlockedTalentRanks ?? {}, trees);
   const gear = params.equipmentBonuses ?? {};
+  const gearPrim = params.equipmentPrimaryStats ?? {};
+  const uniqueMods = params.uniqueItemModifiers ?? {};
   const fatigue = getSystemicFatigueCombatPenalties(params.systemicFatigueStacks ?? 0);
 
-  const effStr = params.coreStats.strengthLevel * fatigue.statEffectivenessMultiplier;
-  const effEnd = params.coreStats.enduranceLevel * fatigue.statEffectivenessMultiplier;
-  const effAgi = params.coreStats.agilityLevel * fatigue.statEffectivenessMultiplier;
+  // Merge unique passive modifiers into talents
+  const mergedTalents = {
+    ...talents,
+    meleePowerPct: (talents.meleePowerPct ?? 0) + (uniqueMods.meleePowerPct ?? 0),
+    armorPct: (talents.armorPct ?? 0) + (uniqueMods.armorPct ?? 0),
+    maxHpPct: (talents.maxHpPct ?? 0) + (uniqueMods.maxHpPct ?? 0),
+    maxStaminaPct: (talents.maxStaminaPct ?? 0) + (uniqueMods.maxStaminaPct ?? 0),
+    damageMitigationPct: (talents.damageMitigationPct ?? 0) + (uniqueMods.damageMitigationPct ?? 0),
+    attackSpeedPct: (talents.attackSpeedPct ?? 0) + (uniqueMods.attackSpeedPct ?? 0),
+    critChanceBonus: (talents.critChanceBonus ?? 0) + (uniqueMods.critChanceBonus ?? 0),
+    critDamageBonus: (talents.critDamageBonus ?? 0) + (uniqueMods.critDamageBonus ?? 0),
+    dodgeRatingBonus: (talents.dodgeRatingBonus ?? 0) + (uniqueMods.dodgeRatingBonus ?? 0),
+    hazardResistancePct: (talents.hazardResistancePct ?? 0) + (uniqueMods.hazardResistancePct ?? 0),
+  };
 
-  const rawMaxHp = 220 + effEnd * 28 + effStr * 10 + (gear.maxHp ?? 0);
-  const maxHp = Math.max(100, Math.round(rawMaxHp * (1 + talents.maxHpPct)));
+  const strBonus = gearPrim.STR ?? 0;
+  const endBonus = gearPrim.END ?? 0;
+  const agiBonus = gearPrim.AGI ?? 0;
+  const dexBonus = gearPrim.DEX ?? 0;
+  const conBonus = gearPrim.CON ?? 0;
+  const wisBonus = gearPrim.WIS ?? 0;
+  const sprBonus = gearPrim.SPR ?? 0;
 
-  const rawMaxStamina = 90 + effEnd * 12 + effAgi * 5 + (gear.maxStamina ?? 0);
-  const maxStamina = Math.max(40, Math.round(rawMaxStamina * (1 + talents.maxStaminaPct)));
+  const effStr = (params.coreStats.strengthLevel + strBonus) * fatigue.statEffectivenessMultiplier;
+  const effEnd = (params.coreStats.enduranceLevel + endBonus) * fatigue.statEffectivenessMultiplier;
+  const effAgi = (params.coreStats.agilityLevel + agiBonus) * fatigue.statEffectivenessMultiplier;
+  const effCon = conBonus * fatigue.statEffectivenessMultiplier;
+  const effDex = dexBonus * fatigue.statEffectivenessMultiplier;
+  const effWis = wisBonus * fatigue.statEffectivenessMultiplier;
+  const effSpr = sprBonus * fatigue.statEffectivenessMultiplier;
+
+  const rawMaxHp = 220 + effEnd * 28 + effStr * 10 + effCon * 15 + (gear.maxHp ?? 0);
+  const maxHp = Math.max(100, Math.round(rawMaxHp * (1 + mergedTalents.maxHpPct)));
+
+  const rawMaxStamina = 90 + effEnd * 12 + effAgi * 5 + effWis * 6 + (gear.maxStamina ?? 0);
+  const maxStamina = Math.max(40, Math.round(rawMaxStamina * (1 + mergedTalents.maxStaminaPct)));
 
   const rawMeleePower = 18 + effStr * 4.5 + effAgi * 1.2 + (gear.meleePower ?? 0);
-  const meleePower = Math.max(5, Math.round(rawMeleePower * (1 + talents.meleePowerPct)));
+  const meleePower = Math.max(5, Math.round(rawMeleePower * (1 + mergedTalents.meleePowerPct)));
 
-  const rawArmor = 8 + effStr * 2.2 + effEnd * 1.5 + (gear.armorRating ?? 0);
-  const armor = Math.max(0, Math.round(rawArmor * (1 + talents.armorPct)));
+  const rawArmor = 8 + effStr * 2.2 + effEnd * 1.5 + effCon * 2.0 + (gear.armorRating ?? 0);
+  const armor = Math.max(0, Math.round(rawArmor * (1 + mergedTalents.armorPct)));
 
   const damageMitigationPct = roundTo2(
-    clamp(talents.damageMitigationPct + talents.partyDamageMitigationPct, 0, 0.65)
+    clamp(
+      mergedTalents.damageMitigationPct +
+        mergedTalents.partyDamageMitigationPct +
+        (gear.damageMitigationPct ?? 0) +
+        effSpr * 0.005,
+      0,
+      0.75
+    )
   );
 
   const attackSpeedMultiplier = roundTo2(
-    (1 + effAgi * 0.02 + (gear.attackSpeedPct ?? 0) + talents.attackSpeedPct) *
+    (1 + effAgi * 0.02 + (gear.attackSpeedPct ?? 0) + mergedTalents.attackSpeedPct) *
       fatigue.statEffectivenessMultiplier
   );
   const attacksPerSecond = roundTo2(clamp(0.75 * attackSpeedMultiplier, 0.35, 3.5));
 
-  const rawDodge = 0.04 + effAgi * 0.006 + (gear.dodgeRating ?? 0) + talents.dodgeRatingBonus;
+  const rawDodge = 0.04 + effAgi * 0.006 + (gear.dodgeRating ?? 0) + mergedTalents.dodgeRatingBonus;
   const dodgeChance = roundTo2(clamp(rawDodge * fatigue.dodgeMultiplier, 0, 0.60));
 
   const critChance = roundTo2(
-    clamp(0.05 + effAgi * 0.007 + (gear.critChance ?? 0) + talents.critChanceBonus, 0, 0.75)
+    clamp(
+      0.05 +
+        effAgi * 0.007 +
+        effDex * 0.006 +
+        (gear.critChance ?? 0) +
+        mergedTalents.critChanceBonus,
+      0,
+      0.80
+    )
   );
 
-  const critMultiplier = roundTo2(1.65 + (gear.critMultiplier ?? 0) + talents.critDamageBonus);
-  const accuracy = roundTo2(clamp(0.96 * fatigue.accuracyMultiplier, 0.65, 1.0));
+  const critMultiplier = roundTo2(1.65 + (gear.critMultiplier ?? 0) + mergedTalents.critDamageBonus);
+  const accuracy = roundTo2(clamp((0.96 + effDex * 0.004) * fatigue.accuracyMultiplier, 0.65, 1.0));
   const hazardResistancePct = roundTo2(
-    clamp(effEnd * 0.015 + talents.hazardResistancePct, 0, 0.85)
+    clamp(
+      effEnd * 0.015 + (gear.hazardResistancePct ?? 0) + mergedTalents.hazardResistancePct,
+      0,
+      0.85
+    )
   );
 
   return {

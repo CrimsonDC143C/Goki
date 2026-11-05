@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, AppState } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, AppState } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import { DynamicRestMode } from '@gymify/game-engine';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { scheduleRestTimerNotification, cancelRestTimerNotification } from '../utils/restNotifications';
@@ -16,7 +17,18 @@ export interface DynamicRestTimerProps {
   variant?: 'banner' | 'hero';
   onMinimize?: () => void;
   onTapToFocus?: () => void;
+  onSelectPreset?: (seconds: number) => void;
+  recommendedSeconds?: number;
+  scrollOffsetY?: number;
 }
+
+export const REST_PRESETS = [60, 90, 120, 180, 240] as const;
+
+export const formatPresetLabel = (sec: number, recSec?: number): string => {
+  const m = sec / 60;
+  const label = m === Math.floor(m) ? `${m}m` : `${m.toFixed(1)}m`;
+  return recSec === sec ? `${label} ★` : label;
+};
 
 export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
   targetEndTimeMs,
@@ -30,16 +42,18 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
   variant = 'banner',
   onMinimize,
   onTapToFocus,
+  onSelectPreset,
+  recommendedSeconds,
+  scrollOffsetY,
 }) => {
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(0);
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(() =>
+    targetEndTimeMs ? Math.max(0, Math.ceil((targetEndTimeMs - Date.now()) / 1000)) : 0
+  );
+  const [showRationale, setShowRationale] = useState<boolean>(false);
   const completedRef = useRef<boolean>(false);
 
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-  const onSkipRef = useRef(onSkip);
-  onSkipRef.current = onSkip;
-  const onAdjustDeltaRef = useRef(onAdjustDelta);
-  onAdjustDeltaRef.current = onAdjustDelta;
   const headlineRef = useRef(headline);
   headlineRef.current = headline;
 
@@ -63,15 +77,27 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
   }, [targetEndTimeMs]);
 
   useEffect(() => {
-    if (!targetEndTimeMs || targetEndTimeMs <= Date.now()) {
+    if (!targetEndTimeMs) {
       setSecondsRemaining(0);
+      completedRef.current = false;
       cancelRestTimerNotification().catch(() => {});
       return;
     }
 
+    const initialDiff = Math.ceil((targetEndTimeMs - Date.now()) / 1000);
+    if (initialDiff <= 0) {
+      setSecondsRemaining(0);
+      cancelRestTimerNotification().catch(() => {});
+      if (!completedRef.current) {
+        completedRef.current = true;
+        triggerSensoryCue('REST_TIMER_EXPIRED');
+        onCompleteRef.current?.();
+      }
+      return;
+    }
+
     completedRef.current = false;
-    const initialSeconds = Math.max(0, Math.ceil((targetEndTimeMs - Date.now()) / 1000));
-    setSecondsRemaining(initialSeconds);
+    setSecondsRemaining(initialDiff);
 
     // Schedule local push notification for background wakeups with high-importance channel
     const notifTitle =
@@ -83,7 +109,7 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
     const notifBody = headlineRef.current
       ? `${headlineRef.current} • Let's crush this set.`
       : 'Step up and begin your next set.';
-    scheduleRestTimerNotification(initialSeconds, notifTitle, notifBody).catch(() => {});
+    scheduleRestTimerNotification(initialDiff, notifTitle, notifBody).catch(() => {});
 
     const interval = setInterval(() => {
       const now = Date.now();
@@ -120,10 +146,11 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
     }
   }, [mode]);
 
-  if (!targetEndTimeMs || secondsRemaining <= 0) {
+  if (!targetEndTimeMs) {
     return null;
   }
 
+  const isComplete = secondsRemaining <= 0;
   const mm = Math.floor(secondsRemaining / 60);
   const ss = secondsRemaining % 60;
   const timeFormatted = `${mm}:${ss < 10 ? '0' : ''}${ss}`;
@@ -144,188 +171,490 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
     onSkip();
   };
 
-  if (variant === 'hero') {
-    return (
-      <View style={styles.heroContainer}>
-        {/* Top bar in modal: Mode Badge + Top Right Close / Minimize */}
-        <View style={styles.heroHeaderRow}>
-          <View style={[styles.badge, { borderColor: modeBadge.border }]}>
-            <Text style={[styles.badgeText, { color: modeBadge.color }]}>{modeBadge.label}</Text>
+  // Parallax floating offset calculation
+  const parallaxTranslateY = Math.min(8, Math.max(-4, (scrollOffsetY ?? 0) * 0.04));
+
+  // =========================================================================
+  // STAGE 2: PINNED PARALLAX FLOATING HUD PILL / RING (Minimised / Banner)
+  // =========================================================================
+  if (variant === 'banner') {
+    if (isComplete) {
+      return (
+        <TouchableOpacity
+          style={[
+            styles.floatingHudPillComplete,
+            { transform: [{ translateY: parallaxTranslateY }] },
+          ]}
+          onPress={handleSkip}
+          activeOpacity={0.85}
+          testID="rest-timer-banner-complete"
+          accessibilityRole="button"
+          accessibilityLabel="Stamina full, tap to begin next set"
+        >
+          <View style={styles.hudCompleteContent}>
+            <Text style={styles.hudCompleteText}>⚡ STAMINA FULL — TAP TO BEGIN NEXT SET</Text>
           </View>
-          {onMinimize ? (
+        </TouchableOpacity>
+      );
+    }
+
+    const miniSize = 34;
+    const miniStroke = 3.5;
+    const miniRadius = (miniSize - miniStroke) / 2;
+    const miniCircumference = 2 * Math.PI * miniRadius;
+    const miniOffset = miniCircumference * (1 - progressFraction);
+
+    return (
+      <View
+        style={[
+          styles.floatingHudPill,
+          { transform: [{ translateY: parallaxTranslateY }] },
+        ]}
+      >
+        {/* Left: Mini Stamina Progress Ring */}
+        <TouchableOpacity
+          style={styles.miniRingWrapper}
+          onPress={onTapToFocus}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Open rest timer focus view"
+        >
+          <Svg width={miniSize} height={miniSize}>
+            <Circle
+              cx={miniSize / 2}
+              cy={miniSize / 2}
+              r={miniRadius}
+              stroke="#2B2833"
+              strokeWidth={miniStroke}
+              fill="none"
+            />
+            <Circle
+              cx={miniSize / 2}
+              cy={miniSize / 2}
+              r={miniRadius}
+              stroke={modeBadge.color}
+              strokeWidth={miniStroke}
+              strokeDasharray={`${miniCircumference} ${miniCircumference}`}
+              strokeDashoffset={miniOffset}
+              strokeLinecap="round"
+              rotation="-90"
+              origin={`${miniSize / 2}, ${miniSize / 2}`}
+              fill="none"
+            />
+          </Svg>
+          <View style={styles.miniRingCenter}>
+            <Text style={styles.miniRingIcon}>⚡</Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Center: Countdown Timer + Headline */}
+        <TouchableOpacity
+          style={styles.hudCenterInfo}
+          onPress={onTapToFocus}
+          activeOpacity={0.7}
+        >
+          <View style={styles.hudTimeRow}>
+            <Text style={styles.hudTimerDisplay}>{timeFormatted}</Text>
+            <View style={[styles.badge, { borderColor: modeBadge.border, paddingVertical: 1, paddingHorizontal: 6 }]}>
+              <Text style={[styles.badgeText, { color: modeBadge.color, fontSize: 9 }]}>
+                {modeBadge.label}
+              </Text>
+            </View>
+          </View>
+          {headline ? (
+            <Text style={styles.hudHeadlineText} numberOfLines={1}>
+              {headline}
+            </Text>
+          ) : null}
+        </TouchableOpacity>
+
+        {/* Right: Quick Controls & Focus action */}
+        <View style={styles.hudControlsRow}>
+          <TouchableOpacity
+            style={styles.hudAdjustBtn}
+            onPress={() => handleAdjust(-15)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Subtract 15 seconds"
+          >
+            <Text style={styles.hudAdjustBtnText}>-15s</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.hudAdjustBtn}
+            onPress={() => handleAdjust(15)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Add 15 seconds"
+          >
+            <Text style={styles.hudAdjustBtnText}>+15s</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.hudSkipBtn}
+            onPress={handleSkip}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Skip rest"
+          >
+            <Text style={styles.hudSkipBtnText}>Skip</Text>
+          </TouchableOpacity>
+          {onTapToFocus ? (
             <TouchableOpacity
-              style={styles.heroClosePill}
-              onPress={onMinimize}
+              style={styles.hudFocusBtn}
+              onPress={onTapToFocus}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Maximize rest timer"
             >
-              <Text style={styles.heroClosePillText}>✕ Close</Text>
+              <Text style={styles.hudFocusBtnText}>⤢</Text>
             </TouchableOpacity>
           ) : null}
         </View>
-
-        {/* Big Digital Clock Display */}
-        <View style={styles.heroClockBox}>
-          <Text style={styles.heroTimerDisplay}>{timeFormatted}</Text>
-          <Text style={styles.heroRemainingLabel}>REMAINING REST</Text>
-        </View>
-
-        {/* Hero Progress Bar */}
-        <View style={styles.heroProgressBarTrack}>
-          <View
-            style={[
-              styles.heroProgressBarFill,
-              {
-                width: `${Math.round(progressFraction * 100)}%`,
-                backgroundColor: modeBadge.color,
-              },
-            ]}
-          />
-        </View>
-
-        {/* Guidance Headline & Subtext */}
-        {headline ? <Text style={styles.heroHeadlineText}>{headline}</Text> : null}
-        {subtext ? <Text style={styles.heroSubtextText}>{subtext}</Text> : null}
-
-        {/* Hero Controls Row */}
-        <View style={styles.heroControlsRow}>
-          <TouchableOpacity
-            style={styles.heroAdjustBtn}
-            onPress={() => handleAdjust(-15)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.heroAdjustBtnText}>-15s</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.heroAdjustBtn}
-            onPress={() => handleAdjust(15)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.heroAdjustBtnText}>+15s</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.heroAdjustBtn}
-            onPress={() => handleAdjust(30)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.heroAdjustBtnText}>+30s</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.heroSkipBtn}
-            onPress={handleSkip}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.heroSkipBtnText}>Skip Rest</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Minimize Action Button */}
-        {onMinimize ? (
-          <TouchableOpacity
-            style={styles.heroViewWorkoutBtn}
-            onPress={onMinimize}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.heroViewWorkoutBtnText}>👀 View Workout (Pin Timer to Top)</Text>
-          </TouchableOpacity>
-        ) : null}
       </View>
     );
   }
 
+  // =========================================================================
+  // STAGE 1: HERO CENTER-SCREEN FOCUS OVERLAY
+  // =========================================================================
+  const heroSize = 168;
+  const heroStrokeWidth = 11;
+  const heroRadius = (heroSize - heroStrokeWidth) / 2;
+  const heroCircumference = 2 * Math.PI * heroRadius;
+  const heroOffset = heroCircumference * (1 - progressFraction);
+
   return (
-    <View style={styles.container}>
-      {/* Mode Tag & Status Banner */}
-      <View style={styles.headerRow}>
+    <View style={styles.heroContainer}>
+      {/* Top bar in modal: Mode Badge + Top Right Close / Minimize */}
+      <View style={styles.heroHeaderRow}>
         <View style={[styles.badge, { borderColor: modeBadge.border }]}>
           <Text style={[styles.badgeText, { color: modeBadge.color }]}>{modeBadge.label}</Text>
         </View>
-        <View style={styles.bannerClockGroup}>
-          <Text style={styles.timerDisplay}>{timeFormatted}</Text>
-          {onTapToFocus ? (
-            <TouchableOpacity
-              style={styles.focusPillBtn}
-              onPress={onTapToFocus}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.focusPillText}>⛶ Center</Text>
-            </TouchableOpacity>
-          ) : null}
+        {onMinimize ? (
+          <TouchableOpacity
+            style={styles.heroClosePill}
+            onPress={onMinimize}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Minimize rest timer"
+          >
+            <Text style={styles.heroClosePillText}>✕ Close</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {/* Circular SVG Stamina Ring with Center Countdown Overlay */}
+      <View style={styles.heroRingCenterBox}>
+        <Svg width={heroSize} height={heroSize}>
+          <Circle
+            cx={heroSize / 2}
+            cy={heroSize / 2}
+            r={heroRadius}
+            stroke="#1C1A22"
+            strokeWidth={heroStrokeWidth}
+            fill="none"
+          />
+          <Circle
+            cx={heroSize / 2}
+            cy={heroSize / 2}
+            r={heroRadius}
+            stroke={isComplete ? '#10B981' : modeBadge.color}
+            strokeWidth={heroStrokeWidth}
+            strokeDasharray={`${heroCircumference} ${heroCircumference}`}
+            strokeDashoffset={heroOffset}
+            strokeLinecap="round"
+            rotation="-90"
+            origin={`${heroSize / 2}, ${heroSize / 2}`}
+            fill="none"
+          />
+        </Svg>
+        <View style={styles.heroRingInnerOverlay}>
+          <Text style={[styles.heroTimerDisplay, isComplete && styles.heroTimerDisplayComplete]}>
+            {isComplete ? '⚡ READY' : timeFormatted}
+          </Text>
+          <Text style={[styles.heroRemainingLabel, isComplete && styles.heroRemainingLabelComplete]}>
+            {isComplete ? 'STAMINA FULL' : 'REMAINING REST'}
+          </Text>
         </View>
       </View>
 
-      {/* Progress Bar */}
-      <View style={styles.progressBarTrack}>
-        <View
-          style={[
-            styles.progressBarFill,
-            {
-              width: `${Math.round(progressFraction * 100)}%`,
-              backgroundColor: modeBadge.color,
-            },
-          ]}
-        />
+      {/* Guidance Headline with Compact (i) Rationale Tooltip Toggle */}
+      <View style={styles.heroHeadlineWrapper}>
+        <View style={styles.heroHeadlineRow}>
+          <Text style={styles.heroHeadlineText}>
+            {headline || (isComplete ? 'Ready For Next Set!' : 'Intra-Set Recovery')}
+          </Text>
+          {subtext ? (
+            <TouchableOpacity
+              style={[styles.rationaleToggleBtn, showRationale && styles.rationaleToggleBtnActive]}
+              onPress={() => setShowRationale((prev) => !prev)}
+              testID="rest-timer-rationale-toggle"
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle physiological rationale explanation"
+            >
+              <Text style={styles.rationaleToggleIcon}>ⓘ</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        {showRationale && subtext ? (
+          <View style={styles.heroRationaleBox}>
+            <Text style={styles.heroSubtextText}>{subtext}</Text>
+          </View>
+        ) : null}
       </View>
 
-      {/* Headline / Guidance */}
-      {headline ? <Text style={styles.headlineText} numberOfLines={1}>{headline}</Text> : null}
-      {subtext ? <Text style={styles.subtextText} numberOfLines={1}>{subtext}</Text> : null}
+      {/* Rest Duration Presets Selector Strip */}
+      {onSelectPreset ? (
+        <View style={styles.heroPresetsRow}>
+          {REST_PRESETS.map((sec) => {
+            const isSelected = totalDurationSeconds === sec;
+            const isRec = recommendedSeconds === sec;
+            return (
+              <TouchableOpacity
+                key={sec}
+                style={[
+                  styles.heroPresetChip,
+                  isSelected && styles.heroPresetChipActive,
+                  isRec && !isSelected && styles.heroPresetChipRecommended,
+                ]}
+                onPress={() => {
+                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                  onSelectPreset(sec);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.heroPresetChipText,
+                    isSelected && styles.heroPresetChipTextActive,
+                    isRec && !isSelected && styles.heroPresetChipTextRecommended,
+                  ]}
+                >
+                  {formatPresetLabel(sec, recommendedSeconds)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
 
-      {/* Quick Controls */}
-      <View style={styles.controlsRow}>
+      {/* Elapsed-Time-Preserving Adjustment Buttons (-15s, +15s, +30s) */}
+      <View style={styles.heroControlsRow}>
         <TouchableOpacity
-          style={styles.adjustBtn}
+          style={styles.heroAdjustBtn}
           onPress={() => handleAdjust(-15)}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Subtract 15 seconds"
         >
-          <Text style={styles.adjustBtnText}>-15s</Text>
+          <Text style={styles.heroAdjustBtnText}>-15s</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.adjustBtn}
+          style={styles.heroAdjustBtn}
           onPress={() => handleAdjust(15)}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Add 15 seconds"
         >
-          <Text style={styles.adjustBtnText}>+15s</Text>
+          <Text style={styles.heroAdjustBtnText}>+15s</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.adjustBtn}
+          style={styles.heroAdjustBtn}
           onPress={() => handleAdjust(30)}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Add 30 seconds"
         >
-          <Text style={styles.adjustBtnText}>+30s</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.skipBtn}
-          onPress={handleSkip}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.skipBtnText}>Skip Rest</Text>
+          <Text style={styles.heroAdjustBtnText}>+30s</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Action Buttons: State-dependent for isComplete vs remainingMs > 0 */}
+      {isComplete ? (
+        <TouchableOpacity
+          style={styles.heroReadyBtn}
+          onPress={handleSkip}
+          testID="rest-timer-ready-btn"
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Stamina full, begin next set"
+        >
+          <Text style={styles.heroReadyBtnText}>⚡ STAMINA FULL — BEGIN NEXT SET</Text>
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.heroActionGroup}>
+          {onMinimize ? (
+            <TouchableOpacity
+              style={styles.heroMinimizeBtn}
+              onPress={onMinimize}
+              testID="rest-timer-minimize-btn"
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="View workout and minimize timer"
+            >
+              <Text style={styles.heroMinimizeBtnText}>View Workout / Minimize Timer</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          <TouchableOpacity
+            style={styles.heroSkipBtnMuted}
+            onPress={handleSkip}
+            testID="rest-timer-skip-btn"
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Skip rest and begin next set"
+          >
+            <Text style={styles.heroSkipBtnMutedText}>Skip Rest & Begin Next Set</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  // Pinned Parallax Floating HUD Pill/Ring Styles (Stage 2)
+  floatingHudPill: {
     backgroundColor: '#1E1D22',
     borderColor: '#3D3840',
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginVertical: 4,
+    borderRadius: 14,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 8,
+    gap: 8,
   },
-  headerRow: {
+  floatingHudPillComplete: {
+    borderColor: '#10B981',
+    backgroundColor: 'rgba(6, 78, 59, 0.95)',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  hudCompleteContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hudCompleteText: {
+    color: '#ECFDF5',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  miniRingWrapper: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  miniRingCenter: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  miniRingIcon: {
+    fontSize: 12,
+  },
+  hudCenterInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  hudTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  hudTimerDisplay: {
+    fontSize: 18,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+    color: '#FDE68A',
+    letterSpacing: 0.5,
+  },
+  hudHeadlineText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#D1D5DB',
+    marginTop: 1,
+  },
+  hudControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  hudAdjustBtn: {
+    backgroundColor: '#2A2830',
+    borderColor: '#423E4C',
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    borderRadius: 6,
+  },
+  hudAdjustBtnText: {
+    color: '#D1D5DB',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  hudSkipBtn: {
+    backgroundColor: '#4C1D24',
+    borderColor: '#782635',
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 7,
+    borderRadius: 6,
+  },
+  hudSkipBtnText: {
+    color: '#FEE2E2',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  hudFocusBtn: {
+    backgroundColor: '#262330',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 7,
+    borderRadius: 6,
+    marginLeft: 2,
+  },
+  hudFocusBtnText: {
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  // Hero Center Modal Layout Styles (Stage 1)
+  heroContainer: {
+    backgroundColor: '#19181E',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
+    borderRadius: 18,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.65,
+    shadowRadius: 18,
+    elevation: 14,
+  },
+  heroHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -336,112 +665,12 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 6,
     borderWidth: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
   badgeText: {
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.5,
-  },
-  bannerClockGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  focusPillBtn: {
-    backgroundColor: '#282531',
-    borderColor: '#484355',
-    borderWidth: 1,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  focusPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#D1D5DB',
-  },
-  timerDisplay: {
-    fontSize: 24,
-    fontWeight: '900',
-    fontVariant: ['tabular-nums'],
-    color: '#E8E6E1',
-    letterSpacing: 1,
-  },
-  progressBarTrack: {
-    height: 5,
-    backgroundColor: '#111013',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  headlineText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#E8E6E1',
-    marginBottom: 2,
-  },
-  subtextText: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginBottom: 10,
-  },
-  controlsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 6,
-  },
-  adjustBtn: {
-    flex: 1,
-    backgroundColor: '#2A282E',
-    borderColor: '#4A4650',
-    borderWidth: 1,
-    paddingVertical: 6,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  adjustBtnText: {
-    color: '#D1D5DB',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  skipBtn: {
-    flex: 1.4,
-    backgroundColor: '#5E1924',
-    borderColor: '#8A2535',
-    borderWidth: 1,
-    paddingVertical: 6,
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  skipBtnText: {
-    color: '#FEE2E2',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  // Hero Center Modal Layout Styles
-  heroContainer: {
-    backgroundColor: '#19181E',
-    borderColor: '#C69A45',
-    borderWidth: 1.5,
-    borderRadius: 16,
-    padding: 18,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  heroHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
   },
   heroClosePill: {
     paddingHorizontal: 10,
@@ -456,16 +685,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#D1D5DB',
   },
-  heroClockBox: {
+  heroRingCenterBox: {
     alignItems: 'center',
-    marginVertical: 4,
+    justifyContent: 'center',
+    marginVertical: 10,
+  },
+  heroRingInnerOverlay: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   heroTimerDisplay: {
-    fontSize: 48,
+    fontSize: 40,
     fontWeight: '900',
     fontVariant: ['tabular-nums'],
     color: '#FDE68A',
-    letterSpacing: 1.5,
+    letterSpacing: 1,
+  },
+  heroTimerDisplayComplete: {
+    color: '#10B981',
+    fontSize: 28,
   },
   heroRemainingLabel: {
     fontSize: 10,
@@ -474,34 +713,97 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     marginTop: 2,
   },
-  heroProgressBarTrack: {
-    height: 8,
-    backgroundColor: '#111014',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginVertical: 12,
+  heroRemainingLabelComplete: {
+    color: '#6EE7B7',
   },
-  heroProgressBarFill: {
-    height: '100%',
-    borderRadius: 4,
+  heroHeadlineWrapper: {
+    marginVertical: 6,
+    alignItems: 'center',
+  },
+  heroHeadlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   heroHeadlineText: {
     fontSize: 15,
     fontWeight: '800',
     color: '#FFFFFF',
     textAlign: 'center',
-    marginBottom: 4,
+  },
+  rationaleToggleBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#282532',
+    borderColor: '#4A4556',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+  },
+  rationaleToggleBtnActive: {
+    backgroundColor: '#4A3B18',
+    borderColor: '#C69A45',
+  },
+  rationaleToggleIcon: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#FDE68A',
+  },
+  heroRationaleBox: {
+    backgroundColor: 'rgba(15, 14, 20, 0.75)',
+    borderColor: '#383344',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 6,
+    width: '100%',
   },
   heroSubtextText: {
     fontSize: 12,
     color: '#D1D5DB',
     textAlign: 'center',
-    marginBottom: 14,
+    lineHeight: 17,
+  },
+  heroPresetsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 6,
+    marginVertical: 10,
+  },
+  heroPresetChip: {
+    flex: 1,
+    backgroundColor: '#24212C',
+    borderColor: '#423D4F',
+    borderWidth: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  heroPresetChipActive: {
+    backgroundColor: '#6B1C28',
+    borderColor: '#DFB660',
+  },
+  heroPresetChipRecommended: {
+    borderColor: '#C69A45',
+  },
+  heroPresetChipText: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  heroPresetChipTextActive: {
+    color: '#FEE2E2',
+    fontWeight: '900',
+  },
+  heroPresetChipTextRecommended: {
+    color: '#FDE68A',
   },
   heroControlsRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 12,
+    marginVertical: 6,
   },
   heroAdjustBtn: {
     flex: 1,
@@ -517,32 +819,54 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
-  heroSkipBtn: {
-    flex: 1.4,
-    backgroundColor: '#6B1C28',
-    borderColor: '#9E2A3C',
-    borderWidth: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
+  heroActionGroup: {
+    marginTop: 6,
+    gap: 6,
   },
-  heroSkipBtnText: {
-    color: '#FEE2E2',
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  heroViewWorkoutBtn: {
-    backgroundColor: '#26232F',
+  heroMinimizeBtn: {
+    backgroundColor: '#1E1B2E',
     borderColor: '#C69A45',
-    borderWidth: 1,
+    borderWidth: 1.5,
     paddingVertical: 11,
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 4,
   },
-  heroViewWorkoutBtnText: {
+  heroMinimizeBtnText: {
     color: '#FDE68A',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
+  },
+  heroSkipBtnMuted: {
+    backgroundColor: 'transparent',
+    borderColor: '#3D3847',
+    borderWidth: 1,
+    paddingVertical: 9,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  heroSkipBtnMutedText: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  heroReadyBtn: {
+    backgroundColor: '#10B981',
+    borderColor: '#059669',
+    borderWidth: 1.5,
+    paddingVertical: 13,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  heroReadyBtnText: {
+    color: '#062B1D',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
 });

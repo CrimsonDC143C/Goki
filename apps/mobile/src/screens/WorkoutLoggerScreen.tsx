@@ -1,6 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,34 +14,79 @@ import {
 } from 'react-native';
 import {
   ARRIVAL_BOON_MULTIPLIER,
-  DEFAULT_TALENT_TREES,
-  HeartRateSample,
   HeartRateZone,
   HolisticStatType,
-  StatType,
-  WorkoutSessionType,
-  calculateE1RM,
-  getOptimalRestAdvice,
-  validateTalentAllocation,
-  verifyTelemetry,
-  xpRequiredForStatLevel,
   SetType,
   SET_TYPE_DESCRIPTORS,
   cycleSetType,
   WorkoutCategory,
   WorkoutPresetDefinition,
+  computeSupersetDisplayLabels,
+  resolveSetCompletionTransition,
+  calculateDynamicRestPlan,
+  DynamicRestMode,
+  calculateE1RM,
+  verifyTelemetry,
+  getOptimalRestAdvice,
+  CompletedWorkoutRecord,
+  CompletedExerciseEntry,
+  PostWorkoutEncouragementSummary,
+  evaluatePostWorkoutSummary,
 } from '@gymify/game-engine';
+import {
+  OfflineDraftExerciseBlock,
+  OfflineDraftSetRow,
+  OfflineDraftCardioItem,
+} from '../utils/offlineStorage';
 import { wearableService } from '../services/wearableTelemetry';
-import { StaminaRingTimer } from '../components/StaminaRingTimer';
 import { WorkoutCategoryGateway } from '../components/WorkoutCategoryGateway';
+import { DynamicRestTimer } from '../components/DynamicRestTimer';
 import { PresetDesignerModal } from '../components/PresetDesignerModal';
+import { ActivityPickerModal } from '../components/ActivityPickerModal';
 import { TrainingHistoryScreen } from './TrainingHistoryScreen';
-import { isEquippableInventoryEntry, useGame } from '../state/GameContext';
+import { useGame, ExerciseCatalogItem } from '../state/GameContext';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+import { cancelRestTimerNotification, requestNotificationPermissions } from '../utils/restNotifications';
 import { Image } from 'expo-image';
 import { getLootChestSpriteUri, LOOT_SPRITES } from '../assets/sprites';
+import { getItemIconSource } from '../assets/itemArtRegistry';
 import { audioManager } from '../services/AudioManager';
-import { COLORS, RARITY_COLORS } from '../theme';
+import { COLORS, RARITY_COLORS, CRIMSON_ONI } from '../theme';
+import {
+  DEMON_BOSS_SPRITE_CONFIG,
+  GREATSWORD_SKELETON_SPRITE_CONFIG,
+} from '../components/battle/sprites/spriteManifest';
+import { SpriteAnimator as BaseSpriteAnimator } from '../components/battle/sprites/SpriteAnimator';
+import type { AnimationState, SpriteAnimatorProps } from '../components/battle/sprites/sprite.types';
+
+// ============================================================================
+// CONSTANTS & CATALOGS
+// ============================================================================
+
+export const GYM_LOCATIONS = [
+  { id: 'iron-sanctum', name: 'Iron Sanctum Barbell Club', xpMultiplier: 1.25 },
+  { id: 'titan-foundry', name: 'Titan Foundry Gym', xpMultiplier: 1.20 },
+  { id: 'home-outpost', name: 'Home Outpost', xpMultiplier: 1.10 },
+] as const;
+
+export const BOSS_ROSTER = [
+  { id: 'vaelgor', name: 'Vaelgor the Defiler', title: 'Crypt Warden', maxHp: 8500 },
+  { id: 'malakor', name: 'Bone Lord Malakor', title: 'Undead Overlord', maxHp: 12000 },
+  { id: 'chronos', name: 'Chronos the Void Watcher', title: 'Abyssal Titan', maxHp: 16000 },
+] as const;
+
+export const WEARABLE_SOURCES = ['Manual', 'Apple Watch', 'Garmin HRM', 'Whoop 4.0'] as const;
+
+const SET_TYPE_COLORS: Record<SetType, string> = {
+  NORMAL: '#9CA3AF',
+  WARMUP: '#38BDF8',
+  DROP_SET: '#EF4444',
+  FAILURE: '#F59E0B',
+  AMRAP: '#F59E0B',
+};
+
+const HR_ZONES: readonly HeartRateZone[] = [1, 2, 3, 4, 5];
+const RPE_OPTIONS = [7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0] as const;
 
 const STAT_XP_META: Record<
   string,
@@ -53,70 +101,283 @@ const STAT_XP_META: Record<
   SPIRIT: { label: 'SPR', emoji: '🔮', color: '#EC407A' },
 };
 
-const SET_TYPE_COLORS: Record<SetType, string> = {
-  NORMAL: '#9CA3AF',
-  WARMUP: '#38BDF8',
-  DROP_SET: '#EF4444',
-  FAILURE: '#F59E0B',
-  AMRAP: '#F59E0B',
+// ============================================================================
+// SPRITE ANIMATOR ADAPTER
+// ============================================================================
+
+interface CustomSpriteProps {
+  rig?: 'greatsword_skeleton' | 'demon_boss' | string;
+  state?: string;
+  size?: number;
+  style?: any;
+}
+
+const SpriteAnimator: React.FC<SpriteAnimatorProps | CustomSpriteProps> = (props: any) => {
+  if (props.rig) {
+    const config =
+      props.rig === 'greatsword_skeleton'
+        ? GREATSWORD_SKELETON_SPRITE_CONFIG
+        : DEMON_BOSS_SPRITE_CONFIG;
+    const animState: AnimationState =
+      props.state === 'take_hit' ? 'hurt' : (props.state as AnimationState) || 'idle';
+    return (
+      <BaseSpriteAnimator
+        config={config}
+        state={animState}
+        size={props.size ?? 48}
+        style={props.style}
+      />
+    );
+  }
+  return <BaseSpriteAnimator {...props} />;
 };
 
-const RPE_OPTIONS = [6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10] as const;
+// ============================================================================
+// HELPER UTILS
+// ============================================================================
 
-export const WorkoutLoggerScreen: React.FC = () => {
+export function formatDuration(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const hrs = Math.floor(safe / 3600);
+  const mins = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  const mm = String(mins).padStart(2, '0');
+  const ss = String(secs).padStart(2, '0');
+  if (hrs > 0) {
+    return `${hrs}:${mm}:${ss}`;
+  }
+  return `${mm}:${ss}`;
+}
+
+export function formatClock(totalSeconds: number): string {
+  return formatDuration(totalSeconds);
+}
+
+export interface UnlockableBadge {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+}
+
+export function evaluateUnlockables(
+  exerciseName: string,
+  weightKg: number,
+  reps: number,
+  e1rm: number,
+  priorBestE1rm: number
+): UnlockableBadge | null {
+  if (priorBestE1rm > 0 && e1rm > priorBestE1rm) {
+    return {
+      id: `pr_${Date.now()}`,
+      title: `💥 NEW ALL-TIME PR: ${exerciseName}!`,
+      description: `Hit ${weightKg}kg × ${reps} reps (Estimated 1RM: ${e1rm}kg > Prior Best: ${priorBestE1rm}kg)!`,
+      icon: '🏆',
+    };
+  }
+  return null;
+}
+
+function playSfx(name: string) {
+  if (name === 'combat_hit') {
+    void audioManager.playSound('enemy-damage');
+  } else {
+    void audioManager.playSound('enemy-damage');
+  }
+}
+
+// ============================================================================
+// PROPS INTERFACE
+// ============================================================================
+
+export interface WorkoutLoggerScreenProps {
+  onOpenOfflineLogger?: () => void;
+  onNavigateToTalents?: () => void;
+  onNavigateToPaperdoll?: () => void;
+  onBackToLanding?: () => void;
+  onFinishAndReturn?: () => void;
+}
+
+// ============================================================================
+// COMPONENT IMPLEMENTATION
+// ============================================================================
+
+export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
+  onOpenOfflineLogger,
+  onNavigateToTalents,
+  onNavigateToPaperdoll,
+  onBackToLanding,
+  onFinishAndReturn,
+}) => {
   const {
     exercises,
     historicalPRs,
-    fatigueState,
-    nextWorkoutMultiplier,
-    combatPenalties,
-    activeDungeonRun,
-    raids,
-    stats,
-    unlockedTalentRanks,
-    inventory,
-    consistencyStreak,
-    resilienceShields,
-    registeredGyms,
     workoutMachine,
     arrivalBanner,
-    restNotificationArmed,
-    lastHybridConsolidation,
     startHybridSession,
     logHybridSet,
     recordHybridCardioSegment,
-    adjustHybridRestTimer,
-    skipHybridRest,
     finishHybridSession,
     proceedToHybridLootReview,
     openHybridLootChest,
     completeHybridReview,
     abandonHybridSession,
-    simulateLayoffHours,
-    unlockTalentNode,
-    toggleEquipItem,
+    workoutHistory,
+    consistencyStreak,
     presets,
     savePreset,
     deletePreset,
-    loadPresetIntoDraft,
+    recordRecentActivity,
+    stats,
     gameMode,
+    lastHybridConsolidation,
   } = useGame();
 
-  // Phase 1 Pre-Workout Config State (`Idle`)
-  const [selectedCategory, setSelectedCategory] = useState<WorkoutCategory | null>('GYM');
-  const [mode, setMode] = useState<WorkoutSessionType>('RESISTANCE');
-  const [selectedGymId, setSelectedGymId] = useState<string | null>(
-    registeredGyms[0]?.id ?? null
-  );
-  const [lowEnergyMode, setLowEnergyMode] = useState(false);
-  const [selectedRaidId, setSelectedRaidId] = useState<string>(raids[0]?.id ?? '');
-  const [showPresetDesigner, setShowPresetDesigner] = useState<boolean>(false);
-
-  // Wearable Telemetry & Ironman Verification State
-  const [wearableLinked, setWearableLinked] = useState<boolean>(false);
-  const [liveBpm, setLiveBpm] = useState<number>(wearableService.getLatestBpm());
+  // Timing & Live Clock State
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const sessionStartTimeRef = useRef<number>(Date.now());
 
+  // Pre-Flight Config State (for Online Dungeon Raid)
+  const [gymIndex, setGymIndex] = useState<number>(0);
+  const [bossIndex, setBossIndex] = useState<number>(0);
+  const [wearableIndex, setWearableIndex] = useState<number>(0);
+  const selectedGym = GYM_LOCATIONS[gymIndex % GYM_LOCATIONS.length]!;
+  const selectedBoss = BOSS_ROSTER[bossIndex % BOSS_ROSTER.length]!;
+  const wearableSource = WEARABLE_SOURCES[wearableIndex % WEARABLE_SOURCES.length]!;
+
+  // Wearable Telemetry State
+  const [wearableLinked, setWearableLinked] = useState<boolean>(false);
+  const [liveBpm, setLiveBpm] = useState<number>(wearableService.getLatestBpm());
+
+  // Boss Combat Telemetry State
+  const [bossAnimState, setBossAnimState] = useState<string>('idle');
+  const [lastDamageDealt, setLastDamageDealt] = useState<number | null>(null);
+  const [bossDamageAccumulated, setBossDamageAccumulated] = useState<number>(0);
+  const [bossCardCollapsed, setBossCardCollapsed] = useState<boolean>(false);
+  const [liveSetsCount, setLiveSetsCount] = useState<number>(0);
+
+  // PR Celebration Modal State
+  const [celebrationBadge, setCelebrationBadge] = useState<UnlockableBadge | null>(null);
+
+  // Category & Modality Selection State
+  const [activeCategory, setActiveCategory] = useState<WorkoutCategory | null>('GYM');
+  const [secondaryCategories, setSecondaryCategories] = useState<WorkoutCategory[]>([]);
+
+  // Tabular Resistance Exercises State
+  const resistanceCatalog = useMemo(
+    () => exercises.filter((e) => e.category === 'RESISTANCE'),
+    [exercises]
+  );
+  const cardioCatalog = useMemo(
+    () => exercises.filter((e) => e.category === 'CARDIO' || e.category === 'RECOVERY_MOBILITY'),
+    [exercises]
+  );
+
+  const [exerciseBlocks, setExerciseBlocks] = useState<OfflineDraftExerciseBlock[]>(() => {
+    const stamp = Date.now();
+    const firstEx = resistanceCatalog[0];
+    const initialId = firstEx?.id ?? 'bench_press';
+    const initialName = firstEx?.name ?? 'Barbell Bench Press';
+    return [
+      {
+        blockId: `blk_${stamp}_1`,
+        exerciseId: initialId,
+        exerciseName: initialName,
+        sets: [
+          {
+            id: `set_${stamp}_1_1`,
+            weightKgStr: '80',
+            repsStr: '8',
+            isWarmup: false,
+            setType: 'NORMAL',
+            rpe: 8.5,
+            completed: false,
+          },
+        ],
+      },
+    ];
+  });
+
+  // Cardio & Recovery Non-Resistance Log State
+  const [cardioEntries, setCardioEntries] = useState<OfflineDraftCardioItem[]>([]);
+  const [selectedCardioId, setSelectedCardioId] = useState<string>(
+    () => cardioCatalog[0]?.id ?? 'zone2_run'
+  );
+  const [cardioMinutesStr, setCardioMinutesStr] = useState<string>('20');
+  const [cardioZone, setCardioZone] = useState<HeartRateZone>(2);
+  const [cardioRpe, setCardioRpe] = useState<number>(7.5);
+
+  // Dynamic Rest Timer State
+  const [restTargetEndTimeMs, setRestTargetEndTimeMs] = useState<number | null>(null);
+  const [restTotalSeconds, setRestTotalSeconds] = useState<number>(90);
+  const [restStartedAtMs, setRestStartedAtMs] = useState<number | null>(null);
+  const [customRestDurationSec, setCustomRestDurationSec] = useState<number | null>(null);
+  const [restRecommendedSec, setRestRecommendedSec] = useState<number>(90);
+  const [restMode, setRestMode] = useState<DynamicRestMode>('WORKING_REST');
+  const [restHeadline, setRestHeadline] = useState<string>('');
+  const [restSubtext, setRestSubtext] = useState<string>('');
+  const [restCenterModalVisible, setRestCenterModalVisible] = useState<boolean>(false);
+  const [restTimerPinned, setRestTimerPinned] = useState<boolean>(false);
+
+  // Modals & UI View State
+  const [openExercisePickerBlockId, setOpenExercisePickerBlockId] = useState<string | null>(null);
+  const [showCardioPicker, setShowCardioPicker] = useState<boolean>(false);
+  const [showPresetDesigner, setShowPresetDesigner] = useState<boolean>(false);
+  const [showTrainingHistory, setShowTrainingHistory] = useState<boolean>(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [scrollOffsetY, setScrollOffsetY] = useState<number>(0);
+  const [postWorkoutSummary, setPostWorkoutSummary] = useState<PostWorkoutEncouragementSummary | null>(null);
+  const [sessionPresetTemplate, setSessionPresetTemplate] = useState<WorkoutPresetDefinition | null>(null);
+  const [editingPresetDraft, setEditingPresetDraft] = useState<WorkoutPresetDefinition | null>(null);
+  const [presetSavedInSession, setPresetSavedInSession] = useState<boolean>(false);
+
+  // Micro-animation for Boss Damage / XP Ticker
+  const microPulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Interval Tick for Session Elapsed Clock
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const sessionElapsedSec = Math.max(
+    0,
+    Math.floor((nowMs - sessionStartTimeRef.current) / 1000)
+  );
+
+  // Superset Labels Calculation
+  const supersetLabels = useMemo(
+    () => computeSupersetDisplayLabels(exerciseBlocks),
+    [exerciseBlocks]
+  );
+
+  // Total Checked Sets Count
+  const completedSetCount = useMemo(
+    () =>
+      exerciseBlocks.reduce(
+        (sum, blk) => sum + blk.sets.filter((s) => s.completed).length,
+        0
+      ),
+    [exerciseBlocks]
+  );
+
+  // Active Session Reference from State Machine
+  const activeSession = workoutMachine.activeSession;
+  const phase = workoutMachine.phase;
+
+  // Live Boss Current HP Math
+  const maxBossHp = selectedBoss.maxHp;
+  const currentBossHp = Math.max(0, maxBossHp - bossDamageAccumulated);
+  const bossHpPct = Math.max(0, Math.min(100, Math.round((currentBossHp / maxBossHp) * 100)));
+
+  // Live Session HUD XP & Gold Math
+  const liveHudXp = (activeSession?.accumulatedMicroXp ?? 0) + liveSetsCount * 45;
+  const liveHudGold = (activeSession?.accumulatedMicroGold ?? 0) + liveSetsCount * 20;
+  const arrivalBoonActive = Boolean(arrivalBanner || activeSession?.arrivalBoon || true);
+
+  // Toggle Wearable Connection
   const toggleWearableLink = async () => {
     if (!wearableLinked) {
       const granted = await wearableService.requestPermissions();
@@ -133,136 +394,629 @@ export const WorkoutLoggerScreen: React.FC = () => {
     }
   };
 
-  // Phase 2 Sweat-Proof Intra-Workout Set Inputs (`DungeonActive` / `Resting`)
-  const [exerciseId, setExerciseId] = useState('bench_press');
-  const [weightKgStr, setWeightKgStr] = useState('85');
-  const [repsStr, setRepsStr] = useState('8');
-  const [selectedRpe, setSelectedRpe] = useState<number>(8);
-  const [isWarmup, setIsWarmup] = useState(false);
-  const [setType, setSetType] = useState<SetType>('NORMAL');
-  const [supersetGroupId, setSupersetGroupId] = useState<string | null>(null);
-  const [customRestOverrideSec, setCustomRestOverrideSec] = useState<number | null>(null);
-
-  // Cardio Segment Inputs
-  const [cardioExerciseId, setCardioExerciseId] = useState('zone2_run');
-  const [cardioMinutesStr, setCardioMinutesStr] = useState('35');
-  const [hrZone, setHrZone] = useState<HeartRateZone>(2);
-
-  // Phase 3 Inline Progression Selection (`LootReview`)
-  const [allocStatTab, setAllocStatTab] = useState<HolisticStatType>('STRENGTH');
-  const [allocFeedback, setAllocFeedback] = useState<string | null>(null);
-  const [showTrainingHistory, setShowTrainingHistory] = useState(false);
-
-  // Micro-animation pulse value for XP / Gold / Boss HP feedback
-  const microPulseAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (!workoutMachine.lastMicroFeedback) return;
-    microPulseAnim.setValue(1.06);
-    Animated.spring(microPulseAnim, {
-      toValue: 1,
-      friction: 5,
-      tension: 120,
-      useNativeDriver: true,
-    }).start();
-  }, [workoutMachine.lastMicroFeedback, microPulseAnim]);
-
-  const resistanceCatalog = exercises.filter((e) => e.category === 'RESISTANCE');
-  const selectedGym = registeredGyms.find((g) => g.id === selectedGymId) ?? null;
-
-  const weightNum = Math.max(0, Number(weightKgStr) || 0);
-  const repsNum = Math.max(0, Math.floor(Number(repsStr) || 0));
-  const liveE1RM = isWarmup ? 0 : calculateE1RM(weightNum, repsNum);
-  const priorPR = historicalPRs[exerciseId];
-  const hasBaseline = Boolean(priorPR && priorPR.bestE1RM > 0);
-  const relIntensity =
-    hasBaseline && priorPR ? weightNum / priorPR.bestE1RM : liveE1RM > 0 ? weightNum / liveE1RM : 0;
-  const isOnPrPace = !isWarmup && hasBaseline && Boolean(priorPR && liveE1RM > priorPR.bestE1RM);
-
-  const liveRestAdvice = getOptimalRestAdvice({
-    workoutType: workoutMachine.activeSession?.workoutType ?? mode,
-    reps: repsNum || 8,
-    relativeIntensity: relIntensity || 0.75,
-    rpe: selectedRpe,
-    isWarmup,
-  });
-
-  const hoursSinceLastWorkout =
-    fatigueState.lastWorkoutAt !== null
-      ? Math.round((Date.now() - fatigueState.lastWorkoutAt.getTime()) / (3600 * 1000))
-      : 0;
-  const comebackEligible = hoursSinceLastWorkout >= 72;
-
-  const stepWeight = (delta: number) => {
-    const next = Math.max(0, Math.round((weightNum + delta) * 2) / 2);
-    setWeightKgStr(String(next));
-  };
-
-  const stepReps = (delta: number) => {
-    const next = Math.max(1, repsNum + delta);
-    setRepsStr(String(next));
-  };
-
-  const handleModeSwitch = (nextMode: WorkoutSessionType) => {
-    setMode(nextMode);
-    if (nextMode === 'CARDIO_LOW_MOD') {
-      setCardioExerciseId('zone2_run');
-      setHrZone(2);
-      setCardioMinutesStr('35');
-    } else if (nextMode === 'CARDIO_HIGH_INTENSITY') {
-      setCardioExerciseId('sprint_intervals');
-      setHrZone(5);
-      setCardioMinutesStr('20');
-    } else if (nextMode === 'ACTIVE_RECOVERY') {
-      setCardioExerciseId('mobility_yoga');
-      setHrZone(1);
-      setCardioMinutesStr('25');
+  // Start Online Hybrid Workout Session (Pre-flight -> DungeonActive)
+  const handleStartHybridSession = useCallback(() => {
+    if (workoutMachine.phase === 'Idle') {
+      sessionStartTimeRef.current = Date.now();
+      if (wearableLinked) {
+        void wearableService.startLiveSession((sample) => setLiveBpm(sample.bpm));
+      }
+      startHybridSession({
+        workoutType:
+          activeCategory === 'SPORT'
+            ? 'CARDIO_HIGH_INTENSITY'
+            : activeCategory === 'CARDIO'
+            ? 'CARDIO_LOW_MOD'
+            : activeCategory === 'RECOVERY'
+            ? 'ACTIVE_RECOVERY'
+            : 'RESISTANCE',
+        workoutCategory: activeCategory ?? 'GYM',
+        trigger: 'GEOFENCE_GYM',
+        gymId: selectedGym.id,
+        gymName: selectedGym.name,
+        lowEnergyMode: false,
+        initialRestSeconds: 90,
+      });
+      triggerSensoryCue('GUILD_THRESHOLD_PULSE');
     }
+  }, [
+    activeCategory,
+    selectedGym.id,
+    selectedGym.name,
+    startHybridSession,
+    wearableLinked,
+    workoutMachine.phase,
+  ]);
+
+  // Category Gateway Handlers
+  const handleSelectPrimaryCategory = (category: WorkoutCategory) => {
+    setActiveCategory(category);
   };
 
-  const handleCrossThreshold = () => {
-    sessionStartTimeRef.current = Date.now();
-    if (wearableLinked) {
-      void wearableService.startLiveSession((sample) => setLiveBpm(sample.bpm));
+  const handleAddSecondarySegment = (category: WorkoutCategory) => {
+    setSecondaryCategories((prev) => Array.from(new Set([...prev, category])));
+  };
+
+  const handleRemoveSecondarySegment = (category: WorkoutCategory) => {
+    setSecondaryCategories((prev) => prev.filter((c) => c !== category));
+  };
+
+  const handleResetCategory = () => {
+    setActiveCategory(null);
+  };
+
+  const handleLoadPreset = (preset: WorkoutPresetDefinition) => {
+    const stamp = Date.now();
+    const rawBlocks = preset.blocks?.exerciseBlocks || [];
+    const blocks: OfflineDraftExerciseBlock[] = rawBlocks.map((b, bIdx) => ({
+      blockId: `blk_${stamp}_${bIdx + 1}`,
+      exerciseId: b.exerciseSlug,
+      exerciseName: b.exerciseName,
+      supersetGroupId: b.supersetGroupId ?? null,
+      sets: b.sets.map((s, sIdx) => ({
+        id: `set_${stamp}_${bIdx + 1}_${sIdx + 1}`,
+        weightKgStr: String(s.targetWeightKg || 60),
+        repsStr: String(s.targetReps || 8),
+        isWarmup: s.setType === 'WARMUP',
+        setType: s.setType || 'NORMAL',
+        rpe: s.targetRpe ?? 8.5,
+        supersetGroupId: b.supersetGroupId ?? null,
+        completed: false,
+      })),
+    }));
+
+    if (blocks.length > 0) {
+      setExerciseBlocks(blocks);
     }
-    startHybridSession({
-      workoutType: mode,
-      workoutCategory: selectedCategory ?? 'GYM',
-      trigger: selectedGym ? 'GEOFENCE_GYM' : 'MANUAL_OPEN_WORLD',
-      gymId: selectedGym?.id ?? null,
-      gymName: selectedGym?.name ?? null,
-      lowEnergyMode,
-      initialRestSeconds: customRestOverrideSec ?? undefined,
+    setActiveCategory(preset.category || 'GYM');
+    triggerSensoryCue('WORKOUT_PRESET_LOADED');
+  };
+
+  const handleLoadSessionIntoWorkout = useCallback(
+    (workout: CompletedWorkoutRecord) => {
+      const nowMs = Date.now();
+      const blocks: OfflineDraftExerciseBlock[] = (workout.exercises || []).map((ex, bIdx) => ({
+        blockId: `blk_hist_${nowMs}_${bIdx + 1}`,
+        exerciseId: ex.exerciseId,
+        exerciseName: ex.exerciseName || ex.exerciseId,
+        supersetGroupId: null,
+        sets: (ex.sets || []).map((s, sIdx) => ({
+          id: `set_hist_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
+          weightKgStr: String(s.weightKg ?? 0),
+          repsStr: String(s.reps ?? 0),
+          isWarmup: s.setType === 'WARMUP' || !!s.isWarmup,
+          setType: s.setType || 'NORMAL',
+          rpe: s.rpe ?? 8.5,
+          supersetGroupId: null,
+          completed: false,
+        })),
+      }));
+
+      if (blocks.length > 0) {
+        setExerciseBlocks(blocks);
+      }
+      setActiveCategory('GYM');
+      setShowTrainingHistory(false);
+      triggerSensoryCue('WORKOUT_PRESET_LOADED');
+    },
+    []
+  );
+
+  // Resistance Exercise Set Row Handlers
+  const handleSelectExercise = (blockId: string, exerciseId: string) => {
+    const ex = exercises.find((e) => e.id === exerciseId);
+    setExerciseBlocks((prev) =>
+      prev.map((b) =>
+        b.blockId === blockId
+          ? { ...b, exerciseId, exerciseName: ex?.name ?? exerciseId }
+          : b
+      )
+    );
+    recordRecentActivity(exerciseId);
+    setOpenExercisePickerBlockId(null);
+  };
+
+  const handleUpdateSetField = (
+    blockId: string,
+    setId: string,
+    field: 'weightKgStr' | 'repsStr',
+    value: string
+  ) => {
+    const cleaned = value.replace(/[^0-9.]/g, '');
+    setValidationError(null);
+    setExerciseBlocks((prev) =>
+      prev.map((b) =>
+        b.blockId === blockId
+          ? {
+              ...b,
+              sets: b.sets.map((s) => (s.id === setId ? { ...s, [field]: cleaned } : s)),
+            }
+          : b
+      )
+    );
+  };
+
+  const handleToggleSuperset = (blockIndex: number) => {
+    setExerciseBlocks((prev) => {
+      const blocks = [...prev];
+      const cur = blocks[blockIndex];
+      const next = blocks[blockIndex + 1];
+      if (!cur) return prev;
+
+      if (cur.supersetGroupId) {
+        const targetGroup = cur.supersetGroupId;
+        return blocks.map((b) =>
+          b.supersetGroupId === targetGroup ? { ...b, supersetGroupId: undefined } : b
+        );
+      }
+
+      const existingGroups = new Set(blocks.map((b) => b.supersetGroupId).filter(Boolean));
+      const letters = ['A', 'B', 'C', 'D'];
+      const nextLetter = letters.find((l) => !existingGroups.has(l)) || `G${existingGroups.size + 1}`;
+
+      return blocks.map((b, idx) => {
+        if (idx === blockIndex || (next && idx === blockIndex + 1)) {
+          return { ...b, supersetGroupId: nextLetter };
+        }
+        return b;
+      });
     });
+    triggerSensoryCue('SUPERSET_TRANSITION_TICK');
   };
 
-  const handleLogSet = () => {
-    if (repsNum <= 0) return;
-    if (wearableLinked) {
-      wearableService.setSimulatedTargetBpm(152 + Math.min(25, repsNum * 2));
-    }
-    const exObj = resistanceCatalog.find((e) => e.id === exerciseId);
-    logHybridSet({
-      exerciseId,
-      reps: repsNum,
-      weightKg: weightNum,
-      rpe: selectedRpe,
-      isWarmup: isWarmup || setType === 'WARMUP',
-      setType,
-      supersetGroupId,
-      customRestSeconds: customRestOverrideSec ?? liveRestAdvice.recommendedSeconds,
-      nextSetHint: {
-        exerciseId,
-        exerciseName: exObj?.name ?? exerciseId,
-        weightKg: weightNum,
-        reps: repsNum,
+  const handleCycleSetType = (blockId: string, setId: string) => {
+    setExerciseBlocks((prev) =>
+      prev.map((b) =>
+        b.blockId === blockId
+          ? {
+              ...b,
+              sets: b.sets.map((s) => {
+                if (s.id === setId) {
+                  const nextType = cycleSetType(s.setType || (s.isWarmup ? 'WARMUP' : 'NORMAL'));
+                  return {
+                    ...s,
+                    setType: nextType,
+                    isWarmup: nextType === 'WARMUP',
+                    rpe: nextType === 'FAILURE' || nextType === 'AMRAP' ? 10 : s.rpe,
+                  };
+                }
+                return s;
+              }),
+            }
+          : b
+      )
+    );
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleCycleSetRpe = (
+    blockId: string,
+    setId: string,
+    currentRpe: number | null | undefined
+  ) => {
+    const effective = currentRpe ?? 8.0;
+    const nextIdx = (RPE_OPTIONS.indexOf(effective as 8.0) + 1) % RPE_OPTIONS.length;
+    const nextRpe = RPE_OPTIONS[nextIdx] ?? 8.0;
+
+    setExerciseBlocks((prev) =>
+      prev.map((b) =>
+        b.blockId === blockId
+          ? {
+              ...b,
+              sets: b.sets.map((s) => (s.id === setId ? { ...s, rpe: nextRpe } : s)),
+            }
+          : b
+      )
+    );
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleAddSetRow = (blockId: string) => {
+    setExerciseBlocks((prev) => {
+      const targetBlock = prev.find((b) => b.blockId === blockId);
+      const targetSupersetGroup = targetBlock?.supersetGroupId;
+
+      return prev.map((b) => {
+        const shouldAdd =
+          b.blockId === blockId ||
+          (!!targetSupersetGroup && b.supersetGroupId === targetSupersetGroup);
+        if (!shouldAdd) return b;
+
+        const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const lastRow = b.sets[b.sets.length - 1];
+        return {
+          ...b,
+          sets: [
+            ...b.sets,
+            {
+              id: `set_${stamp}`,
+              weightKgStr: lastRow?.weightKgStr ?? '60',
+              repsStr: lastRow?.repsStr ?? '8',
+              isWarmup: false,
+              setType: 'NORMAL',
+              rpe: lastRow?.rpe ?? 8.5,
+              completed: false,
+            },
+          ],
+        };
+      });
+    });
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleRemoveSetRow = (blockId: string, setId: string) => {
+    setExerciseBlocks((prev) =>
+      prev.map((b) => {
+        if (b.blockId !== blockId || b.sets.length <= 1) return b;
+        return {
+          ...b,
+          sets: b.sets.filter((s) => s.id !== setId),
+        };
+      })
+    );
+  };
+
+  const handleAddExerciseBlock = () => {
+    const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const usedIds = new Set(exerciseBlocks.map((b) => b.exerciseId));
+    const nextExercise =
+      resistanceCatalog.find((e) => !usedIds.has(e.id)) ?? resistanceCatalog[0];
+    const nextId = nextExercise?.id ?? 'bench_press';
+
+    setExerciseBlocks((prev) => [
+      ...prev,
+      {
+        blockId: `blk_${stamp}`,
+        exerciseId: nextId,
+        exerciseName: nextExercise?.name ?? nextId,
+        sets: [
+          {
+            id: `set_${stamp}_1`,
+            weightKgStr: '60',
+            repsStr: '8',
+            isWarmup: false,
+            setType: 'NORMAL',
+            rpe: 8.5,
+            completed: false,
+          },
+        ],
       },
+    ]);
+  };
+
+  const handleRemoveExerciseBlock = (blockId: string) => {
+    setExerciseBlocks((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((b) => b.blockId !== blockId);
     });
   };
 
-  const handleFinishWorkout = async () => {
-    let telemetryPayload: any = undefined;
+  // Primary Checkbox Set Completed Event Handler (Ticking DONE)
+  const handleToggleSetCompleted = (blockId: string, setId: string) => {
+    setValidationError(null);
+    let justCompleted = false;
+    let completedRow: OfflineDraftSetRow | null = null;
+    let completedBlock: OfflineDraftExerciseBlock | null = null;
 
+    const nextBlocks = exerciseBlocks.map((b) => {
+      if (b.blockId !== blockId) return b;
+      completedBlock = b;
+      return {
+        ...b,
+        sets: b.sets.map((s) => {
+          if (s.id === setId) {
+            justCompleted = !s.completed;
+            completedRow = s;
+            return { ...s, completed: !s.completed };
+          }
+          return s;
+        }),
+      };
+    });
+
+    setExerciseBlocks(nextBlocks);
+
+    // If user unchecked a set: cancel any running rest timer
+    if (!justCompleted) {
+      setRestTargetEndTimeMs(null);
+      setRestStartedAtMs(null);
+      setRestCenterModalVisible(false);
+      setRestTimerPinned(false);
+      cancelRestTimerNotification().catch(() => {});
+      return;
+    }
+
+    // Auto-transition from Idle to DungeonActive if not engaged yet!
+    if (workoutMachine.phase === 'Idle') {
+      handleStartHybridSession();
+    }
+
+    if (completedRow && completedBlock) {
+      const exBlock = completedBlock as OfflineDraftExerciseBlock;
+      const setRow = completedRow as OfflineDraftSetRow;
+      const weightKg = Number(setRow.weightKgStr) || 0;
+      const reps = Number(setRow.repsStr) || 0;
+      const rowRpe = setRow.rpe ?? 8.5;
+      const rowSetType = setRow.setType || 'NORMAL';
+      const rowIsWarmup = setRow.isWarmup || rowSetType === 'WARMUP';
+
+      recordRecentActivity(exBlock.exerciseId);
+      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+      requestNotificationPermissions().catch(() => {});
+
+      // Boss Damage Calculation & Sensory Feedback
+      const baseDmg = Math.round(
+        weightKg * reps * (rowIsWarmup ? 0.35 : 1.0) * (rowSetType === 'DROP_SET' ? 1.15 : 1.0)
+      );
+      const bossDmg = Math.max(15, baseDmg);
+      setBossDamageAccumulated((prev) => prev + bossDmg);
+      setLastDamageDealt(bossDmg);
+      setBossAnimState('take_hit');
+      playSfx('combat_hit');
+      setLiveSetsCount((c) => c + 1);
+
+      // Micro Pulse animation for boss feedback
+      microPulseAnim.setValue(1.08);
+      Animated.spring(microPulseAnim, {
+        toValue: 1,
+        friction: 5,
+        tension: 120,
+        useNativeDriver: true,
+      }).start();
+
+      setTimeout(() => {
+        setBossAnimState('idle');
+      }, 700);
+
+      setTimeout(() => {
+        setLastDamageDealt(null);
+      }, 1800);
+
+      // Log Hybrid Set to Context Machine
+      logHybridSet({
+        exerciseId: exBlock.exerciseId,
+        reps,
+        weightKg,
+        rpe: rowRpe,
+        isWarmup: rowIsWarmup,
+        setType: rowSetType,
+        supersetGroupId: exBlock.supersetGroupId,
+        nextSetHint: {
+          exerciseId: exBlock.exerciseId,
+          exerciseName: exBlock.exerciseName ?? exBlock.exerciseId,
+          weightKg,
+          reps,
+        },
+      });
+
+      // Check PR unlockables
+      const liveE1rm = rowIsWarmup ? 0 : calculateE1RM(weightKg, reps);
+      const priorPr = historicalPRs[exBlock.exerciseId]?.bestE1RM ?? 0;
+      const prBadge = evaluateUnlockables(
+        exBlock.exerciseName ?? exBlock.exerciseId,
+        weightKg,
+        reps,
+        liveE1rm,
+        priorPr
+      );
+      if (prBadge) {
+        setCelebrationBadge(prBadge);
+        triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
+      }
+
+      // Check if all sets across all exercises are complete
+      const hasRemainingSets = nextBlocks.some((b) => b.sets.some((s) => !s.completed));
+      if (!hasRemainingSets) {
+        setRestTargetEndTimeMs(null);
+        setRestStartedAtMs(null);
+        setRestCenterModalVisible(false);
+        setRestTimerPinned(false);
+        cancelRestTimerNotification().catch(() => {});
+        triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
+        return;
+      }
+
+      // Dynamic Rest Transition Resolution
+      const transition = resolveSetCompletionTransition({
+        blocks: nextBlocks,
+        completedBlockId: blockId,
+        completedSetId: setId,
+      });
+
+      const blockEx = exercises.find((e) => e.id === exBlock.exerciseId);
+      const plan = calculateDynamicRestPlan({
+        setType: rowSetType,
+        isWarmup: rowIsWarmup,
+        rpe: rowRpe,
+        isCompound: blockEx ? blockEx.baseXpFactor >= 1.15 : true,
+        nextSameExerciseSetIsDropSet: transition.nextSameExerciseSetIsDropSet,
+        isMidSupersetRound: transition.isMidSupersetRound,
+        nextSupersetExerciseName: transition.nextSupersetExerciseName,
+        nextSupersetMemberLabel: transition.nextSupersetMemberLabel,
+      });
+
+      const spiritBonusSec = Math.min(30, (stats.SPIRIT?.level ?? 1) * 2);
+      const effectiveSec =
+        customRestDurationSec !== null && plan.mode === 'WORKING_REST'
+          ? customRestDurationSec
+          : plan.seconds + spiritBonusSec;
+      const startedMs = Date.now();
+
+      setRestRecommendedSec(plan.seconds);
+      setRestStartedAtMs(startedMs);
+      setRestTotalSeconds(effectiveSec);
+      setRestTargetEndTimeMs(startedMs + effectiveSec * 1000);
+      setRestMode(plan.mode);
+      setRestHeadline(plan.headline);
+      setRestSubtext(plan.subtext);
+      setRestCenterModalVisible(true);
+      setRestTimerPinned(false);
+
+      if (transition.nextSameExerciseSetIsDropSet) {
+        triggerSensoryCue('DROP_SET_IMMEDIATE_TICK');
+      } else if (transition.isMidSupersetRound) {
+        triggerSensoryCue('SUPERSET_TRANSITION_TICK');
+      }
+    }
+  };
+
+  // Non-Resistance Segment Logging (Cardio / Sport / Flexibility)
+  const handleAddCardioEntry = () => {
+    setValidationError(null);
+    const exMeta = cardioCatalog.find((e) => e.id === selectedCardioId) ?? cardioCatalog[0];
+    const mins = Number(cardioMinutesStr) || 0;
+    const durationSeconds = Math.max(60, Math.round(mins * 60));
+
+    if (durationSeconds <= 0) {
+      setValidationError('Enter valid duration before adding cardio segment.');
+      return;
+    }
+
+    if (workoutMachine.phase === 'Idle') {
+      handleStartHybridSession();
+    }
+
+    const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const newCardioItem: OfflineDraftCardioItem = {
+      id: `cardio_${stamp}`,
+      exerciseId: exMeta?.id ?? selectedCardioId,
+      exerciseName: exMeta?.name ?? selectedCardioId,
+      activityType:
+        exMeta?.category === 'RECOVERY_MOBILITY' ? 'RECOVERY_MOBILITY' : 'CARDIO',
+      durationSeconds,
+      averageHrZone: cardioZone,
+      rpe: cardioRpe,
+    };
+
+    setCardioEntries((prev) => [...prev, newCardioItem]);
+
+    // Record segment in engine hybrid state
+    recordHybridCardioSegment({
+      exerciseId: newCardioItem.exerciseId,
+      activityType: newCardioItem.activityType,
+      durationSeconds: newCardioItem.durationSeconds,
+      averageHrZone: newCardioItem.averageHrZone,
+    });
+
+    // Boss damage feedback for cardio segment
+    const cardioDmg = Math.round(mins * 12 * (cardioZone >= 4 ? 1.5 : 1.0));
+    setBossDamageAccumulated((prev) => prev + cardioDmg);
+    setLastDamageDealt(cardioDmg);
+    setBossAnimState('take_hit');
+    playSfx('combat_hit');
+
+    setTimeout(() => setBossAnimState('idle'), 700);
+    setTimeout(() => setLastDamageDealt(null), 1800);
+
+    recordRecentActivity(selectedCardioId);
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleRemoveCardioEntry = (entryId: string) => {
+    setCardioEntries((prev) => prev.filter((c) => c.id !== entryId));
+  };
+
+  // Rest Timer Controller Handlers
+  const handleRestSelectPreset = useCallback(
+    (targetSec: number) => {
+      setCustomRestDurationSec(targetSec);
+      const now = Date.now();
+      const anchorStartMs =
+        restStartedAtMs ??
+        (restTargetEndTimeMs !== null ? restTargetEndTimeMs - restTotalSeconds * 1000 : now);
+
+      const nextEndMs = anchorStartMs + targetSec * 1000;
+      if (nextEndMs <= now) {
+        setRestTargetEndTimeMs(null);
+        setRestStartedAtMs(null);
+        setRestTotalSeconds(targetSec);
+        setRestCenterModalVisible(false);
+        setRestTimerPinned(false);
+        cancelRestTimerNotification().catch(() => {});
+        triggerSensoryCue('REST_TIMER_EXPIRED');
+      } else {
+        setRestStartedAtMs(anchorStartMs);
+        setRestTotalSeconds(targetSec);
+        setRestTargetEndTimeMs(nextEndMs);
+      }
+    },
+    [restStartedAtMs, restTargetEndTimeMs, restTotalSeconds]
+  );
+
+  const handleRestAdjustDelta = useCallback(
+    (delta: number) => {
+      if (restTargetEndTimeMs === null) return;
+      const now = Date.now();
+      const anchorStartMs = restStartedAtMs ?? (restTargetEndTimeMs - restTotalSeconds * 1000);
+      const rawNextEndMs = restTargetEndTimeMs + delta * 1000;
+
+      if (rawNextEndMs <= now) {
+        setRestTargetEndTimeMs(null);
+        setRestStartedAtMs(null);
+        setRestCenterModalVisible(false);
+        setRestTimerPinned(false);
+        cancelRestTimerNotification().catch(() => {});
+        triggerSensoryCue('REST_TIMER_EXPIRED');
+      } else {
+        const remainingMs = rawNextEndMs - now;
+        const cappedRemainingMs = Math.min(600_000, remainingMs);
+        const nextEndMs = now + cappedRemainingMs;
+        const nextConfiguredSec = Math.max(
+          10,
+          Math.min(600, Math.round((nextEndMs - anchorStartMs) / 1000))
+        );
+        setRestStartedAtMs(anchorStartMs);
+        setRestTotalSeconds(nextConfiguredSec);
+        setRestTargetEndTimeMs(nextEndMs);
+      }
+    },
+    [restStartedAtMs, restTargetEndTimeMs, restTotalSeconds]
+  );
+
+  const handleRestSkip = useCallback(() => {
+    setRestTargetEndTimeMs(null);
+    setRestStartedAtMs(null);
+    setRestCenterModalVisible(false);
+    setRestTimerPinned(false);
+    cancelRestTimerNotification().catch(() => {});
+  }, []);
+
+  const handleRestComplete = useCallback(() => {}, []);
+
+  // Finish Workout Action -> Transition to Celebratory Spoils Receipt
+  const handleFinishWorkout = async () => {
+    setRestTargetEndTimeMs(null);
+    setRestStartedAtMs(null);
+    setRestCenterModalVisible(false);
+    setRestTimerPinned(false);
+    cancelRestTimerNotification().catch(() => {});
+
+    if (completedSetCount === 0 && cardioEntries.length === 0) {
+      Alert.alert(
+        'Abandon Raid',
+        'No sets or segments have been logged yet. Would you like to abandon the raid?',
+        [
+          { text: 'Keep Training', style: 'cancel' },
+          {
+            text: 'Abandon Raid',
+            style: 'destructive',
+            onPress: () => {
+              abandonHybridSession();
+              if (onBackToLanding) {
+                onBackToLanding();
+              }
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    if (workoutMachine.phase === 'Idle') {
+      handleStartHybridSession();
+    }
+
+    let telemetryPayload: any = undefined;
     if (wearableLinked) {
       const endTime = Date.now();
       const samples = await wearableService.getHeartRateSamples(
@@ -270,13 +1024,11 @@ export const WorkoutLoggerScreen: React.FC = () => {
         endTime
       );
       await wearableService.stopLiveSession();
-
       const durationSec = Math.max(1, Math.round((endTime - sessionStartTimeRef.current) / 1000));
       const verification = verifyTelemetry(samples, durationSec, {
         workoutType: activeSession?.workoutType,
-        targetHrZone: hrZone,
+        targetHrZone: cardioZone,
       });
-
       telemetryPayload = {
         samples,
         source: wearableService.getPlatformSource(),
@@ -285,707 +1037,228 @@ export const WorkoutLoggerScreen: React.FC = () => {
       };
     }
 
-    finishHybridSession(selectedRaidId || undefined, telemetryPayload);
-  };
+    // Build CompletedWorkoutRecord for post-workout summary analyzer
+    const historyExercises: CompletedExerciseEntry[] = [];
+    for (const block of exerciseBlocks) {
+      const exMeta = exercises.find((e) => e.id === block.exerciseId);
+      const completedRows = block.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
+      if (completedRows.length > 0) {
+        historyExercises.push({
+          exerciseId: block.exerciseId,
+          exerciseName: exMeta?.name ?? block.exerciseName ?? block.exerciseId,
+          sets: completedRows.map((s, idx) => ({
+            setNumber: idx + 1,
+            weightKg: Math.max(0, Number(s.weightKgStr) || 0),
+            reps: Math.floor(Number(s.repsStr) || 0),
+            rpe: s.rpe ?? null,
+            setType: s.setType,
+            isWarmup: s.isWarmup,
+          })),
+        });
+      }
+    }
 
-  const handleLogCardioBlock = () => {
-    const mins = Math.max(5, Number(cardioMinutesStr) || 20);
-    const activityMap: Record<string, string> = {
-      zone2_run: 'running',
-      indoor_cycle: 'cycling',
-      hiit_rower: 'rowing',
-      sprint_intervals: 'running',
-      mobility_yoga: 'walking',
+    const nowMs = Date.now();
+    const currentWorkout: CompletedWorkoutRecord = {
+      id: `online_hist_${nowMs}`,
+      source: 'ONLINE',
+      performedAtIso: new Date(nowMs).toISOString(),
+      durationSeconds: sessionElapsedSec,
+      workoutCategory: activeCategory ?? 'GYM',
+      workoutType: 'HYBRID',
+      exercises: historyExercises,
     };
-    recordHybridCardioSegment({
-      exerciseId: cardioExerciseId,
-      activityType: activityMap[cardioExerciseId] ?? 'running',
-      durationSeconds: Math.round(mins * 60),
-      averageHrZone: hrZone,
+
+    const summary = evaluatePostWorkoutSummary({
+      currentWorkout,
+      previousWorkouts: workoutHistory,
+      consistencyStreak: consistencyStreak + 1,
+      cardioSegmentCount: cardioEntries.length,
     });
+
+    const draftTemplate: WorkoutPresetDefinition = {
+      id: '',
+      slug: '',
+      name: '',
+      category: activeCategory ?? 'GYM',
+      notes: '',
+      isSystemSeed: false,
+      blocks: {
+        exerciseBlocks: exerciseBlocks.map((b) => {
+          const completedSets = b.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
+          const chosenSets = completedSets.length > 0 ? completedSets : b.sets;
+          return {
+            blockId: b.blockId,
+            exerciseSlug: b.exerciseId,
+            exerciseName: b.exerciseName || b.exerciseId,
+            supersetGroupId: b.supersetGroupId ?? undefined,
+            sets: chosenSets.map((s) => ({
+              targetWeightKg: Math.max(0, Number(s.weightKgStr) || 0),
+              targetReps: Math.max(1, Math.floor(Number(s.repsStr) || 0)),
+              setType: s.setType || 'NORMAL',
+              targetRpe: s.rpe ?? 8.5,
+            })),
+          };
+        }),
+        cardioSegments: cardioEntries.map((c, idx) => ({
+          segmentId: c.id || `seg_${idx + 1}`,
+          exerciseSlug: c.exerciseId,
+          exerciseName: c.exerciseName,
+          activityType: c.activityType,
+          targetDurationMinutes: Math.max(1, Math.round(c.durationSeconds / 60)),
+          targetHrZone: c.averageHrZone,
+          targetRpe: c.rpe ?? null,
+        })),
+        sessionRpeTarget: null,
+      },
+    };
+
+    const res = finishHybridSession(selectedBoss.id || undefined, telemetryPayload);
+    if (!res.ok) {
+      setValidationError(res.error ?? 'Unable to consolidate workout.');
+      return;
+    }
+
+    setValidationError(null);
+    setPostWorkoutSummary(summary);
+    setSessionPresetTemplate(draftTemplate);
+    setPresetSavedInSession(false);
   };
 
-  const phase = workoutMachine.phase;
-  const activeSession = workoutMachine.activeSession;
-
-  // ==========================================================================
-  // PHASE 1 VIEW: `Idle` ("Crossing the Threshold" — Zero-Friction Launchpad)
-  // ==========================================================================
-  if (phase === 'Idle') {
-    const projectedTotalMultiplier = (
-      ARRIVAL_BOON_MULTIPLIER *
-      nextWorkoutMultiplier *
-      (comebackEligible || lowEnergyMode ? 1.15 : 1.0)
-    ).toFixed(2);
-
-    return (
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Workout Category Gateway Step */}
-        <WorkoutCategoryGateway
-          selectedCategory={selectedCategory}
-          secondaryCategories={[]}
-          presets={presets}
-          isOffline={false}
-          onSelectPrimaryCategory={(cat) => {
-            setSelectedCategory(cat);
-            if (cat === 'GYM') setMode('RESISTANCE');
-            else if (cat === 'CARDIO') setMode('CARDIO_LOW_MOD');
-            else if (cat === 'SPORT') setMode('CARDIO_HIGH_INTENSITY');
-            else if (cat === 'RECOVERY') setMode('ACTIVE_RECOVERY');
-          }}
-          onAddSecondarySegment={() => {}}
-          onRemoveSecondarySegment={() => {}}
-          onResetCategory={() => setSelectedCategory(null)}
-          onLoadPreset={(preset) => {
-            setSelectedCategory(preset.category);
-            if (preset.category === 'GYM') setMode('RESISTANCE');
-            else if (preset.category === 'CARDIO') setMode('CARDIO_LOW_MOD');
-            else if (preset.category === 'SPORT') setMode('CARDIO_HIGH_INTENSITY');
-            else if (preset.category === 'RECOVERY') setMode('ACTIVE_RECOVERY');
-
-            const firstBlock = preset.blocks?.exerciseBlocks?.[0];
-            if (firstBlock) {
-              setExerciseId(firstBlock.exerciseSlug);
-              setSupersetGroupId(firstBlock.supersetGroupId ?? null);
-              const firstSet = firstBlock.sets?.[0];
-              if (firstSet) {
-                setWeightKgStr(String(firstSet.targetWeightKg || 0));
-                setRepsStr(String(firstSet.targetReps || 0));
-                setSetType(firstSet.setType || 'NORMAL');
-                setIsWarmup(firstSet.setType === 'WARMUP');
-                setSelectedRpe(firstSet.targetRpe ?? 8.5);
-              }
-            }
-
-            startHybridSession({
-              workoutType:
-                preset.category === 'GYM'
-                  ? 'RESISTANCE'
-                  : preset.category === 'RECOVERY'
-                  ? 'ACTIVE_RECOVERY'
-                  : 'CARDIO_LOW_MOD',
-              workoutCategory: preset.category,
-              sourcePresetId: preset.id,
-              trigger: selectedGym ? 'GEOFENCE_GYM' : 'MANUAL_OPEN_WORLD',
-              gymId: selectedGym?.id ?? null,
-              gymName: selectedGym?.name ?? null,
-              lowEnergyMode,
-              initialRestSeconds: customRestOverrideSec ?? undefined,
-            });
-          }}
-          onOpenPresetDesigner={() => setShowPresetDesigner(true)}
-          onOpenTrainingHistory={() => setShowTrainingHistory(true)}
-        />
-
-        {/* Rest, Consistency & Tavern Multiplier Status */}
-        <View style={styles.statusCard}>
-          <View style={styles.statusRow}>
-            <View style={styles.badge}>
-              <Text style={styles.badgeTitle}>
-                {fatigueState.isRestingInTavern
-                  ? '🍺 Tavern Rested'
-                  : '🔥 Active Training Block'}
-              </Text>
-              <Text style={styles.badgeSub}>
-                Base Rest Mult: {nextWorkoutMultiplier.toFixed(2)}x • Streak:{' '}
-                {consistencyStreak} sessions
-              </Text>
-            </View>
-
-            <View style={[styles.badge, styles.boonPreviewBadge]}>
-              <Text style={styles.boonPreviewTitle}>⚡ {projectedTotalMultiplier}x Total XP</Text>
-              <Text style={styles.badgeSub}>Includes 1.25x Arrival Boon</Text>
-            </View>
-          </View>
-
-          {combatPenalties.stacks > 0 && (
-            <View style={styles.fatigueWarning}>
-              <Text style={styles.fatigueWarningText}>
-                ⚠️ Systemic Fatigue ({combatPenalties.stacks} stack): Log Active Recovery or rest!
-              </Text>
-            </View>
-          )}
-
-          {activeDungeonRun?.status === 'ACTIVE_WINDOW' && (
-            <Text style={styles.liveDungeonNotice}>
-              ⚡ Active 24h Dungeon Expedition: Completing this session injects a Live Combat Buff!
+  const renderPostWorkoutSummaryModal = () => (
+    <Modal
+      visible={postWorkoutSummary !== null && !showPresetDesigner}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setPostWorkoutSummary(null)}
+    >
+      <View style={styles.postWorkoutOverlay}>
+        <View style={styles.postWorkoutCard}>
+          <View style={styles.postWorkoutHeader}>
+            <Text style={styles.postWorkoutHeadline}>
+              {postWorkoutSummary?.headline}
             </Text>
-          )}
-        </View>
-
-        {/* Phase 1 Geofence / Open-World Arrival Selector */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>
-            Phase 1: Threshold Arrival Detection (Equal 1.25x Boon)
-          </Text>
-          <Text style={styles.helperText}>
-            Entering a registered Gym Geofence or starting Open-World Training grants an immediate
-            1.25x Arrival Boon with &lt;2s sensory confirmation and zero menu distractions.
-          </Text>
-
-          <View style={styles.gymSelectorCol}>
-            {registeredGyms.map((gym) => {
-              const active = selectedGymId === gym.id;
-              return (
-                <Pressable
-                  key={gym.id}
-                  style={[styles.gymOptionBtn, active && styles.gymOptionBtnActive]}
-                  onPress={() => setSelectedGymId(gym.id)}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.gymOptionTitle, active && { color: COLORS.gold }]}>
-                      🏛️ Geofence: {gym.name}
-                    </Text>
-                    <Text style={styles.gymOptionSub}>
-                      Cue: &ldquo;Adventurer&apos;s Guild Entered: {gym.name}&rdquo; • +1.25x XP
-                    </Text>
-                  </View>
-                  <Text style={styles.radioDot}>{active ? '●' : '○'}</Text>
-                </Pressable>
-              );
-            })}
-
-            <Pressable
-              style={[styles.gymOptionBtn, selectedGymId === null && styles.gymOptionBtnActive]}
-              onPress={() => setSelectedGymId(null)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[styles.gymOptionTitle, selectedGymId === null && { color: COLORS.gold }]}
-                >
-                  🧭 Outside Gym: Open-World Training
-                </Text>
-                <Text style={styles.gymOptionSub}>
-                  Cue: &ldquo;Open-World Training Begun.&rdquo; • Equal +1.25x XP Boon
-                </Text>
-              </View>
-              <Text style={styles.radioDot}>{selectedGymId === null ? '●' : '○'}</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Anti-Streak Collapse Safety Net Pre-Check */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>
-            Anti-Streak Collapse Safety Net ({resilienceShields} Iron Will Shields Earned)
-          </Text>
-          <View style={styles.resilienceTogglesRow}>
-            <Pressable
-              style={[styles.resilienceChip, lowEnergyMode && styles.resilienceChipActive]}
-              onPress={() => setLowEnergyMode((v) => !v)}
-            >
-              <Text
-                style={[
-                  styles.resilienceChipText,
-                  lowEnergyMode && styles.resilienceChipTextActive,
-                ]}
-              >
-                {lowEnergyMode ? '✅ ' : '🔋 '}Low-Energy / High-Stress Day (+15% Resilience Bonus)
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.resilienceChip, comebackEligible && styles.resilienceChipActive]}
-              onPress={() => simulateLayoffHours(comebackEligible ? 24 : 96)}
-            >
-              <Text
-                style={[
-                  styles.resilienceChipText,
-                  comebackEligible && styles.resilienceChipTextActive,
-                ]}
-              >
-                {comebackEligible
-                  ? `🛡️ Comeback Active (${hoursSinceLastWorkout}h since last)`
-                  : '⏱️ Simulate 96h Missed-Session Gap'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={[styles.resilienceChip, wearableLinked && styles.resilienceChipActive]}
-              onPress={toggleWearableLink}
-            >
-              <Text
-                style={[
-                  styles.resilienceChipText,
-                  wearableLinked && styles.resilienceChipTextActive,
-                ]}
-              >
-                {wearableLinked
-                  ? `❤️ Wearable Linked (${wearableService.getPlatformSource()} • Ironman Active)`
-                  : '⌚ Link Wearable (Apple Health / Health Connect)'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Workout Modality & Raid Boss Channel */}
-        <Text style={styles.sectionTitle}>Select Training Discipline</Text>
-        <View style={styles.modeTabs}>
-          {(
-            [
-              { key: 'RESISTANCE', label: '🏋️ Strength (STR)' },
-              { key: 'CARDIO_LOW_MOD', label: '🏃 Zone 1-3 (END)' },
-              { key: 'CARDIO_HIGH_INTENSITY', label: '⚡ Zone 4-5 (AGI)' },
-              { key: 'ACTIVE_RECOVERY', label: '🧘 Recovery (+25%)' },
-            ] as const
-          ).map((t) => (
-            <Pressable
-              key={t.key}
-              style={[styles.modeTab, mode === t.key && styles.modeTabActive]}
-              onPress={() => handleModeSwitch(t.key)}
-            >
-              <Text style={[styles.modeTabText, mode === t.key && styles.modeTabTextActive]}>
-                {t.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Channel Post-Workout Energy Into Raid Boss</Text>
-          <View style={styles.exChipsRow}>
-            {raids.map((r) => (
-              <Pressable
-                key={r.id}
-                style={[styles.exChip, selectedRaidId === r.id && styles.exChipActive]}
-                onPress={() => setSelectedRaidId(r.id)}
-              >
-                <Text
-                  style={[styles.exChipText, selectedRaidId === r.id && styles.exChipTextActive]}
-                >
-                  {r.accessType === 'GUILD_ONLY' ? '🛡️ ' : '🌍 '}
-                  {r.bossName}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        {/* High-Visibility 64dp Threshold CTA */}
-        <Pressable style={styles.thresholdStartBtn} onPress={handleCrossThreshold}>
-          <Text style={styles.thresholdStartTitle}>
-            ⚔️ {selectedGym ? `ENTER ${selectedGym.name.toUpperCase()}` : 'BEGIN OPEN-WORLD TRAINING'}
-          </Text>
-          <Text style={styles.thresholdStartSub}>
-            Instant 1.25x Arrival Boon • Engages Zero-Distraction Focus Lock
-          </Text>
-        </Pressable>
-
-        <PresetDesignerModal
-          visible={showPresetDesigner}
-          onSavePreset={(preset) => {
-            savePreset(preset);
-            triggerSensoryCue('WORKOUT_PRESET_LOADED');
-          }}
-          onDeletePreset={deletePreset}
-          onClose={() => setShowPresetDesigner(false)}
-        />
-
-        <TrainingHistoryScreen
-          visible={showTrainingHistory}
-          onBack={() => setShowTrainingHistory(false)}
-        />
-      </ScrollView>
-    );
-  }
-
-  // ==========================================================================
-  // PHASE 2 VIEW: `DungeonActive` & `Resting` (Sweat-Proof Operant Loop)
-  // ==========================================================================
-  if ((phase === 'DungeonActive' || phase === 'Resting') && activeSession) {
-    const boss = activeSession.encounterBoss;
-    const bossHpPct = Math.max(0, Math.min(100, Math.round((boss.currentHp / boss.maxHp) * 100)));
-    const micro = workoutMachine.lastMicroFeedback;
-    const isResistanceMode =
-      activeSession.workoutType === 'RESISTANCE' || activeSession.workoutType === 'HYBRID';
-
-    return (
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-        {/* Phase 1 Instantaneous (<1.6s) Threshold Banner — Non-Modal, Auto-Fading */}
-        {arrivalBanner && (
-          <View style={styles.arrivalToast}>
-            <Text style={styles.arrivalToastTitle}>⚡ {arrivalBanner.headline}</Text>
-            <Text style={styles.arrivalToastSub}>{arrivalBanner.subheadline}</Text>
-          </View>
-        )}
-
-        {/* Ultra-Minimalist Micro-Feedback Bar: Boss HP + Ticking XP/Gold Counters */}
-        <Animated.View
-          style={[
-            styles.bossHudCard,
-            { transform: [{ scale: microPulseAnim }] },
-          ]}
-        >
-          <View style={styles.bossTopRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bossLabel}>
-                👹 {boss.bossName}{' '}
-                {boss.defeatedCount > 0 ? `(Tier ${boss.defeatedCount + 1})` : ''}
-              </Text>
-              <Text style={styles.bossHpNumbers}>
-                HP {boss.currentHp.toLocaleString()} / {boss.maxHp.toLocaleString()} ({bossHpPct}%)
-              </Text>
-            </View>
-            <View style={styles.liveCountersRight}>
-              <Text style={styles.liveXpTicker}>+{activeSession.accumulatedMicroXp} XP</Text>
-              <Text style={styles.liveGoldTicker}>🪙 +{activeSession.accumulatedMicroGold}g</Text>
-            </View>
-          </View>
-
-          <View style={styles.bossHpTrack}>
-            <View style={[styles.bossHpFill, { width: `${bossHpPct}%` }]} />
-          </View>
-
-          {micro && (
-            <View style={styles.microFeedbackStrip}>
-              <Text style={styles.microFeedbackText}>
-                ✨ Set #{activeSession.setLogs.length} Logged: +{micro.xpTick} XP • +
-                {micro.goldTick}g • −{micro.bossHpDamage} Boss HP
-                {micro.isLivePrPace ? ' • 💥 PR PACE!' : ''}
-              </Text>
-            </View>
-          )}
-        </Animated.View>
-
-        {/* Wearable Biometric Telemetry & Ironman HUD */}
-        <View style={styles.wearableLiveCard}>
-          <View style={styles.wearableLiveLeft}>
-            <Text style={styles.wearableHeartPulseIcon}>{wearableLinked ? '❤️' : '⌚'}</Text>
-            <View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={styles.wearableLiveBpmText}>
-                  {wearableLinked ? `${liveBpm} BPM` : 'Wearable Disconnected'}
-                </Text>
-                {wearableLinked && (
-                  <View style={styles.ironmanBadgePill}>
-                    <Text style={styles.ironmanBadgeText}>IRONMAN ARMED</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.wearableLiveSubtext}>
-                {wearableLinked
-                  ? `Hardware Telemetry: ${wearableService.getPlatformSource()} • Biometrics Active`
-                  : 'Manual Honesty Mode • Tap to Link Wearable'}
-              </Text>
-            </View>
-          </View>
-          <Pressable
-            style={[styles.wearableMiniToggleBtn, wearableLinked && styles.wearableMiniToggleBtnActive]}
-            onPress={toggleWearableLink}
-          >
-            <Text
-              style={[
-                styles.wearableMiniToggleText,
-                wearableLinked && styles.wearableMiniToggleTextActive,
-              ]}
-            >
-              {wearableLinked ? 'UNLINK' : 'LINK'}
+            <Text style={styles.postWorkoutEncouragementText}>
+              {postWorkoutSummary?.encouragingMessage}
             </Text>
-          </Pressable>
-        </View>
+          </View>
 
-        {/* Auto-Rest Integration: Stamina Recharging Ring when in `Resting` state */}
-        {phase === 'Resting' && (
-          <StaminaRingTimer
-            restTimer={activeSession.restTimer}
-            lockscreenAlertArmed={restNotificationArmed}
-            onAdjustDelta={(delta) => adjustHybridRestTimer({ deltaSeconds: delta })}
-            onSelectPreset={(sec) => {
-              setCustomRestOverrideSec(sec);
-              adjustHybridRestTimer({ newDurationSeconds: sec });
-            }}
-            onSkipRest={skipHybridRest}
-          />
-        )}
-
-        {/* Sweat-Proof Set Logger / Next-Set Preview Card */}
-        {isResistanceMode ? (
-          <View style={styles.card}>
-            <View style={styles.nextSetHeaderRow}>
-              <Text style={styles.cardTitle}>
-                {phase === 'Resting'
-                  ? `⏭️ Next-Set Preview (Set #${activeSession.setLogs.length + 1})`
-                  : `🏋️ Active Set #${activeSession.setLogs.length + 1}`}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <TouchableOpacity
-                  style={styles.sweatHistoryBtn}
-                  onPress={() => setShowTrainingHistory(true)}
-                  testID="online-active-history-btn"
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.sweatHistoryBtnText}>📊 History</Text>
-                </TouchableOpacity>
-                <Pressable
-                  style={[styles.warmupToggle, (isWarmup || setType === 'WARMUP') && styles.warmupToggleActive]}
-                  onPress={() => {
-                    const next = !isWarmup;
-                    setIsWarmup(next);
-                    setSetType(next ? 'WARMUP' : 'NORMAL');
-                  }}
-                >
-                  <Text style={styles.warmupToggleText}>
-                    {isWarmup || setType === 'WARMUP' ? '🔥 Warm-Up Set' : '⚔️ Working Set'}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-
-            {/* Set Type & Superset Grouping Bar */}
-            <View style={styles.setTypeAndSupersetBar}>
-              <View style={styles.setTypeItem}>
-                <Text style={styles.subfieldLabel}>TAG:</Text>
-                <TouchableOpacity
-                  style={[styles.setTypeBadgeBtn, { borderColor: SET_TYPE_COLORS[setType] }]}
-                  onPress={() => {
-                    const next = cycleSetType(setType);
-                    setSetType(next);
-                    setIsWarmup(next === 'WARMUP');
-                    if (next === 'FAILURE' || next === 'AMRAP') {
-                      setSelectedRpe(10);
-                    }
-                    triggerSensoryCue('SET_MICRO_REWARD_TICK');
-                  }}
-                >
-                  <Text style={[styles.setTypeBadgeText, { color: SET_TYPE_COLORS[setType] }]}>
-                    [{SET_TYPE_DESCRIPTORS.find((d) => d.type === setType)?.shortCode || 'N'}] {setType}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.supersetItem}>
-                <Text style={styles.subfieldLabel}>SUPERSET:</Text>
-                <TouchableOpacity
-                  style={[styles.supersetGroupBtn, !!supersetGroupId && styles.supersetGroupBtnActive]}
-                  onPress={() => {
-                    const groups = [null, 'A', 'B', 'C'];
-                    const nextIdx = (groups.indexOf(supersetGroupId) + 1) % groups.length;
-                    setSupersetGroupId(groups[nextIdx] ?? null);
-                    triggerSensoryCue('SUPERSET_TRANSITION_TICK');
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.supersetGroupText,
-                      !!supersetGroupId && styles.supersetGroupTextActive,
-                    ]}
-                  >
-                    {supersetGroupId ? `Group ${supersetGroupId}` : 'None'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Large-Target Exercise Selector */}
+          {postWorkoutSummary?.hasImprovements ? (
             <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginBottom: 12 }}
+              style={styles.improvementsScroll}
+              contentContainerStyle={styles.improvementsScrollContent}
             >
-              <View style={styles.exChipsRow}>
-                {resistanceCatalog.map((ex) => {
-                  const selected = exerciseId === ex.id;
-                  return (
-                    <Pressable
-                      key={ex.id}
-                      style={[styles.sweatExChip, selected && styles.exChipActive]}
-                      onPress={() => setExerciseId(ex.id)}
+              <Text style={styles.improvementsSectionTitle}>
+                LIFT PROGRESSION HIGHLIGHTS
+              </Text>
+              {postWorkoutSummary.improvements.map((imp) => (
+                <View key={imp.exerciseId} style={styles.improvementCard}>
+                  <View style={styles.improvementCardLeft}>
+                    <Text style={styles.improvementExName}>{imp.exerciseName}</Text>
+                    <Text style={styles.improvementDetailText}>{imp.detailText}</Text>
+                  </View>
+                  <View style={styles.improvementCardRight}>
+                    <Text style={styles.improvementTopSet}>{imp.topSetLabel}</Text>
+                    <View
+                      style={[
+                        styles.improvementBadgePill,
+                        imp.isAllTimePr && styles.prBadgePill,
+                      ]}
                     >
-                      <Text style={[styles.exChipText, selected && styles.exChipTextActive]}>
-                        {ex.name}
+                      <Text
+                        style={[
+                          styles.improvementBadgeText,
+                          imp.isAllTimePr && styles.prBadgeText,
+                        ]}
+                      >
+                        {imp.improvementBadge}
                       </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                    </View>
+                  </View>
+                </View>
+              ))}
             </ScrollView>
-
-            {/* Sweaty-Hand 58dp Stepper Controls for Weight & Reps */}
-            <View style={styles.sweatControlsGrid}>
-              <View style={styles.sweatStepperCard}>
-                <Text style={styles.sweatFieldLabel}>LOAD (KG)</Text>
-                <View style={styles.stepperRow}>
-                  <Pressable style={styles.bigStepBtn} onPress={() => stepWeight(-2.5)}>
-                    <Text style={styles.bigStepBtnText}>−2.5</Text>
-                  </Pressable>
-                  <TextInput
-                    style={styles.bigNumericInput}
-                    keyboardType="numeric"
-                    value={weightKgStr}
-                    onChangeText={setWeightKgStr}
-                  />
-                  <Pressable style={styles.bigStepBtn} onPress={() => stepWeight(2.5)}>
-                    <Text style={styles.bigStepBtnText}>+2.5</Text>
-                  </Pressable>
-                </View>
-                <Text style={[styles.e1rmLiveHint, isOnPrPace && { color: COLORS.gold }]}>
-                  {isWarmup
-                    ? 'Warm-up (0 fatigue tax)'
-                    : isOnPrPace
-                      ? `⚡ PR PACE! e1RM ${liveE1RM}kg > ${priorPR?.bestE1RM}kg`
-                      : `e1RM: ${liveE1RM}kg (${Math.round(relIntensity * 100)}% rel)`}
+          ) : (
+            <View style={styles.effortStatsContainer}>
+              <View style={styles.effortStatPill}>
+                <Text style={styles.effortStatIcon}>🔥</Text>
+                <Text style={styles.effortStatValue}>
+                  {postWorkoutSummary?.streakCount ?? 1} Session{(postWorkoutSummary?.streakCount ?? 1) === 1 ? '' : 's'}
                 </Text>
+                <Text style={styles.effortStatLabel}>Streak Sustained</Text>
               </View>
-
-              <View style={styles.sweatStepperCard}>
-                <Text style={styles.sweatFieldLabel}>REPS COMPLETED</Text>
-                <View style={styles.stepperRow}>
-                  <Pressable style={styles.bigStepBtn} onPress={() => stepReps(-1)}>
-                    <Text style={styles.bigStepBtnText}>−1</Text>
-                  </Pressable>
-                  <TextInput
-                    style={styles.bigNumericInput}
-                    keyboardType="numeric"
-                    value={repsStr}
-                    onChangeText={setRepsStr}
-                  />
-                  <Pressable style={styles.bigStepBtn} onPress={() => stepReps(1)}>
-                    <Text style={styles.bigStepBtnText}>+1</Text>
-                  </Pressable>
-                </View>
-                <Text style={styles.e1rmLiveHint}>
-                  Optimal Rest: {liveRestAdvice.recommendedSeconds}s ({liveRestAdvice.headline.split('(')[0]?.trim()})
+              <View style={styles.effortStatPill}>
+                <Text style={styles.effortStatIcon}>✓</Text>
+                <Text style={styles.effortStatValue}>
+                  {postWorkoutSummary?.totalCompletedSets ?? 0} Sets
+                </Text>
+                <Text style={styles.effortStatLabel}>Completed</Text>
+              </View>
+              <View style={styles.effortStatPill}>
+                <Text style={styles.effortStatIcon}>💪</Text>
+                <Text style={styles.effortStatValue}>
+                  {(postWorkoutSummary?.totalTonnageKg ?? 0) > 0
+                    ? `${postWorkoutSummary?.totalTonnageKg}kg`
+                    : 'Habit Banked'}
+                </Text>
+                <Text style={styles.effortStatLabel}>
+                  {(postWorkoutSummary?.totalTonnageKg ?? 0) > 0 ? 'Total Tonnage' : 'Effort Logged'}
                 </Text>
               </View>
             </View>
+          )}
 
-            {/* 1-Tap Perceived Exertion (RPE) Strip */}
-            <Text style={styles.rpeStripLabel}>Perceived Exertion (RPE): {selectedRpe}</Text>
-            <View style={styles.rpePillsRow}>
-              {RPE_OPTIONS.map((rVal) => {
-                const active = selectedRpe === rVal;
-                return (
-                  <Pressable
-                    key={rVal}
-                    style={[styles.rpePill, active && styles.rpePillActive]}
-                    onPress={() => setSelectedRpe(rVal)}
-                  >
-                    <Text style={[styles.rpePillText, active && styles.rpePillTextActive]}>
-                      {rVal}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {/* Primary 64dp Sweaty-Hand Set Completion CTA */}
-            <Pressable style={styles.logSetGiantBtn} onPress={handleLogSet}>
-              <Text style={styles.logSetGiantTitle}>
-                ⚡ LOG SET #{activeSession.setLogs.length + 1} ({weightNum}kg × {repsNum})
+          <View style={styles.postWorkoutActions}>
+            <TouchableOpacity
+              style={[
+                styles.postWorkoutSavePresetBtn,
+                presetSavedInSession && styles.postWorkoutSavePresetBtnSuccess,
+              ]}
+              onPress={() => {
+                if (sessionPresetTemplate) {
+                  setEditingPresetDraft(sessionPresetTemplate);
+                  setShowPresetDesigner(true);
+                }
+              }}
+              activeOpacity={0.7}
+              testID="post-workout-save-preset-btn"
+            >
+              <Text
+                style={[
+                  styles.postWorkoutSavePresetBtnText,
+                  presetSavedInSession && styles.postWorkoutSavePresetBtnTextSuccess,
+                ]}
+              >
+                {presetSavedInSession
+                  ? '✓ Routine Preset Saved'
+                  : '💾 Save Session as Routine Preset'}
               </Text>
-              <Text style={styles.logSetGiantSub}>
-                Triggers Micro-Reward & Auto-Starts{' '}
-                {customRestOverrideSec ?? liveRestAdvice.recommendedSeconds}s Stamina Ring
-              </Text>
-            </Pressable>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.postWorkoutContinueBtn}
+              onPress={() => setPostWorkoutSummary(null)}
+              activeOpacity={0.7}
+              testID="post-workout-continue-btn"
+            >
+              <Text style={styles.postWorkoutContinueBtnText}>Continue to Spoils →</Text>
+            </TouchableOpacity>
           </View>
-        ) : (
-          /* Cardio / Recovery Intra-Workout Logger */
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Log Cardio / Recovery Interval Block</Text>
-            <View style={styles.inputsRow}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Minutes</Text>
-                <TextInput
-                  style={styles.bigNumericInput}
-                  keyboardType="numeric"
-                  value={cardioMinutesStr}
-                  onChangeText={setCardioMinutesStr}
-                />
-              </View>
-              <View style={{ flex: 2 }}>
-                <Text style={styles.inputLabel}>Target HR Zone</Text>
-                <View style={styles.rpePillsRow}>
-                  {([1, 2, 3, 4, 5] as HeartRateZone[]).map((z) => (
-                    <Pressable
-                      key={z}
-                      style={[styles.rpePill, hrZone === z && styles.rpePillActive]}
-                      onPress={() => setHrZone(z)}
-                    >
-                      <Text style={[styles.rpePillText, hrZone === z && styles.rpePillTextActive]}>
-                        Z{z}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            </View>
-
-            <Pressable style={styles.logSetGiantBtn} onPress={handleLogCardioBlock}>
-              <Text style={styles.logSetGiantTitle}>
-                ⚡ RECORD {cardioMinutesStr}m ZONE {hrZone} BLOCK
-              </Text>
-            </Pressable>
-          </View>
-        )}
-
-        {/* Minimalist Intra-Session Set Ledger */}
-        {activeSession.setLogs.length > 0 && (
-          <View style={styles.ledgerCard}>
-            <Text style={styles.ledgerTitle}>
-              Completed Sets ({activeSession.setLogs.length})
-            </Text>
-            {activeSession.setLogs.map((s) => (
-              <View key={s.id} style={styles.ledgerRow}>
-                <Text style={styles.ledgerLeft}>
-                  #{s.setNumber} {s.exerciseName}: {s.weightKg}kg × {s.reps}
-                  {s.rpe ? ` @ RPE ${s.rpe}` : ''}
-                </Text>
-                <Text style={styles.ledgerRight}>
-                  +{s.microXpTick} XP • +{s.microGoldTick}g {s.isLivePersonalRecordPace ? '💥' : ''}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {workoutMachine.lastError && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{workoutMachine.lastError}</Text>
-          </View>
-        )}
-
-        {/* Finish Workout (Phase 3 Trigger) & Abandon Controls */}
-        <View style={styles.sessionFooterRow}>
-          <Pressable
-            style={[
-              styles.finishWorkoutBtn,
-              activeSession.setLogs.length === 0 &&
-                activeSession.cardioSegments.length === 0 &&
-                styles.btnDisabled,
-            ]}
-            onPress={handleFinishWorkout}
-          >
-            <Text style={styles.finishWorkoutBtnText}>
-              🏁 FINISH WORKOUT & CONSOLIDATE REWARDS
-            </Text>
-          </Pressable>
-
-          <Pressable style={styles.abandonBtn} onPress={abandonHybridSession}>
-            <Text style={styles.abandonBtnText}>Cancel</Text>
-          </Pressable>
         </View>
+      </View>
+    </Modal>
+  );
 
-        <PresetDesignerModal
-          visible={showPresetDesigner}
-          onSavePreset={(preset) => {
-            savePreset(preset);
-            triggerSensoryCue('WORKOUT_PRESET_LOADED');
-          }}
-          onDeletePreset={deletePreset}
-          onClose={() => setShowPresetDesigner(false)}
-        />
-
-        <TrainingHistoryScreen
-          visible={showTrainingHistory}
-          onBack={() => setShowTrainingHistory(false)}
-        />
-      </ScrollView>
-    );
-  }
+  // Category Visibility Flags
+  const showResistanceUI =
+    !activeCategory || activeCategory === 'GYM' || secondaryCategories.includes('GYM');
+  const showCardioUI = activeCategory === 'CARDIO' || secondaryCategories.includes('CARDIO');
+  const showSportUI = activeCategory === 'SPORT' || secondaryCategories.includes('SPORT');
+  const showRecoveryUI =
+    activeCategory === 'RECOVERY' || secondaryCategories.includes('RECOVERY');
 
   // ==========================================================================
-  // PHASE 3A VIEW: `DungeonComplete` ("Dungeon Cleared" Effort Consolidation)
+  // PHASE 3A VIEW: `DungeonComplete` (Consolidated Spoils Hero Receipt)
   // ==========================================================================
   if (phase === 'DungeonComplete' && activeSession?.rewardPayload) {
     const rp = activeSession.rewardPayload;
@@ -997,9 +1270,7 @@ export const WorkoutLoggerScreen: React.FC = () => {
           <Text style={styles.clearedEyebrow}>PHASE 3 • DELAYED GRATIFICATION CONSOLIDATION</Text>
           <Text style={styles.clearedHeadline}>🏰 DUNGEON CLEARED!</Text>
           <Text style={styles.clearedSub}>
-            {activeSession.arrivalBoon.gymName
-              ? `Guild Sanctum: ${activeSession.arrivalBoon.gymName}`
-              : 'Open-World Expedition Completed'}
+            Guild Sanctum: {selectedGym.name} • Boss Slain: {selectedBoss.name}
           </Text>
 
           {/* Biometric Telemetry Mode Badge */}
@@ -1074,11 +1345,11 @@ export const WorkoutLoggerScreen: React.FC = () => {
             </Text>
           </View>
 
-          {/* Anti-Streak Collapse ("Resilience Bonus") Banner */}
+          {/* Anti-Streak Collapse Resilience Banner */}
           {rp.resilienceBonus.triggered && (
             <View style={styles.resilienceAwardedCard}>
               <Text style={styles.resilienceAwardedTitle}>
-                🛡️ {rp.resilienceBonus.badgeTitle} (+{rp.resilienceBonus.flatBonusXp} XP & +
+                🛡️ {rp.resilienceBonus.badgeTitle} (+{rp.resilienceBonus.flatBonusXp} XP &amp; +
                 {rp.resilienceBonus.flatBonusGold}g)
               </Text>
               <Text style={styles.resilienceAwardedBody}>{rp.resilienceBonus.message}</Text>
@@ -1089,11 +1360,25 @@ export const WorkoutLoggerScreen: React.FC = () => {
           {crit.triggered && crit.guaranteedLootDrop && (
             <View style={styles.prCritCard}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Image
-                  source={{ uri: LOOT_SPRITES.relic_trophy }}
-                  style={{ width: 44, height: 44 }}
-                  contentFit="contain"
-                />
+                {getItemIconSource(crit.guaranteedLootDrop.itemSlug) ? (
+                  <Image
+                    source={getItemIconSource(crit.guaranteedLootDrop.itemSlug) as any}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 8,
+                      borderWidth: 1.5,
+                      borderColor: RARITY_COLORS[crit.guaranteedLootDrop.rarity] ?? COLORS.gold,
+                    }}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <Image
+                    source={{ uri: LOOT_SPRITES.relic_trophy }}
+                    style={{ width: 44, height: 44 }}
+                    contentFit="contain"
+                  />
+                )}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.prCritHeadline}>
                     💥 CRITICAL TRAINING BONUS! (+{crit.totalBonusXp} Bonus XP)
@@ -1116,40 +1401,56 @@ export const WorkoutLoggerScreen: React.FC = () => {
           {lastHybridConsolidation && lastHybridConsolidation.raidEnergy > 0 && (
             <Text style={styles.raidEnergyText}>
               🐉 Channeled {lastHybridConsolidation.raidEnergy.toLocaleString()} Workout Energy into
-              7-Day Raid Boss!
+              Guild Raid Boss!
             </Text>
           )}
         </View>
 
         <Pressable style={styles.thresholdStartBtn} onPress={proceedToHybridLootReview}>
           <Text style={styles.thresholdStartTitle}>
-            🎁 ENTER LOOT REVIEW & STAT ALLOCATION
+            🎁 ENTER LOOT REVIEW &amp; STAT ALLOCATION
           </Text>
           <Text style={styles.thresholdStartSub}>
-            Unseal [{rp.lootChest.tier}] {rp.lootChest.chestName} • Allocate Talent & Gear Upgrades
+            Unseal [{rp.lootChest.tier}] {rp.lootChest.chestName} • Allocate Talent &amp; Gear Upgrades
           </Text>
         </Pressable>
+
+        {renderPostWorkoutSummaryModal()}
+
+        <PresetDesignerModal
+          visible={showPresetDesigner}
+          editingPreset={editingPresetDraft ?? sessionPresetTemplate}
+          onSavePreset={(preset) => {
+            savePreset(preset);
+            setPresetSavedInSession(true);
+            triggerSensoryCue('WORKOUT_PRESET_LOADED');
+            Alert.alert('Preset Saved', `Routine "${preset.name}" has been saved.`);
+          }}
+          onDeletePreset={deletePreset}
+          onClose={() => {
+            setShowPresetDesigner(false);
+            setEditingPresetDraft(null);
+          }}
+        />
       </ScrollView>
     );
   }
 
   // ==========================================================================
-  // PHASE 3B VIEW: `LootReview` (Effort-Gated Chest + Stat/Equipment Upgrades)
+  // PHASE 3B VIEW: `LootReview` (Unseal Chest & Upgrade Progression)
   // ==========================================================================
   if (phase === 'LootReview' && activeSession?.rewardPayload) {
     const rp = activeSession.rewardPayload;
     const chest = rp.lootChest;
     const chestColor = RARITY_COLORS[chest.tier] ?? COLORS.gold;
-    const visibleTrees = DEFAULT_TALENT_TREES.filter((t) => t.governingStat === allocStatTab);
-    const equippableGear = inventory.filter(isEquippableInventoryEntry);
+    const totalAvailTalentPts = Object.values(stats).reduce((acc, s) => acc + s.pointsAvailable, 0);
 
     return (
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Effort-Gated Loot Chest Sequence */}
         <View style={[styles.chestCard, { borderColor: chestColor }]}>
-          <Text style={styles.clearedEyebrow}>EFFORT & CONSISTENCY REWARD CHEST</Text>
+          <Text style={styles.clearedEyebrow}>EFFORT &amp; CONSISTENCY REWARD CHEST</Text>
 
-          {/* Sprite-Based Loot Chest Icon */}
           <View style={{ alignItems: 'center', marginVertical: 12 }}>
             <Image
               source={{ uri: getLootChestSpriteUri(chest.tier) }}
@@ -1183,756 +1484,1818 @@ export const WorkoutLoggerScreen: React.FC = () => {
           ) : (
             <View style={styles.revealedLootBox}>
               <Text style={styles.revealedHeader}>Unsealed Reliquary Drops:</Text>
-              {chest.drops.map((d) => (
-                <View key={d.itemSlug} style={styles.lootDropRow}>
-                  <Image
-                    source={{ uri: LOOT_SPRITES.ore_mythic }}
-                    style={{ width: 22, height: 22, marginRight: 8 }}
-                    contentFit="contain"
-                  />
-                  <Text
-                    style={[
-                      styles.revealedDropLine,
-                      { color: RARITY_COLORS[d.rarity] ?? COLORS.textPrimary },
-                    ]}
-                  >
-                    • {d.quantity}x {d.itemName} [{d.rarity}]
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-
-        {/* Post-Workout Character Progression (Unlocked Here!) */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>
-            🔓 Post-Workout Character Progression (7-Stat System)
-          </Text>
-          <Text style={styles.helperText}>
-            Focus Lock lifted! Allocate earned Stat Talent Points across all 7 holistic archetypes.
-          </Text>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-            {(
-              [
-                'STRENGTH',
-                'ENDURANCE',
-                'AGILITY',
-                'DEXTERITY',
-                'CONSTITUTION',
-                'WISDOM',
-                'SPIRIT',
-              ] as const
-            ).map((st) => {
-              const s = stats[st];
-              const req = xpRequiredForStatLevel(s.level);
-              const active = allocStatTab === st;
-              const meta = STAT_XP_META[st];
-              return (
-                <Pressable
-                  key={st}
-                  style={[styles.modeTab, active && styles.modeTabActive, { minWidth: 105, marginRight: 8 }]}
-                  onPress={() => {
-                    setAllocStatTab(st);
-                    setAllocFeedback(null);
-                  }}
-                >
-                  <Text style={[styles.modeTabText, active && styles.modeTabTextActive]}>
-                    {meta?.emoji} {meta?.label ?? st} Lv.{s.level} ({s.pointsAvailable}p)
-                  </Text>
-                  <Text style={{ color: COLORS.textMuted, fontSize: 10, marginTop: 2 }}>
-                    {s.xp}/{req} XP
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          {allocFeedback && <Text style={styles.allocFeedbackText}>{allocFeedback}</Text>}
-
-          {visibleTrees.map((tree) => (
-            <View key={tree.slug} style={styles.inlineTreeBox}>
-              <Text style={styles.inlineTreeTitle}>
-                {tree.name} ({tree.archetypeRole})
-              </Text>
-              {tree.nodes.slice(0, 2).map((node) => {
-                const rank = unlockedTalentRanks[node.id] ?? 0;
-                const check = validateTalentAllocation(
-                  {
-                    availablePoints: {
-                      STRENGTH: stats.STRENGTH.pointsAvailable,
-                      ENDURANCE: stats.ENDURANCE.pointsAvailable,
-                      AGILITY: stats.AGILITY.pointsAvailable,
-                      DEXTERITY: stats.DEXTERITY.pointsAvailable,
-                      CONSTITUTION: stats.CONSTITUTION.pointsAvailable,
-                      WISDOM: stats.WISDOM.pointsAvailable,
-                      SPIRIT: stats.SPIRIT.pointsAvailable,
-                    },
-                    unlockedNodeRanks: unlockedTalentRanks,
-                  },
-                  node.id,
-                  DEFAULT_TALENT_TREES
-                );
+              {chest.drops.map((d) => {
+                const iconSrc = getItemIconSource(d.itemSlug);
                 return (
-                  <View key={node.id} style={styles.inlineNodeRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.inlineNodeName}>
-                        {node.name} ({rank}/{node.maxRank})
-                      </Text>
-                      <Text style={styles.inlineNodeDesc}>{node.description}</Text>
-                    </View>
-                    <Pressable
-                      style={[styles.inlineAllocBtn, !check.valid && styles.btnDisabled]}
-                      onPress={() => {
-                        const res = unlockTalentNode(node.id);
-                        setAllocFeedback(
-                          res.ok ? `Unlocked +1 ${node.name}!` : (res.error ?? 'Locked')
-                        );
-                      }}
+                  <View key={d.itemSlug} style={styles.lootDropRow}>
+                    {iconSrc ? (
+                      <Image
+                        source={iconSrc as any}
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 6,
+                          marginRight: 10,
+                          borderWidth: 1,
+                          borderColor: RARITY_COLORS[d.rarity] ?? COLORS.borderHighlight,
+                        }}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <Image
+                        source={{ uri: LOOT_SPRITES.ore_mythic }}
+                        style={{ width: 22, height: 22, marginRight: 8 }}
+                        contentFit="contain"
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.revealedDropLine,
+                        { color: RARITY_COLORS[d.rarity] ?? COLORS.textPrimary, flex: 1 },
+                      ]}
                     >
-                      <Text style={styles.inlineAllocBtnText}>
-                        {rank >= node.maxRank ? 'MAX' : `+1 (${node.pointCostPerRank}p)`}
-                      </Text>
-                    </Pressable>
+                      • {d.quantity}x {d.itemName} [{d.rarity}]
+                    </Text>
                   </View>
                 );
               })}
             </View>
-          ))}
+          )}
+        </View>
 
-          {/* Quick Equipment Upgrade List */}
-          <Text style={[styles.cardTitle, { marginTop: 10 }]}>Equipment Loadout Upgrades</Text>
-          {equippableGear.map((g) => (
-            <View key={g.slug} style={styles.inlineNodeRow}>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={[
-                    styles.inlineNodeName,
-                    { color: RARITY_COLORS[g.rarity] ?? COLORS.textPrimary },
-                  ]}
-                >
-                  {g.equipped ? '✅ ' : ''}
-                  {g.name} [{g.rarity}]
-                </Text>
-                <Text style={styles.inlineNodeDesc}>
-                  Req: STR {g.requiredStrength ?? 0} • END {g.requiredEndurance ?? 0} • AGI{' '}
-                  {g.requiredAgility ?? 0}
-                </Text>
-              </View>
-              <Pressable
-                style={styles.inlineEquipBtn}
-                onPress={() => {
-                  const res = toggleEquipItem(g.slug);
-                  setAllocFeedback(
-                    res.ok ? `Updated ${g.name}.` : (res.error ?? 'Stat requirement unmet')
-                  );
-                }}
-              >
-                <Text style={styles.inlineEquipBtnText}>{g.equipped ? 'Unequip' : 'Equip'}</Text>
+        {/* Action Banner for Unspent Talent Points & Spoils */}
+        <View style={styles.actionBannerCard}>
+          <Text style={styles.actionBannerTitle}>
+            ✨ {totalAvailTalentPts} Unspent Talent Points &amp; New Spoils Available
+          </Text>
+          <Text style={styles.actionBannerSub}>
+            Focus lock lifted! Allocate stat talents and equip upgraded gear at your leisure.
+          </Text>
+          <View style={styles.actionBannerButtonsRow}>
+            {onNavigateToTalents && (
+              <Pressable style={styles.actionBannerBtn} onPress={onNavigateToTalents}>
+                <Text style={styles.actionBannerBtnText}>✨ Open Talents</Text>
               </Pressable>
-            </View>
-          ))}
+            )}
+            {onNavigateToPaperdoll && (
+              <Pressable
+                style={[styles.actionBannerBtn, styles.actionBannerBtnPaperdoll]}
+                onPress={onNavigateToPaperdoll}
+              >
+                <Text style={styles.actionBannerBtnText}>🛡️ Open Paperdoll</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
 
         {/* Save Routine as Preset Action */}
         <Pressable
           style={styles.saveAsPresetBtn}
-          onPress={() => setShowPresetDesigner(true)}
+          onPress={() => {
+            setEditingPresetDraft(sessionPresetTemplate);
+            setShowPresetDesigner(true);
+          }}
         >
-          <Text style={styles.saveAsPresetBtnText}>
-            💾 SAVE ROUTINE AS PRESET
-          </Text>
+          <Text style={styles.saveAsPresetBtnText}>💾 SAVE ROUTINE AS PRESET</Text>
         </Pressable>
 
-        <Pressable style={styles.finishWorkoutBtn} onPress={completeHybridReview}>
+        {/* Save & Return to Base Consolidation Button */}
+        <Pressable
+          style={styles.finishWorkoutBtn}
+          onPress={() => {
+            completeHybridReview();
+            if (onFinishAndReturn) {
+              onFinishAndReturn();
+            }
+          }}
+        >
           <Text style={styles.finishWorkoutBtnText}>
-            ✅ COMPLETE CONSOLIDATION & RETURN TO SANCTUM
+            🏰 SAVE &amp; RETURN TO BASE
           </Text>
         </Pressable>
 
         <PresetDesignerModal
           visible={showPresetDesigner}
+          editingPreset={editingPresetDraft ?? sessionPresetTemplate}
           onSavePreset={(preset) => {
             savePreset(preset);
+            setPresetSavedInSession(true);
             triggerSensoryCue('WORKOUT_PRESET_LOADED');
+            Alert.alert('Preset Saved', `Routine "${preset.name}" has been saved.`);
           }}
           onDeletePreset={deletePreset}
-          onClose={() => setShowPresetDesigner(false)}
+          onClose={() => {
+            setShowPresetDesigner(false);
+            setEditingPresetDraft(null);
+          }}
         />
 
         <TrainingHistoryScreen
           visible={showTrainingHistory}
           onBack={() => setShowTrainingHistory(false)}
+          onLoadSessionIntoWorkout={handleLoadSessionIntoWorkout}
         />
       </ScrollView>
     );
   }
 
-  return null;
+  // ==========================================================================
+  // PHASE 1 & 2 UNIVERSAL TABULAR WORKOUT SHEET (`Idle`, `DungeonActive`, `Resting`)
+  // ==========================================================================
+  return (
+    <View style={styles.root}>
+      {/* 1. Top Workout Header */}
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeftGroup}>
+          <Pressable
+            style={styles.backBtn}
+            onPress={() => {
+              if (completedSetCount > 0) {
+                Alert.alert(
+                  'Active Raid',
+                  'Workout in progress. Do you want to return to home screen?',
+                  [
+                    { text: 'Keep Training', style: 'cancel' },
+                    { text: 'Leave', style: 'destructive', onPress: onBackToLanding },
+                  ]
+                );
+              } else if (onBackToLanding) {
+                onBackToLanding();
+              }
+            }}
+          >
+            <Text style={styles.backBtnText}>← Back</Text>
+          </Pressable>
+
+          <TouchableOpacity
+            style={styles.topBarHistoryBtn}
+            onPress={() => setShowTrainingHistory(true)}
+            testID="online-history-top-btn"
+            activeOpacity={0.7}
+          >
+            <Text style={styles.topBarHistoryText}>📊 History</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.sessionTimerBadge}>
+          <Text style={styles.sessionClock}>{formatDuration(sessionElapsedSec)}</Text>
+          <Text style={styles.sessionSubRaid}>⚔️ Online Raid</Text>
+        </View>
+      </View>
+
+      {/* 2. Pinned Rest Timer (Floating Banner above bottom edge / top when minimized) */}
+      {restTargetEndTimeMs && restTimerPinned ? (
+        <View style={styles.pinnedFloatingRestContainer}>
+          <DynamicRestTimer
+            targetEndTimeMs={restTargetEndTimeMs}
+            totalDurationSeconds={restTotalSeconds}
+            mode={restMode}
+            headline={restHeadline}
+            subtext={restSubtext}
+            onAdjustDelta={handleRestAdjustDelta}
+            onSkip={handleRestSkip}
+            onComplete={handleRestComplete}
+            variant="banner"
+            onTapToFocus={() => {
+              setRestCenterModalVisible(true);
+              setRestTimerPinned(false);
+            }}
+            onSelectPreset={handleRestSelectPreset}
+            recommendedSeconds={restRecommendedSec}
+            scrollOffsetY={scrollOffsetY}
+          />
+        </View>
+      ) : null}
+
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          restTargetEndTimeMs && restTimerPinned ? styles.scrollContentWithPinnedTimer : null,
+        ]}
+        keyboardShouldPersistTaps="handled"
+        onScroll={(e) => setScrollOffsetY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
+      >
+        {validationError && (
+          <View style={styles.validationBox}>
+            <Text style={styles.validationText}>{validationError}</Text>
+          </View>
+        )}
+
+        {/* 3. Sleek Pre-Flight Readiness Bar (Before First Set: workoutMachine.phase === 'Idle') */}
+        {phase === 'Idle' && (
+          <View style={styles.preflightCompactCard} testID="workout-preflight-card">
+            <View style={styles.preflightPillsRow}>
+              <TouchableOpacity
+                style={styles.preflightPill}
+                onPress={() => setGymIndex((i) => i + 1)}
+              >
+                <Text style={styles.preflightPillText}>
+                  📍 {selectedGym.name} ({selectedGym.xpMultiplier}x)
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.preflightPill}
+                onPress={() => setBossIndex((i) => i + 1)}
+              >
+                <Text style={styles.preflightPillText}>
+                  🐉 Target: {selectedBoss.name}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.preflightPill, wearableLinked && styles.preflightPillActive]}
+                onPress={async () => {
+                  setWearableIndex((i) => i + 1);
+                  await toggleWearableLink();
+                }}
+              >
+                <Text
+                  style={[
+                    styles.preflightPillText,
+                    wearableLinked && styles.preflightPillTextActive,
+                  ]}
+                >
+                  ⌚ Wearable: {wearableLinked ? `${liveBpm} BPM` : wearableSource}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.engageBossBtn}
+              onPress={handleStartHybridSession}
+              testID="workout-preflight-enter-btn"
+            >
+              <Text style={styles.engageBossBtnText}>⚔️ Engage Boss</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* 4. Live Boss HP Bar & Mini Sprite Card (Intra-Workout: DungeonActive / Resting) */}
+        {(phase === 'DungeonActive' || phase === 'Resting') && (
+          <Animated.View
+            style={[
+              styles.liveBossCard,
+              { transform: [{ scale: microPulseAnim }] },
+            ]}
+          >
+            <View style={styles.bossMainRow}>
+              {/* Mini Boss Avatar Frame with Animated Sprite and Damage Flash Overlay */}
+              <View style={styles.bossAvatarFrame}>
+                <SpriteAnimator
+                  rig={selectedBoss.id === 'vaelgor' ? 'greatsword_skeleton' : 'demon_boss'}
+                  state={bossAnimState}
+                  size={48}
+                />
+                {lastDamageDealt !== null && (
+                  <View style={styles.damageFlashBadge}>
+                    <Text style={styles.damageFlashText}>-{lastDamageDealt} DMG</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Boss Name, Title & HP Bar */}
+              <View style={styles.bossDetailCol}>
+                <View style={styles.bossNameRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.bossNameText}>
+                      🐉 {selectedBoss.name} • {selectedBoss.title}
+                    </Text>
+                    <Text style={styles.bossHpNumText}>
+                      HP {currentBossHp.toLocaleString()} / {maxBossHp.toLocaleString()} ({bossHpPct}%)
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.chevronToggleBtn}
+                    onPress={() => setBossCardCollapsed(!bossCardCollapsed)}
+                  >
+                    <Text style={styles.chevronToggleText}>
+                      {bossCardCollapsed ? '▼' : '▲'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Live Boss HP Progress Bar */}
+                <View style={styles.bossHpTrack}>
+                  <View style={[styles.bossHpFill, { width: `${bossHpPct}%` }]} />
+                </View>
+              </View>
+            </View>
+
+            {/* Collapsible Telemetry Row */}
+            {!bossCardCollapsed && (
+              <View style={styles.bossTelemetryRow}>
+                <Text style={styles.liveCounterBadge} numberOfLines={1}>
+                  ✨ +{liveHudXp} XP • 🪙 {liveHudGold}g
+                </Text>
+                {arrivalBoonActive && (
+                  <Text style={styles.arrivalBoonBadge} numberOfLines={1}>⚡ Boon: +5% All Stats</Text>
+                )}
+                <Text style={styles.gymMultiplierBadge} numberOfLines={1}>
+                  📍 {selectedGym.name} ({selectedGym.xpMultiplier}x)
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+        )}
+
+        {/* 5. Workout Category Gateway */}
+        <WorkoutCategoryGateway
+          selectedCategory={activeCategory}
+          secondaryCategories={secondaryCategories}
+          presets={presets}
+          isOffline={false}
+          onSelectPrimaryCategory={handleSelectPrimaryCategory}
+          onAddSecondarySegment={handleAddSecondarySegment}
+          onRemoveSecondarySegment={handleRemoveSecondarySegment}
+          onResetCategory={handleResetCategory}
+          onLoadPreset={handleLoadPreset}
+          onOpenPresetDesigner={() => setShowPresetDesigner(true)}
+          onOpenTrainingHistory={() => setShowTrainingHistory(true)}
+        />
+
+        {/* 6. Resistance Training Tabular Spreadsheet Sheet */}
+        {showResistanceUI && (
+          <View style={styles.modalitySection}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={styles.sectionHeadingGroup}>
+                <Text style={styles.sectionHeading}>RESISTANCE SETS</Text>
+              </View>
+              <Text style={styles.sectionCountMeta}>
+                {completedSetCount} set{completedSetCount === 1 ? '' : 's'} checked
+              </Text>
+            </View>
+
+            {exerciseBlocks.map((block, bIdx) => {
+              const exMeta = exercises.find((e) => e.id === block.exerciseId);
+              const supersetInfo = supersetLabels[block.blockId];
+              const isGrouped = !!block.supersetGroupId;
+              const nextBlock = exerciseBlocks[bIdx + 1];
+              const prevBlock = exerciseBlocks[bIdx - 1];
+              const isLinkedWithNext =
+                isGrouped &&
+                !!nextBlock?.supersetGroupId &&
+                nextBlock.supersetGroupId === block.supersetGroupId;
+              const isLinkedWithPrev =
+                isGrouped &&
+                !!prevBlock?.supersetGroupId &&
+                prevBlock.supersetGroupId === block.supersetGroupId;
+
+              const prRecord = historicalPRs[block.exerciseId];
+              const prevHint =
+                prRecord && prRecord.bestE1RM > 0
+                  ? `Best: ${prRecord.bestE1RM}kg e1RM`
+                  : '80kg × 8 @ 8';
+
+              return (
+                <React.Fragment key={block.blockId}>
+                  <View
+                    style={[
+                      styles.exerciseCard,
+                      isGrouped && { borderLeftColor: '#C69A45', borderLeftWidth: 4 },
+                      isLinkedWithNext && styles.exerciseCardLinkedNext,
+                      isLinkedWithPrev && styles.exerciseCardLinkedPrev,
+                    ]}
+                  >
+                    {/* Superset Pill Header */}
+                    {supersetInfo ? (
+                      <View style={styles.supersetBanner}>
+                        <Text style={styles.supersetBannerText}>
+                          ⚡ SUPERSET {supersetInfo.supersetGroupId} ({supersetInfo.memberLabel})
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {/* Exercise Selector & Actions Header */}
+                    <View style={styles.exerciseCardHeader}>
+                      <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+                        <Pressable
+                          style={styles.exerciseSelectorBtn}
+                          onPress={() => setOpenExercisePickerBlockId(block.blockId)}
+                        >
+                          <Text style={styles.exerciseSelectorText} numberOfLines={1}>
+                            {exMeta?.name ?? block.exerciseName ?? block.exerciseId}
+                          </Text>
+                          <Text style={styles.exerciseSelectorCaret}>🔍 ▼</Text>
+                        </Pressable>
+                        <Text style={styles.prevSessionHintText}>Prev: {prevHint}</Text>
+                      </View>
+
+                      <View style={styles.cardHeaderActions}>
+                        <TouchableOpacity
+                          style={[styles.linkSupersetBtn, isGrouped && styles.linkSupersetBtnActive]}
+                          onPress={() => handleToggleSuperset(bIdx)}
+                        >
+                          <Text
+                            style={[
+                              styles.linkSupersetBtnText,
+                              isGrouped && styles.linkSupersetBtnTextActive,
+                            ]}
+                          >
+                            {isGrouped ? '🔗 Superset' : '🔗 Link'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        {exerciseBlocks.length > 1 && (
+                          <Pressable
+                            style={styles.removeBlockBtn}
+                            onPress={() => handleRemoveExerciseBlock(block.blockId)}
+                          >
+                            <Text style={styles.removeBlockBtnText}>✕</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Table Column Headers */}
+                    <View style={styles.setTableHeader}>
+                      <Text style={[styles.colHeader, { width: 44 }]}>TYPE</Text>
+                      <Text style={[styles.colHeader, styles.colInput]}>KG</Text>
+                      <Text style={[styles.colHeader, styles.colInput]}>REPS</Text>
+                      <Text style={[styles.colHeader, { width: 52 }]}>RPE</Text>
+                      <Text style={[styles.colHeader, styles.colCheck]}>DONE</Text>
+                      {block.sets.length > 1 && <View style={styles.colDeleteSpacer} />}
+                    </View>
+
+                    {/* Set Rows */}
+                    {block.sets.map((row) => {
+                      const rowSetType = row.setType || (row.isWarmup ? 'WARMUP' : 'NORMAL');
+                      const badgeDesc = SET_TYPE_DESCRIPTORS.find((d) => d.type === rowSetType);
+                      const tagColor = SET_TYPE_COLORS[rowSetType] || '#9CA3AF';
+                      const rawCode = badgeDesc?.shortCode || 'N';
+                      const displayCode = rawCode === 'N' ? '1' : rawCode;
+
+                      return (
+                        <View
+                          key={row.id}
+                          style={[
+                            styles.setRow,
+                            row.completed && styles.setRowCompleted,
+                            rowSetType === 'DROP_SET' && styles.dropSetRowIndent,
+                          ]}
+                        >
+                          {/* Cycling Set Type Pill [1 / W / D / F] */}
+                          <TouchableOpacity
+                            style={[styles.setTypeBtn, { borderColor: tagColor }]}
+                            onPress={() => handleCycleSetType(block.blockId, row.id)}
+                          >
+                            <Text style={[styles.setTypeBtnText, { color: tagColor }]}>
+                              [{displayCode}]
+                            </Text>
+                          </TouchableOpacity>
+
+                          {/* KG numeric TextInput */}
+                          <TextInput
+                            style={[
+                              styles.numericInput,
+                              row.completed && styles.numericInputCompleted,
+                            ]}
+                            value={row.weightKgStr}
+                            onChangeText={(val) =>
+                              handleUpdateSetField(block.blockId, row.id, 'weightKgStr', val)
+                            }
+                            keyboardType="decimal-pad"
+                            placeholder="0"
+                            placeholderTextColor={CRIMSON_ONI.ashMuted}
+                            selectTextOnFocus
+                          />
+
+                          {/* REPS numeric TextInput */}
+                          <TextInput
+                            style={[
+                              styles.numericInput,
+                              row.completed && styles.numericInputCompleted,
+                            ]}
+                            value={row.repsStr}
+                            onChangeText={(val) =>
+                              handleUpdateSetField(block.blockId, row.id, 'repsStr', val)
+                            }
+                            keyboardType="number-pad"
+                            placeholder="0"
+                            placeholderTextColor={CRIMSON_ONI.ashMuted}
+                            selectTextOnFocus
+                          />
+
+                          {/* Cycling RPE Pill */}
+                          <TouchableOpacity
+                            style={styles.rpePillBtn}
+                            onPress={() => handleCycleSetRpe(block.blockId, row.id, row.rpe)}
+                          >
+                            <Text style={styles.rpePillText}>
+                              {row.rpe ? `${row.rpe}` : '8.5'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          {/* DONE Checkbox */}
+                          <Pressable
+                            style={[
+                              styles.checkBtn,
+                              row.completed && styles.checkBtnCompleted,
+                            ]}
+                            onPress={() => handleToggleSetCompleted(block.blockId, row.id)}
+                            testID="set-complete-btn"
+                          >
+                            <Text
+                              style={[
+                                styles.checkBtnText,
+                                row.completed && styles.checkBtnTextCompleted,
+                              ]}
+                            >
+                              {row.completed ? '✓' : ''}
+                            </Text>
+                          </Pressable>
+
+                          {/* Delete Set Row Button */}
+                          {block.sets.length > 1 && (
+                            <Pressable
+                              style={styles.deleteSetBtn}
+                              onPress={() => handleRemoveSetRow(block.blockId, row.id)}
+                            >
+                              <Text style={styles.deleteSetText}>✕</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      );
+                    })}
+
+                    {/* + Add Set Footer Button */}
+                    <Pressable
+                      style={styles.addSetRowBtn}
+                      onPress={() => handleAddSetRow(block.blockId)}
+                    >
+                      <Text style={styles.addSetRowText}>+ Add Set</Text>
+                    </Pressable>
+                  </View>
+
+                  {/* Superset Connecting Bridge between linked exercises */}
+                  {isLinkedWithNext ? (
+                    <View style={styles.supersetBridge}>
+                      <View style={styles.supersetBridgeLine} />
+                      <View style={styles.supersetBridgeBadge}>
+                        <Text style={styles.supersetBridgeText}>⚡ SUPERSET LINK</Text>
+                      </View>
+                      <View style={styles.supersetBridgeTrail} />
+                    </View>
+                  ) : null}
+                </React.Fragment>
+              );
+            })}
+
+            {/* Bottom Action Row: + Add Exercise */}
+            <View style={styles.bottomExerciseActionRow}>
+              <Pressable
+                style={styles.addExerciseBlockBtn}
+                onPress={handleAddExerciseBlock}
+              >
+                <Text style={styles.addExerciseBlockText}>+ Add Exercise</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
+        {/* 7. Non-Resistance Modality Logging (Cardio / Sport / Flexibility) */}
+        {(showCardioUI || showSportUI || showRecoveryUI) && (
+          <View style={styles.modalitySection}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionHeading}>
+                {showSportUI
+                  ? 'SPORT TRAINING'
+                  : showRecoveryUI
+                  ? 'ACTIVE RECOVERY & MOBILITY'
+                  : 'CARDIO TRAINING'}
+              </Text>
+              <Text style={styles.sectionCountMeta}>{cardioEntries.length} logged</Text>
+            </View>
+
+            <View style={styles.cardioCard}>
+              <View style={styles.cardioSelectHeader}>
+                <Text style={styles.cardioLabel}>Activity:</Text>
+                <TouchableOpacity
+                  style={styles.cardioBrowseBtn}
+                  onPress={() => setShowCardioPicker(true)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.cardioBrowseBtnText}>🔍 Browse / Add Modality</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.cardioSelectedBanner}
+                onPress={() => setShowCardioPicker(true)}
+                activeOpacity={0.8}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardioSelectedName}>
+                    {cardioCatalog.find((c) => c.id === selectedCardioId)?.name ??
+                      selectedCardioId}
+                  </Text>
+                  <Text style={styles.cardioSelectedSub}>
+                    {cardioCatalog.find((c) => c.id === selectedCardioId)?.equipmentType ||
+                      'Activity'}{' '}
+                    • Tap to search or add custom
+                  </Text>
+                </View>
+                <Text style={styles.cardioSelectedChangeIcon}>🔍</Text>
+              </TouchableOpacity>
+
+              <View style={styles.cardioSelectRow}>
+                <Text style={styles.cardioQuickLabel}>Quick:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+                  {cardioCatalog.slice(0, 10).map((c) => {
+                    const active = c.id === selectedCardioId;
+                    return (
+                      <Pressable
+                        key={c.id}
+                        style={[styles.cardioPill, active && styles.cardioPillActive]}
+                        onPress={() => {
+                          setSelectedCardioId(c.id);
+                          recordRecentActivity(c.id);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.cardioPillText,
+                            active && styles.cardioPillTextActive,
+                          ]}
+                        >
+                          {c.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              {/* Duration & HR Zone Controls */}
+              <View style={styles.cardioFormRow}>
+                <View style={styles.cardioInputGroup}>
+                  <Text style={styles.cardioInputLabel}>Duration (mins)</Text>
+                  <TextInput
+                    style={styles.cardioNumericInput}
+                    value={cardioMinutesStr}
+                    onChangeText={(val) => setCardioMinutesStr(val.replace(/[^0-9]/g, ''))}
+                    keyboardType="number-pad"
+                    placeholder="20"
+                    placeholderTextColor={CRIMSON_ONI.ashMuted}
+                  />
+                </View>
+
+                <View style={styles.cardioInputGroup}>
+                  <Text style={styles.cardioInputLabel}>Session RPE</Text>
+                  <TouchableOpacity
+                    style={styles.cardioRpeBtn}
+                    onPress={() => {
+                      const idx =
+                        (RPE_OPTIONS.indexOf(cardioRpe as 7.5) + 1) % RPE_OPTIONS.length;
+                      setCardioRpe(RPE_OPTIONS[idx] ?? 7.5);
+                    }}
+                  >
+                    <Text style={styles.cardioRpeText}>{cardioRpe.toFixed(1)}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.cardioInputGroup}>
+                  <Text style={styles.cardioInputLabel}>HR Zone</Text>
+                  <View style={styles.zoneRow}>
+                    {HR_ZONES.map((z) => (
+                      <Pressable
+                        key={z}
+                        style={[styles.zoneBtn, cardioZone === z && styles.zoneBtnActive]}
+                        onPress={() => setCardioZone(z)}
+                      >
+                        <Text
+                          style={[
+                            styles.zoneText,
+                            cardioZone === z && styles.zoneTextActive,
+                          ]}
+                        >
+                          Z{z}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.addCardioBtn}
+                onPress={handleAddCardioEntry}
+              >
+                <Text style={styles.addCardioBtnText}>+ Log Segment</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Logged Non-Resistance Items */}
+            {cardioEntries.map((item) => (
+              <View key={item.id} style={styles.cardioEntryRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardioEntryName}>{item.exerciseName}</Text>
+                  <Text style={styles.cardioEntryMeta}>
+                    {Math.round(item.durationSeconds / 60)} mins • Zone {item.averageHrZone}
+                    {item.rpe ? ` • RPE ${item.rpe}` : ''}
+                  </Text>
+                </View>
+                <Pressable onPress={() => handleRemoveCardioEntry(item.id)}>
+                  <Text style={styles.cardioEntryDelete}>✕</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* 8. Finish Workout Action Button */}
+        <View style={styles.presetSaveContainer}>
+          <TouchableOpacity
+            style={styles.finishWorkoutBottomBtn}
+            onPress={handleFinishWorkout}
+            activeOpacity={0.7}
+            testID="finish-offline-workout-btn"
+          >
+            <Text style={styles.finishWorkoutBottomBtnText}>🏁 Finish Workout</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+
+      {/* 9. Resistance Activity Picker Modal */}
+      <ActivityPickerModal
+        visible={openExercisePickerBlockId !== null}
+        onClose={() => setOpenExercisePickerBlockId(null)}
+        onSelectExercise={(item) => {
+          if (openExercisePickerBlockId) {
+            handleSelectExercise(openExercisePickerBlockId, item.id);
+          }
+        }}
+        currentExerciseId={
+          openExercisePickerBlockId
+            ? exerciseBlocks.find((b) => b.blockId === openExercisePickerBlockId)?.exerciseId
+            : null
+        }
+        targetWorkoutCategory="GYM"
+        title="Select Resistance Exercise"
+      />
+
+      {/* 10. Cardio / Sport / Recovery Activity Picker Modal */}
+      <ActivityPickerModal
+        visible={showCardioPicker}
+        onClose={() => setShowCardioPicker(false)}
+        onSelectExercise={(item) => {
+          setSelectedCardioId(item.id);
+          recordRecentActivity(item.id);
+        }}
+        currentExerciseId={selectedCardioId}
+        targetWorkoutCategory={
+          activeCategory === 'SPORT'
+            ? 'SPORT'
+            : activeCategory === 'RECOVERY'
+            ? 'RECOVERY'
+            : 'CARDIO'
+        }
+        title={
+          activeCategory === 'SPORT'
+            ? 'Select Sport Modality'
+            : activeCategory === 'RECOVERY'
+            ? 'Select Recovery & Mobility'
+            : 'Select Cardio Training'
+        }
+      />
+
+      {/* 11. Center Focus Rest Timer Modal (Proc'd on set DONE) */}
+      <Modal
+        visible={!!(restTargetEndTimeMs && restCenterModalVisible)}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {
+          setRestCenterModalVisible(false);
+          setRestTimerPinned(true);
+        }}
+      >
+        <Pressable
+          style={styles.restModalBackdrop}
+          onPress={() => {
+            setRestCenterModalVisible(false);
+            setRestTimerPinned(true);
+          }}
+        >
+          <Pressable style={styles.restModalCard} onPress={(e) => e.stopPropagation()}>
+            <DynamicRestTimer
+              targetEndTimeMs={restTargetEndTimeMs}
+              totalDurationSeconds={restTotalSeconds}
+              mode={restMode}
+              headline={restHeadline}
+              subtext={restSubtext}
+              onAdjustDelta={handleRestAdjustDelta}
+              onSkip={handleRestSkip}
+              onComplete={handleRestComplete}
+              variant="hero"
+              onMinimize={() => {
+                setRestCenterModalVisible(false);
+                setRestTimerPinned(true);
+              }}
+              onSelectPreset={handleRestSelectPreset}
+              recommendedSeconds={restRecommendedSec}
+            />
+
+            <Pressable
+              style={styles.minimizeRestBtn}
+              onPress={() => {
+                setRestCenterModalVisible(false);
+                setRestTimerPinned(true);
+              }}
+            >
+              <Text style={styles.minimizeRestBtnText}>
+                👁️ View Workout / Minimize Timer
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* 12. PR Badge Celebration Modal */}
+      <Modal
+        visible={celebrationBadge !== null}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setCelebrationBadge(null)}
+      >
+        <View style={styles.prModalBackdrop}>
+          <View style={styles.prModalCard}>
+            <Text style={styles.prModalIcon}>{celebrationBadge?.icon}</Text>
+            <Text style={styles.prModalTitle}>{celebrationBadge?.title}</Text>
+            <Text style={styles.prModalDesc}>{celebrationBadge?.description}</Text>
+            <TouchableOpacity
+              style={styles.prModalAcknowledgeBtn}
+              onPress={() => setCelebrationBadge(null)}
+            >
+              <Text style={styles.prModalAcknowledgeText}>Claim Personal Record 🏆</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {renderPostWorkoutSummaryModal()}
+
+      {/* 13. Preset Designer Modal */}
+      <PresetDesignerModal
+        visible={showPresetDesigner}
+        editingPreset={editingPresetDraft ?? sessionPresetTemplate}
+        onSavePreset={(preset) => {
+          savePreset(preset);
+          setPresetSavedInSession(true);
+          triggerSensoryCue('WORKOUT_PRESET_LOADED');
+          Alert.alert('Preset Saved', `Routine "${preset.name}" has been saved.`);
+        }}
+        onDeletePreset={deletePreset}
+        onClose={() => {
+          setShowPresetDesigner(false);
+          setEditingPresetDraft(null);
+        }}
+      />
+
+      {/* 14. Training History Matrix Modal */}
+      <TrainingHistoryScreen
+        visible={showTrainingHistory}
+        onBack={() => setShowTrainingHistory(false)}
+        onLoadSessionIntoWorkout={handleLoadSessionIntoWorkout}
+      />
+    </View>
+  );
 };
 
+// ============================================================================
+// STYLESHEET
+// ============================================================================
+
 const styles = StyleSheet.create({
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
+  root: {
+    flex: 1,
+    backgroundColor: '#121114',
   },
-  statusCard: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 12,
-    marginBottom: 12,
-  },
-  statusRow: {
+  topBar: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#19181D',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2B2930',
+  },
+  topBarLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
-  badge: {
-    backgroundColor: COLORS.bgElevated,
+  backBtn: {
     paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
-  },
-  boonPreviewBadge: {
-    borderWidth: 1,
-    borderColor: COLORS.gold,
-    backgroundColor: COLORS.goldDim,
-  },
-  badgeTitle: {
-    color: COLORS.textPrimary,
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  boonPreviewTitle: {
-    color: COLORS.gold,
-    fontWeight: '900',
-    fontSize: 13,
-  },
-  badgeSub: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  fatigueWarning: {
-    marginTop: 8,
-    backgroundColor: COLORS.strengthDim,
-    padding: 8,
-    borderRadius: 8,
-  },
-  fatigueWarningText: {
-    color: COLORS.strength,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  liveDungeonNotice: {
-    marginTop: 8,
-    color: COLORS.shieldCyan,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  sectionTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  card: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 14,
-    marginBottom: 12,
-  },
-  cardTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  helperText: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginBottom: 10,
-    lineHeight: 16,
-  },
-  gymSelectorCol: {
-    gap: 8,
-  },
-  gymOptionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bgDeep,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 12,
-    minHeight: 58,
-  },
-  gymOptionBtnActive: {
-    borderColor: COLORS.gold,
-    backgroundColor: COLORS.goldDim,
-  },
-  gymOptionTitle: {
-    color: COLORS.textPrimary,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  gymOptionSub: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  radioDot: {
-    color: COLORS.gold,
-    fontSize: 18,
-    fontWeight: '900',
-    marginLeft: 10,
-  },
-  resilienceTogglesRow: {
-    gap: 8,
-    marginTop: 4,
-  },
-  resilienceChip: {
-    backgroundColor: COLORS.bgElevated,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    minHeight: 46,
-    justifyContent: 'center',
-  },
-  resilienceChipActive: {
-    borderColor: COLORS.shieldCyan,
-    backgroundColor: COLORS.agilityDim,
-  },
-  resilienceChipText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  resilienceChipTextActive: {
-    color: COLORS.shieldCyan,
-    fontWeight: '800',
-  },
-  modeTabs: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 12,
-  },
-  modeTab: {
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 9,
-    minHeight: 46,
-    justifyContent: 'center',
-  },
-  modeTabActive: {
-    borderColor: COLORS.gold,
-    backgroundColor: COLORS.goldDim,
-  },
-  modeTabText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  modeTabTextActive: {
-    color: COLORS.gold,
-    fontWeight: '800',
-  },
-  exChipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  exChip: {
-    backgroundColor: COLORS.bgElevated,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  sweatExChip: {
-    backgroundColor: COLORS.bgElevated,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  exChipActive: {
-    borderColor: COLORS.gold,
-    backgroundColor: COLORS.goldDim,
-  },
-  exChipText: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  exChipTextActive: {
-    color: COLORS.gold,
-    fontWeight: '800',
-  },
-  thresholdStartBtn: {
-    backgroundColor: COLORS.gold,
-    minHeight: 66,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginTop: 4,
-  },
-  thresholdStartTitle: {
-    color: COLORS.bgDeep,
-    fontSize: 15,
-    fontWeight: '900',
-    letterSpacing: 0.4,
-  },
-  thresholdStartSub: {
-    color: COLORS.bgDeep,
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 2,
-    opacity: 0.85,
-  },
-  arrivalToast: {
-    backgroundColor: COLORS.goldDim,
-    borderWidth: 1.5,
-    borderColor: COLORS.gold,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 12,
-  },
-  arrivalToastTitle: {
-    color: COLORS.gold,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  arrivalToastSub: {
-    color: COLORS.textPrimary,
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  bossHudCard: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
-    padding: 12,
-    marginBottom: 12,
-  },
-  bossTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  bossLabel: {
-    color: COLORS.textPrimary,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  bossHpNumbers: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  liveCountersRight: {
-    alignItems: 'flex-end',
-  },
-  liveXpTicker: {
-    color: COLORS.agility,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  liveGoldTicker: {
-    color: COLORS.gold,
-    fontSize: 12,
-    fontWeight: '800',
-    marginTop: 2,
-  },
-  bossHpTrack: {
-    height: 10,
-    backgroundColor: COLORS.bgDeep,
-    borderRadius: 5,
-    overflow: 'hidden',
-  },
-  bossHpFill: {
-    height: '100%',
-    backgroundColor: COLORS.strength,
-  },
-  microFeedbackStrip: {
-    marginTop: 8,
-    backgroundColor: COLORS.bgElevated,
-    borderRadius: 7,
     paddingVertical: 6,
-    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: '#26242B',
   },
-  microFeedbackText: {
-    color: COLORS.gold,
+  backBtnText: {
+    color: '#D1D5DB',
     fontSize: 12,
     fontWeight: '800',
   },
-  nextSetHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
+  topBarTitle: {
+    color: '#FDE68A',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.3,
   },
-  sweatHistoryBtn: {
-    backgroundColor: '#2A241A',
+  sessionTimerBadge: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: '#24222B',
+  },
+  sessionClock: {
+    fontSize: 14,
+    fontWeight: '900',
+    fontVariant: ['tabular-nums'],
+    color: '#E8E6E1',
+    letterSpacing: 0.5,
+  },
+  sessionSubRaid: {
+    fontSize: 9,
+    color: '#C69A45',
+    fontWeight: '800',
+    marginTop: 1,
+  },
+  topBarRightGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  topBarPresetsBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#26242E',
+    borderWidth: 1,
+    borderColor: '#4B5563',
+  },
+  topBarPresetsText: {
+    color: '#E5E7EB',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  topBarHistoryBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#2D2316',
     borderColor: '#C69A45',
     borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
   },
-  sweatHistoryBtnText: {
+  topBarHistoryText: {
     color: '#FDE68A',
     fontSize: 11,
     fontWeight: '800',
   },
-  warmupToggle: {
-    backgroundColor: COLORS.bgElevated,
+  finishTopBtn: {
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 6,
+    backgroundColor: '#5E1924',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#C69A45',
   },
-  warmupToggleActive: {
-    borderColor: COLORS.warning,
-  },
-  warmupToggleText: {
-    color: COLORS.textPrimary,
+  finishTopBtnText: {
+    color: '#FDE68A',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '900',
   },
-  sweatControlsGrid: {
-    gap: 10,
-    marginBottom: 12,
+  pinnedFloatingRestContainer: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    right: 12,
+    zIndex: 999,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
   },
-  sweatStepperCard: {
-    backgroundColor: COLORS.bgDeep,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  scrollContent: {
     padding: 12,
+    paddingBottom: 48,
   },
-  sweatFieldLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '800',
-    marginBottom: 6,
-    letterSpacing: 0.5,
+  scrollContentWithPinnedTimer: {
+    paddingBottom: 110,
   },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  bigStepBtn: {
-    minWidth: 68,
-    minHeight: 58,
-    backgroundColor: COLORS.bgElevated,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bigStepBtnText: {
-    color: COLORS.textPrimary,
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  bigNumericInput: {
-    flex: 1,
-    minHeight: 58,
-    backgroundColor: COLORS.bgCard,
-    color: COLORS.textPrimary,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    textAlign: 'center',
-    fontSize: 22,
-    fontWeight: '900',
-    paddingHorizontal: 10,
-  },
-  e1rmLiveHint: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 6,
-  },
-  rpeStripLabel: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  rpePillsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 14,
-  },
-  rpePill: {
-    minWidth: 46,
-    minHeight: 46,
-    backgroundColor: COLORS.bgElevated,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
-  rpePillActive: {
-    backgroundColor: COLORS.strengthDim,
-    borderColor: COLORS.strength,
-  },
-  rpePillText: {
-    color: COLORS.textSecondary,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  rpePillTextActive: {
-    color: COLORS.strength,
-  },
-  logSetGiantBtn: {
-    minHeight: 64,
-    backgroundColor: COLORS.gold,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-  },
-  logSetGiantTitle: {
-    color: COLORS.bgDeep,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  logSetGiantSub: {
-    color: COLORS.bgDeep,
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 2,
-    opacity: 0.85,
-  },
-  inputsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
-  },
-  inputGroup: {
-    minWidth: 96,
-  },
-  inputLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    marginBottom: 4,
-    fontWeight: '700',
-  },
-  ledgerCard: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 12,
-    marginBottom: 12,
-  },
-  ledgerTitle: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  ledgerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 5,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  ledgerLeft: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  ledgerRight: {
-    color: COLORS.gold,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  errorBanner: {
-    backgroundColor: COLORS.strengthDim,
-    borderColor: COLORS.strength,
+  validationBox: {
+    backgroundColor: '#2F1A1C',
+    borderColor: '#7F1D1D',
     borderWidth: 1,
     borderRadius: 8,
     padding: 10,
     marginBottom: 10,
   },
-  errorBannerText: {
-    color: COLORS.strength,
+  validationText: {
+    color: '#F87171',
     fontSize: 12,
     fontWeight: '700',
   },
-  sessionFooterRow: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-  finishWorkoutBtn: {
-    flex: 1,
-    minHeight: 56,
-    backgroundColor: COLORS.endurance,
+
+  // 3. Pre-Flight Bar Styles
+  preflightCompactCard: {
+    backgroundColor: '#1E1D24',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
     borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  preflightPillsRow: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  preflightPill: {
+    backgroundColor: '#282631',
+    borderColor: '#3D3A49',
+    borderWidth: 1,
+    borderRadius: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  preflightPillActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: '#162C3D',
+  },
+  preflightPillText: {
+    color: '#E5E7EB',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  preflightPillTextActive: {
+    color: '#38BDF8',
+  },
+  engageBossBtn: {
+    backgroundColor: '#C69A45',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
   },
-  finishWorkoutBtnText: {
-    color: COLORS.bgDeep,
+  engageBossBtnText: {
+    color: '#121114',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  // 4. Live Boss HP & Sprite Card Styles
+  liveBossCard: {
+    backgroundColor: '#1A1821',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#C69A45',
+    padding: 10,
+    marginBottom: 12,
+  },
+  bossMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  bossAvatarFrame: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#282433',
+    borderWidth: 1,
+    borderColor: '#C69A45',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  damageFlashBadge: {
+    position: 'absolute',
+    top: 2,
+    backgroundColor: 'rgba(239, 68, 68, 0.9)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  damageFlashText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  bossDetailCol: {
+    flex: 1,
+  },
+  bossNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  bossNameText: {
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  bossHpNumText: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 1,
+  },
+  chevronToggleBtn: {
+    padding: 4,
+  },
+  chevronToggleText: {
+    color: '#C69A45',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  bossHpTrack: {
+    height: 8,
+    backgroundColor: '#2D2B35',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 2,
+  },
+  bossHpFill: {
+    height: '100%',
+    backgroundColor: '#EF4444',
+  },
+  bossTelemetryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#2F2C3A',
+  },
+  liveCounterBadge: {
+    color: '#FCD34D',
+    fontSize: 10,
+    fontWeight: '900',
+    backgroundColor: '#2E2616',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    flexShrink: 1,
+  },
+  arrivalBoonBadge: {
+    color: '#34D399',
+    fontSize: 10,
+    fontWeight: '800',
+    backgroundColor: '#13352A',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    flexShrink: 1,
+  },
+  gymMultiplierBadge: {
+    color: '#93C5FD',
+    fontSize: 10,
+    fontWeight: '800',
+    backgroundColor: '#1E2D48',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    flexShrink: 1,
+  },
+
+  // Resistance Modality Sheet Styles
+  modalitySection: {
+    marginBottom: 16,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  sectionHeadingGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionHeading: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#C69A45',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sectionHistoryPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#2D2316',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+  },
+  sectionHistoryPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FDE68A',
+  },
+  sectionCountMeta: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '700',
+  },
+  exerciseCard: {
+    backgroundColor: '#1B1920',
+    borderRadius: 12,
+    borderColor: '#2F2C38',
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 10,
+  },
+  exerciseCardLinkedNext: {
+    marginBottom: 0,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
+  },
+  exerciseCardLinkedPrev: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+  },
+  supersetBanner: {
+    backgroundColor: '#2E2211',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  supersetBannerText: {
+    color: '#FDE68A',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  exerciseCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+    gap: 8,
+  },
+  exerciseSelectorBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+  },
+  exerciseSelectorText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#F3F4F6',
+    flexShrink: 1,
+  },
+  exerciseSelectorCaret: {
+    fontSize: 10,
+    color: '#C69A45',
+  },
+  prevSessionHintText: {
+    color: '#8C8994',
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  cardHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  linkSupersetBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4A4656',
+    backgroundColor: '#26242F',
+  },
+  linkSupersetBtnActive: {
+    borderColor: '#C69A45',
+    backgroundColor: '#352814',
+  },
+  linkSupersetBtnText: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  linkSupersetBtnTextActive: {
+    color: '#FDE68A',
+  },
+  removeBlockBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  removeBlockBtnText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  // Table Columns
+  setTableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2B2836',
+    marginBottom: 6,
+  },
+  colHeader: {
+    color: '#8A8794',
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: 0.4,
+  },
+  colInput: {
+    flex: 1,
+  },
+  colCheck: {
+    width: 48,
+  },
+  colDeleteSpacer: {
+    width: 24,
+  },
+  setRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  setRowCompleted: {
+    opacity: 0.82,
+  },
+  dropSetRowIndent: {
+    paddingLeft: 8,
+    backgroundColor: '#241719',
+    borderRadius: 6,
+  },
+  setTypeBtn: {
+    width: 44,
+    height: 36,
+    borderWidth: 1,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#22202B',
+  },
+  setTypeBtnText: {
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  numericInput: {
+    flex: 1,
+    height: 36,
+    backgroundColor: '#25232F',
+    borderWidth: 1,
+    borderColor: '#383545',
+    borderRadius: 6,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+    paddingHorizontal: 4,
+  },
+  numericInputCompleted: {
+    borderColor: '#10B981',
+    backgroundColor: '#172722',
+  },
+  rpePillBtn: {
+    width: 52,
+    height: 36,
+    backgroundColor: '#23212C',
+    borderWidth: 1,
+    borderColor: '#3A3749',
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rpePillText: {
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  checkBtn: {
+    width: 48,
+    height: 36,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    backgroundColor: '#23212C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkBtnCompleted: {
+    backgroundColor: '#10B981',
+    borderColor: '#059669',
+  },
+  checkBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  checkBtnTextCompleted: {
+    color: '#FFFFFF',
+  },
+  deleteSetBtn: {
+    width: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteSetText: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  addSetRowBtn: {
+    marginTop: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#383446',
+    backgroundColor: '#22202B',
+    alignItems: 'center',
+  },
+  addSetRowText: {
+    color: '#C69A45',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  supersetBridge: {
+    alignItems: 'center',
+    marginVertical: -2,
+    zIndex: 2,
+  },
+  supersetBridgeLine: {
+    width: 2,
+    height: 8,
+    backgroundColor: '#C69A45',
+  },
+  supersetBridgeBadge: {
+    backgroundColor: '#2E2211',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 1,
+  },
+  supersetBridgeText: {
+    color: '#FDE68A',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  supersetBridgeTrail: {
+    width: 2,
+    height: 8,
+    backgroundColor: '#C69A45',
+  },
+  bottomExerciseActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  addExerciseBlockBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C69A45',
+    backgroundColor: '#2B2317',
+    alignItems: 'center',
+  },
+  addExerciseBlockText: {
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  managePresetsBottomBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4A4656',
+    backgroundColor: '#22202B',
+    alignItems: 'center',
+  },
+  managePresetsBottomText: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  // Cardio & Non-Resistance Section Styles
+  cardioCard: {
+    backgroundColor: '#1B1920',
+    borderRadius: 12,
+    borderColor: '#2F2C38',
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 10,
+  },
+  cardioSelectHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  cardioLabel: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cardioBrowseBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: '#252230',
+    borderWidth: 1,
+    borderColor: '#3D394C',
+  },
+  cardioBrowseBtnText: {
+    color: '#38BDF8',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  cardioSelectedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#23202D',
+    borderWidth: 1,
+    borderColor: '#3C384A',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  cardioSelectedName: {
+    color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
   },
-  abandonBtn: {
-    minHeight: 56,
-    paddingHorizontal: 14,
-    backgroundColor: COLORS.bgElevated,
-    borderRadius: 12,
+  cardioSelectedSub: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  cardioSelectedChangeIcon: {
+    fontSize: 14,
+    color: '#C69A45',
+  },
+  cardioSelectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  cardioQuickLabel: {
+    color: '#8C8994',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cardioPill: {
+    backgroundColor: '#23212C',
+    borderRadius: 6,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#3C3949',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginRight: 6,
+  },
+  cardioPillActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: '#162C3D',
+  },
+  cardioPillText: {
+    color: '#D1D5DB',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cardioPillTextActive: {
+    color: '#38BDF8',
+    fontWeight: '900',
+  },
+  cardioFormRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-end',
+    marginBottom: 10,
+  },
+  cardioInputGroup: {
+    flex: 1,
+  },
+  cardioInputLabel: {
+    color: '#8C8994',
+    fontSize: 10,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  cardioNumericInput: {
+    height: 38,
+    backgroundColor: '#25232F',
+    borderWidth: 1,
+    borderColor: '#383545',
+    borderRadius: 6,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+    paddingHorizontal: 4,
+  },
+  cardioRpeBtn: {
+    height: 38,
+    backgroundColor: '#23212C',
+    borderWidth: 1,
+    borderColor: '#3A3749',
+    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  abandonBtnText: {
-    color: COLORS.textMuted,
+  cardioRpeText: {
+    color: '#FDE68A',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  zoneRow: {
+    flexDirection: 'row',
+    gap: 3,
+  },
+  zoneBtn: {
+    flex: 1,
+    height: 38,
+    backgroundColor: '#23212C',
+    borderWidth: 1,
+    borderColor: '#3C3949',
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  zoneBtnActive: {
+    borderColor: '#F59E0B',
+    backgroundColor: '#352613',
+  },
+  zoneText: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  zoneTextActive: {
+    color: '#FDE68A',
+    fontWeight: '900',
+  },
+  addCardioBtn: {
+    backgroundColor: '#38BDF8',
+    borderRadius: 8,
+    paddingVertical: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addCardioBtnText: {
+    color: '#0A1E29',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '900',
   },
-  btnDisabled: {
-    opacity: 0.45,
+  cardioEntryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1E1C25',
+    borderWidth: 1,
+    borderColor: '#2D2A37',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 6,
   },
+  cardioEntryName: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  cardioEntryMeta: {
+    color: '#9CA3AF',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  cardioEntryDelete: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '800',
+    paddingHorizontal: 8,
+  },
+  presetSaveContainer: {
+    marginTop: 8,
+  },
+  savePresetBtn: {
+    backgroundColor: '#22202B',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  savePresetBtnText: {
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  // Rest Modal Styles
+  restModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 12, 18, 0.86)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  restModalCard: {
+    width: '100%',
+    maxWidth: 440,
+  },
+  minimizeRestBtn: {
+    backgroundColor: '#22202B',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3D394B',
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  minimizeRestBtnText: {
+    color: '#FDE68A',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+
+  // PR Celebration Modal Styles
+  prModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  prModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#1E1B26',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#C69A45',
+    padding: 20,
+    alignItems: 'center',
+  },
+  prModalIcon: {
+    fontSize: 48,
+    marginBottom: 8,
+  },
+  prModalTitle: {
+    color: '#FDE68A',
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  prModalDesc: {
+    color: '#E5E7EB',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  prModalAcknowledgeBtn: {
+    backgroundColor: '#C69A45',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    width: '100%',
+    alignItems: 'center',
+  },
+  prModalAcknowledgeText: {
+    color: '#121114',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+
+  // Phase 3 Styles (Dungeon Cleared & Loot Review)
   dungeonClearedHeroCard: {
     backgroundColor: COLORS.bgCard,
     borderRadius: 14,
@@ -1958,6 +3321,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 12,
+  },
+  verificationBadge: {
+    marginTop: 8,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
+  },
+  verificationBadgeIronman: {
+    backgroundColor: '#311019',
+    borderColor: '#E11D48',
+  },
+  verificationBadgeHonesty: {
+    backgroundColor: '#1E1D24',
+    borderColor: '#374151',
+  },
+  verificationBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  verificationBadgeIronmanText: {
+    color: '#FDA4AF',
+  },
+  verificationBadgeHonestyText: {
+    color: '#9CA3AF',
   },
   metricsGrid: {
     flexDirection: 'row',
@@ -2044,6 +3434,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 4,
   },
+  thresholdStartBtn: {
+    backgroundColor: COLORS.gold,
+    minHeight: 66,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 4,
+  },
+  thresholdStartTitle: {
+    color: COLORS.bgDeep,
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  thresholdStartSub: {
+    color: COLORS.bgDeep,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+    opacity: 0.85,
+  },
   chestCard: {
     backgroundColor: COLORS.bgCard,
     borderRadius: 14,
@@ -2055,6 +3468,12 @@ const styles = StyleSheet.create({
     fontSize: 19,
     fontWeight: '900',
     marginVertical: 4,
+  },
+  helperText: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginBottom: 10,
+    lineHeight: 16,
   },
   unsealChestBtn: {
     minHeight: 60,
@@ -2082,134 +3501,56 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 6,
   },
+  lootDropRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
   revealedDropLine: {
     fontSize: 14,
     fontWeight: '800',
-    marginVertical: 2,
   },
-  allocFeedbackText: {
+  actionBannerCard: {
+    backgroundColor: '#1E182D',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: COLORS.gold,
+    padding: 16,
+    marginBottom: 14,
+  },
+  actionBannerTitle: {
     color: COLORS.gold,
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 8,
+    fontSize: 15,
+    fontWeight: '900',
+    marginBottom: 4,
   },
-  inlineTreeBox: {
-    backgroundColor: COLORS.bgDeep,
+  actionBannerSub: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  actionBannerButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionBannerBtn: {
+    flex: 1,
+    minHeight: 46,
+    backgroundColor: COLORS.gold,
     borderRadius: 10,
-    padding: 10,
-    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  actionBannerBtnPaperdoll: {
+    backgroundColor: COLORS.bgElevated,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  inlineTreeTitle: {
-    color: COLORS.gold,
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 6,
-  },
-  inlineNodeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 6,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  inlineNodeName: {
-    color: COLORS.textPrimary,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  inlineNodeDesc: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-  },
-  inlineAllocBtn: {
-    backgroundColor: COLORS.gold,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    minHeight: 40,
-    justifyContent: 'center',
-  },
-  inlineAllocBtnText: {
+  actionBannerBtnText: {
     color: COLORS.bgDeep,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  inlineEquipBtn: {
-    backgroundColor: COLORS.bgElevated,
-    borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    minHeight: 40,
-    justifyContent: 'center',
-  },
-  inlineEquipBtnText: {
-    color: COLORS.textPrimary,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  setTypeAndSupersetBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 10,
-    backgroundColor: '#16151A',
-    borderColor: '#2F2D35',
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  setTypeItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  subfieldLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#8A8890',
-  },
-  setTypeBadgeBtn: {
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: '#1E1D22',
-  },
-  setTypeBadgeText: {
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  supersetItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  supersetGroupBtn: {
-    borderWidth: 1,
-    borderColor: '#423F49',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: '#1E1D22',
-  },
-  supersetGroupBtnActive: {
-    borderColor: '#C69A45',
-    backgroundColor: '#3E2E10',
-  },
-  supersetGroupText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#9CA3AF',
-  },
-  supersetGroupTextActive: {
-    color: '#FCD34D',
+    fontSize: 13,
     fontWeight: '900',
   },
   saveAsPresetBtn: {
@@ -2227,102 +3568,215 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.5,
   },
-  wearableLiveCard: {
-    backgroundColor: '#18171E',
-    borderWidth: 1,
-    borderColor: '#2F2D38',
+  finishWorkoutBtn: {
+    minHeight: 56,
+    backgroundColor: COLORS.endurance,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  finishWorkoutBtnText: {
+    color: COLORS.bgDeep,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  finishWorkoutBottomBtn: {
+    backgroundColor: '#5E1924',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#C69A45',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  finishWorkoutBottomBtnText: {
+    color: '#FDE68A',
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  postWorkoutOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  postWorkoutCard: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: '#1C1B20',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
     borderRadius: 14,
-    padding: 12,
-    marginBottom: 12,
+    padding: 18,
+    shadowColor: '#C69A45',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  postWorkoutHeader: {
+    marginBottom: 14,
+    alignItems: 'center',
+  },
+  postWorkoutHeadline: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#FDE68A',
+    textAlign: 'center',
+    letterSpacing: 0.4,
+    marginBottom: 8,
+  },
+  postWorkoutEncouragementText: {
+    fontSize: 13,
+    color: '#D1D5DB',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  improvementsScroll: {
+    maxHeight: 220,
+    marginVertical: 10,
+  },
+  improvementsScrollContent: {
+    gap: 8,
+  },
+  improvementsSectionTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#C69A45',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  improvementCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: '#26242B',
+    borderColor: '#3D3A44',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  wearableLiveLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  improvementCardLeft: {
     flex: 1,
+    marginRight: 8,
   },
-  wearableHeartPulseIcon: {
-    fontSize: 24,
+  improvementExName: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#F3F4F6',
   },
-  wearableLiveBpmText: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: '#F43F5E',
-    letterSpacing: 0.3,
-  },
-  wearableLiveSubtext: {
-    fontSize: 10,
+  improvementDetailText: {
+    fontSize: 11,
     color: '#9CA3AF',
     marginTop: 2,
-    fontWeight: '600',
   },
-  ironmanBadgePill: {
-    backgroundColor: '#7F1D1D',
+  improvementCardRight: {
+    alignItems: 'flex-end',
+  },
+  improvementTopSet: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#E5E7EB',
+    marginBottom: 4,
+  },
+  improvementBadgePill: {
+    backgroundColor: '#382810',
+    borderColor: '#C69A45',
     borderWidth: 1,
-    borderColor: '#EF4444',
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  ironmanBadgeText: {
-    color: '#FECACA',
-    fontSize: 9,
+  improvementBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FDE68A',
+  },
+  prBadgePill: {
+    backgroundColor: '#4A1D24',
+    borderColor: '#EF4444',
+  },
+  prBadgeText: {
+    color: '#FCA5A5',
+  },
+  effortStatsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginVertical: 14,
+  },
+  effortStatPill: {
+    flex: 1,
+    backgroundColor: '#26242B',
+    borderColor: '#3D3A44',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+  },
+  effortStatIcon: {
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  effortStatValue: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#FDE68A',
+    textAlign: 'center',
+  },
+  effortStatLabel: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  postWorkoutActions: {
+    marginTop: 14,
+    gap: 10,
+  },
+  postWorkoutSavePresetBtn: {
+    backgroundColor: '#26242B',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  postWorkoutSavePresetBtnSuccess: {
+    backgroundColor: '#1E3A2F',
+    borderColor: '#10B981',
+  },
+  postWorkoutSavePresetBtnText: {
+    color: '#FDE68A',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  postWorkoutSavePresetBtnTextSuccess: {
+    color: '#6EE7B7',
+  },
+  postWorkoutContinueBtn: {
+    backgroundColor: '#5E1924',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  postWorkoutContinueBtnText: {
+    color: '#FDE68A',
+    fontSize: 14,
     fontWeight: '900',
     letterSpacing: 0.5,
-  },
-  wearableMiniToggleBtn: {
-    backgroundColor: '#26242E',
-    borderWidth: 1,
-    borderColor: '#4B5563',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  wearableMiniToggleBtnActive: {
-    backgroundColor: '#37181F',
-    borderColor: '#F43F5E',
-  },
-  wearableMiniToggleText: {
-    color: '#E5E7EB',
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  wearableMiniToggleTextActive: {
-    color: '#FB7185',
-    fontWeight: '900',
-  },
-  verificationBadge: {
-    marginTop: 8,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: 1,
-    alignSelf: 'flex-start',
-  },
-  verificationBadgeIronman: {
-    backgroundColor: '#311019',
-    borderColor: '#E11D48',
-  },
-  verificationBadgeHonesty: {
-    backgroundColor: '#1E1D24',
-    borderColor: '#374151',
-  },
-  verificationBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  verificationBadgeIronmanText: {
-    color: '#FDA4AF',
-  },
-  verificationBadgeHonestyText: {
-    color: '#9CA3AF',
-  },
-  lootDropRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 4,
   },
 });

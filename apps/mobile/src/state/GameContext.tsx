@@ -16,12 +16,14 @@ import {
   ArrivalTriggerType,
   CombatantCharacterInput,
   ConsolidatedSpoilsSummary,
+  DEFAULT_DUNGEON_CATALOG,
   DEFAULT_TALENT_TREES,
   DerivedCombatAttributes,
   DungeonCombatReplayResult,
   DungeonDefinition,
   DungeonWorkoutBuff,
   EquipItemType,
+  isAdventurerRankSufficient,
   EquipmentLoadoutMap,
   EquipmentSlot,
   EquipmentStatBonuses,
@@ -84,6 +86,15 @@ import {
   CompletedExerciseEntry,
   CompletedSetEntry,
   DEFAULT_SAMPLE_WORKOUT_HISTORY,
+  BASE_EQUIPPABLE_ITEMS,
+  BASE_EQUIPPABLE_ITEM_BY_SLUG,
+  ITEM_TIER_CONFIG,
+  ItemTier,
+  PrimaryStatBonuses,
+  Tier5UniqueDefinition,
+  rollProceduralItemInstance,
+  proceduralItemToLootDrop,
+  aggregateEquippedItemModifiers,
 } from '@gymify/game-engine';
 import {
   OfflineDraftExerciseBlock,
@@ -116,6 +127,9 @@ import {
   RegisterPayload,
   apiFetch,
   createCharacterAccount,
+  updateCharacterAccount,
+  deleteCharacterAccount,
+  restoreCharacterAccount,
   fetchCharacterSheet,
   fetchCurrentSession,
   fetchUserCharacters,
@@ -173,6 +187,17 @@ export interface InventoryEntry {
   statBonuses?: EquipmentStatBonuses;
   equipped?: boolean;
   equippedSlot?: EquipmentSlot | null;
+  baseSlug?: string;
+  tier?: ItemTier;
+  prefixId?: string | null;
+  prefixLabel?: string | null;
+  prefixSummary?: string | null;
+  suffixId?: string | null;
+  suffixLabel?: string | null;
+  suffixSummary?: string | null;
+  baseStatsSummary?: string;
+  primaryStatBonuses?: PrimaryStatBonuses;
+  uniquePassive?: Tier5UniqueDefinition | LootDrop['uniquePassive'];
 }
 
 export function isEquippableInventoryEntry(item: InventoryEntry): boolean {
@@ -296,6 +321,7 @@ interface GameContextValue {
   gatheringNodes: GatheringNodeItem[];
   activeGathering: ActiveGatheringState | null;
   lastGatheringDrop: LootDrop[] | null;
+  dungeons: readonly DungeonDefinition[];
   starterDungeon: DungeonDefinition;
   companionRoster: CombatantCharacterInput[];
   activeDungeonRun: ActiveDungeonRunState | null;
@@ -403,8 +429,9 @@ interface GameContextValue {
   ) => { ok: boolean; error?: string };
   completeGatheringNow: () => void;
   syncGatheringTicks: () => Promise<void>;
-  startDungeonExpedition: (selectedPartyIds: string[]) => { ok: boolean; error?: string };
+  startDungeonExpedition: (selectedPartyIds: string[], dungeonSlug?: string) => { ok: boolean; error?: string };
   resolveActiveDungeonNow: () => void;
+  dismissCompletedDungeonReplay: () => void;
   lockDailyRaidStrike: (raidId: string) => { ok: boolean; damage?: number; error?: string };
   resolveWeeklyRaidRewards: (raidId: string) => void;
   completeGuildBounty: (bountySlug: string) => { ok: boolean; error?: string };
@@ -416,14 +443,25 @@ interface GameContextValue {
   isLiveSyncConnected: boolean;
   gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
   setGameMode: (mode: 'STANDARD' | 'IRONMAN_VERIFIED') => void;
+  appearanceId: string;
   characters: PersistedCharacterProfile[];
+  deletedCharacters: PersistedCharacterProfile[];
   activeCharacterId: string | null;
   switchCharacter: (characterId: string) => Promise<boolean>;
   createCharacter: (
     name: string,
     mode: 'STANDARD' | 'IRONMAN_VERIFIED',
-    avatarSpriteId?: string
+    appearanceIdOrAvatar?: string
   ) => Promise<{ ok: boolean; error?: string }>;
+  updateCharacterAppearance: (
+    appearanceId: string,
+    characterId?: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  deleteCharacter: (
+    characterId: string,
+    permanent?: boolean
+  ) => Promise<{ ok: boolean; error?: string }>;
+  restoreCharacter: (characterId: string) => Promise<{ ok: boolean; error?: string }>;
   refreshCharacterSheet: () => Promise<void>;
   login: (credentials: LoginPayload) => Promise<{ ok: boolean; error?: string }>;
   register: (payload: RegisterPayload) => Promise<{ ok: boolean; error?: string }>;
@@ -501,29 +539,6 @@ const KNOWN_ITEM_METADATA: Record<
     | 'statBonuses'
   >
 > = {
-  malakor_signet: {
-    itemType: 'ACCESSORY',
-    description: 'Trophy signet ring dropped by Bone Lord Malakor.',
-    requiredStrength: 2,
-    requiredEndurance: 2,
-    requiredAgility: 2,
-    statBonuses: { meleePower: 14, maxHp: 65, critChance: 0.05 },
-  },
-  crown_of_the_wyrm: {
-    itemType: 'HEAD',
-    description: 'Mythic helm awarded to slayers of Ignisrax, World-Forge Wyrm.',
-    requiredStrength: 5,
-    requiredEndurance: 5,
-    requiredAgility: 5,
-    statBonuses: { meleePower: 35, armorRating: 35, maxHp: 180, critChance: 0.08 },
-  },
-  warden_chainmail: {
-    itemType: 'CHEST',
-    description: 'Endurance-fitted hauberk forged for sustained dungeon expeditions.',
-    requiredStrength: 2,
-    requiredEndurance: 3,
-    statBonuses: { armorRating: 24, maxHp: 90, maxStamina: 30 },
-  },
   vitality_elixir: {
     itemType: 'CONSUMABLE',
     description: 'Restorative alchemical draught brewed from Sunleaf herbs (+25 Stamina).',
@@ -553,6 +568,39 @@ const KNOWN_ITEM_METADATA: Record<
     itemType: 'MATERIAL',
     description: 'Legendary shard earned through peak progressive overload.',
   },
+  raid_essence_crystal: {
+    itemType: 'MATERIAL',
+    description: 'Crystallized essence dropped by Raid Bosses.',
+  },
+  // Dynamically include all 32 base equippable armaments
+  ...Object.fromEntries(
+    BASE_EQUIPPABLE_ITEMS.map((base) => [
+      base.baseSlug,
+      {
+        itemType: base.itemType,
+        description: base.description,
+        weaponHandedness: base.handedness,
+        requiredStrength: base.statRequirements?.STR ?? 0,
+        requiredEndurance: base.statRequirements?.END ?? 0,
+        requiredAgility: base.statRequirements?.AGI ?? 0,
+        statBonuses: {
+          meleePower: base.baseStats.meleePower,
+          armorRating: base.baseStats.armor,
+          maxHp: base.baseStats.maxHp,
+          maxStamina: base.baseStats.maxStamina,
+          attackSpeedPct: base.baseStats.attackSpeedPct,
+          dodgeRating: base.baseStats.dodgeChancePct,
+          critChance: base.baseStats.critChancePct,
+          damageMitigationPct: base.baseStats.damageMitigationPct,
+          lifeOnHit: base.baseStats.lifeOnHit,
+          armorPenetrationPct: base.baseStats.armorPenetrationPct,
+          skillPotencyPct: base.baseStats.skillPotencyPct,
+          startOfCombatShieldHp: base.baseStats.startOfCombatShieldHp,
+          hazardResistancePct: base.baseStats.hazardResistancePct,
+        },
+      },
+    ])
+  ),
 };
 
 const STARTER_DUNGEON: DungeonDefinition = {
@@ -597,29 +645,6 @@ const STARTER_DUNGEON: DungeonDefinition = {
     },
     {
       roomNumber: 3,
-      roomName: 'Sunken Reliquary Chest',
-      roomType: 'LOOT_CHEST',
-      guaranteedGold: 85,
-      lootRolls: 1,
-      lootTable: [
-        {
-          itemSlug: 'obsidian_ingot',
-          itemName: 'Obsidian Steel Ingot',
-          rarity: 'UNCOMMON',
-          quantity: 2,
-          weight: 70,
-        },
-        {
-          itemSlug: 'vitality_elixir',
-          itemName: 'Elixir of Peak Output',
-          rarity: 'RARE',
-          quantity: 1,
-          weight: 30,
-        },
-      ],
-    },
-    {
-      roomNumber: 4,
       roomName: 'Sanctum of Bone Lord Malakor',
       roomType: 'BOSS',
       guaranteedGold: 180,
@@ -650,6 +675,29 @@ const STARTER_DUNGEON: DungeonDefinition = {
           rarity: 'UNCOMMON',
           quantity: 3,
           weight: 60,
+        },
+      ],
+    },
+    {
+      roomNumber: 4,
+      roomName: 'Sunken Reliquary Chest',
+      roomType: 'LOOT_CHEST',
+      guaranteedGold: 85,
+      lootRolls: 1,
+      lootTable: [
+        {
+          itemSlug: 'obsidian_ingot',
+          itemName: 'Obsidian Steel Ingot',
+          rarity: 'UNCOMMON',
+          quantity: 2,
+          weight: 70,
+        },
+        {
+          itemSlug: 'vitality_elixir',
+          itemName: 'Elixir of Peak Output',
+          rarity: 'RARE',
+          quantity: 1,
+          weight: 30,
         },
       ],
     },
@@ -795,6 +843,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const currentProfileRef = useRef<PersistedCharacterProfile | null>(null);
   const [gameMode, setGameMode] = useState<'STANDARD' | 'IRONMAN_VERIFIED'>('STANDARD');
   const [characterArtUri, setCharacterArtUri] = useState<string | null>(null);
+  const [appearanceId, setAppearanceId] = useState<string>('oni_warlord');
+  const [deletedCharacters, setDeletedCharacters] = useState<PersistedCharacterProfile[]>([]);
+  const deletedCharactersRef = useRef<PersistedCharacterProfile[]>([]);
+  deletedCharactersRef.current = deletedCharacters;
+  const locallyPermanentlyErasedIdsRef = useRef<Set<string>>(new Set<string>());
   const [adventurerRank, setAdventurerRank] = useState<AdventurerRank>('COPPER');
   const [adventurerReputation, setAdventurerReputation] = useState(140);
   const [guildName] = useState('Iron Vanguard [IRON]');
@@ -884,128 +937,79 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     accessory2: null,
   });
 
-  const [rawInventory, setRawInventory] = useState<InventoryEntry[]>([
-    {
-      slug: 'ironbound_greatsword',
-      name: 'Ironbound Greatsword',
-      description: 'Heavy two-handed blade forged for strength vanguard builds.',
-      rarity: 'UNCOMMON',
-      quantity: 1,
-      itemType: 'WEAPON',
-      weaponHandedness: 'TWO_HANDED',
-      requiredStrength: 3,
-      statBonuses: { meleePower: 22, critChance: 0.03 },
-    },
-    {
-      slug: 'tempered_iron_buckler',
-      name: 'Tempered Iron Buckler',
-      description: 'Reinforced off-hand parrying shield forged at the Guild Foundry.',
-      rarity: 'UNCOMMON',
-      quantity: 1,
-      itemType: 'OFFHAND',
-      requiredStrength: 3,
-      requiredEndurance: 2,
-      statBonuses: { armorRating: 12, maxHp: 35 },
-    },
-    {
-      slug: 'ashen_iron_helm',
-      name: 'Ashen Vanguard Greathelm',
-      description: 'Dark-forged iron visor offering solid cranial protection.',
-      rarity: 'UNCOMMON',
-      quantity: 1,
-      itemType: 'HEAD',
-      requiredStrength: 4,
-      statBonuses: { armorRating: 10, maxHp: 45 },
-    },
-    {
-      slug: 'warden_chainmail',
-      name: "Warden's Tempered Hauberk",
-      description: 'Endurance-fitted armor built for 24-hour dungeon expeditions.',
-      rarity: 'RARE',
-      quantity: 1,
-      itemType: 'CHEST',
-      requiredStrength: 2,
-      requiredEndurance: 3,
-      statBonuses: { armorRating: 24, maxHp: 90, maxStamina: 30 },
-    },
-    {
-      slug: 'strider_greaves',
-      name: 'Outrider Leather Greaves',
-      description: 'Articulated leg guards favoring aerobic march stamina.',
-      rarity: 'UNCOMMON',
-      quantity: 1,
-      itemType: 'LEGS',
-      requiredEndurance: 3,
-      statBonuses: { armorRating: 8, maxStamina: 20 },
-    },
-    {
-      slug: 'ironshod_sabatons',
-      name: 'Ironshod March Boots',
-      description: 'Sure-footed greave boots plated against dungeon floor hazards.',
-      rarity: 'COMMON',
-      quantity: 1,
-      itemType: 'BOOTS',
-      requiredEndurance: 2,
-      statBonuses: { armorRating: 6, dodgeRating: 0.02 },
-    },
-    {
-      slug: 'copper_guild_ring',
-      name: 'Copper Guild Signet',
-      description: 'Issued upon induction into the Iron Vanguard guild hall.',
-      rarity: 'COMMON',
-      quantity: 1,
-      itemType: 'ACCESSORY',
-      requiredStrength: 1,
-      statBonuses: { meleePower: 4, maxHp: 20 },
-    },
-    {
-      slug: 'crimson_oni_charm',
-      name: 'Crimson Oni War-Charm',
-      description: 'Carved battle talisman resonating with disciplined physical grit.',
-      rarity: 'RARE',
-      quantity: 1,
-      itemType: 'ACCESSORY',
-      requiredStrength: 5,
-      requiredEndurance: 4,
-      statBonuses: { meleePower: 9, critChance: 0.04, maxStamina: 15 },
-    },
-    {
-      slug: 'windrunner_daggers',
-      name: 'Twin Windrunner Blades',
-      description: 'Featherweight blades scaling with peak high-zone Agility.',
-      rarity: 'RARE',
-      quantity: 1,
-      itemType: 'WEAPON',
-      weaponHandedness: 'ONE_HANDED',
-      requiredAgility: 6, // Requires AGI 6 (demonstrates stat-gate check clearly!)
-      statBonuses: { meleePower: 25, attackSpeedPct: 0.16, dodgeRating: 0.06, critChance: 0.07 },
-    },
-    {
-      slug: 'vitality_elixir',
-      name: 'Elixir of Peak Output',
-      description: 'Alchemical draught distilled from Sunleaf herbs (+25 Stamina).',
-      rarity: 'RARE',
-      quantity: 2,
-      itemType: 'CONSUMABLE',
-      statBonuses: { maxStamina: 25 },
-    },
-    {
-      slug: 'iron_ore_cluster',
-      name: 'Rich Iron Ore Cluster',
-      description: 'Raw iron ore cluster mined from Iron Crag veins.',
-      rarity: 'COMMON',
-      quantity: 3,
-      itemType: 'MATERIAL',
-    },
-    {
-      slug: 'sunleaf_herb_bundle',
-      name: 'Sunleaf Herb Bundle',
-      description: 'Restorative wild herbs used in stamina alchemy.',
-      rarity: 'COMMON',
-      quantity: 2,
-      itemType: 'MATERIAL',
-    },
-  ]);
+  const [rawInventory, setRawInventory] = useState<InventoryEntry[]>(() => {
+    const buildStarterGearEntry = (
+      baseSlug: string,
+      tier: ItemTier,
+      seed: string,
+      overrides?: Partial<InventoryEntry>
+    ): InventoryEntry => {
+      const rolled = rollProceduralItemInstance({ baseSlug, tier, seed });
+      return {
+        slug: rolled.baseSlug,
+        baseSlug: rolled.baseSlug,
+        name: rolled.displayName,
+        description: rolled.description,
+        rarity: rolled.rarity,
+        quantity: 1,
+        itemType: rolled.itemType,
+        weaponHandedness: rolled.handedness,
+        requiredStrength: overrides?.requiredStrength ?? rolled.statRequirements?.STR ?? 0,
+        requiredEndurance: overrides?.requiredEndurance ?? rolled.statRequirements?.END ?? 0,
+        requiredAgility: overrides?.requiredAgility ?? rolled.statRequirements?.AGI ?? 0,
+        statBonuses: rolled.statBonuses,
+        tier: rolled.tier,
+        prefixId: rolled.prefix?.id ?? null,
+        prefixLabel: rolled.prefix?.label ?? null,
+        prefixSummary: rolled.prefixSummary,
+        suffixId: rolled.suffix?.id ?? null,
+        suffixLabel: rolled.suffix?.label ?? null,
+        suffixSummary: rolled.suffixSummary,
+        baseStatsSummary: rolled.baseStatsSummary,
+        primaryStatBonuses: rolled.primaryStatBonuses,
+        uniquePassive: rolled.uniquePassive,
+        ...overrides,
+      };
+    };
+
+    return [
+      buildStarterGearEntry('ironbound_greatsword', 2, 'starter-greatsword', { requiredStrength: 3 }),
+      buildStarterGearEntry('tempered_iron_buckler', 1, 'starter-buckler', { requiredStrength: 3, requiredEndurance: 2 }),
+      buildStarterGearEntry('ashen_iron_helm', 2, 'starter-helm', { requiredStrength: 4 }),
+      buildStarterGearEntry('warden_chainmail', 3, 'starter-chest', { requiredStrength: 2, requiredEndurance: 3 }),
+      buildStarterGearEntry('strider_greaves', 2, 'starter-legs', { requiredEndurance: 3 }),
+      buildStarterGearEntry('ironshod_sabatons', 1, 'starter-boots', { requiredEndurance: 2 }),
+      buildStarterGearEntry('copper_guild_ring', 1, 'starter-ring', { requiredStrength: 1 }),
+      buildStarterGearEntry('crimson_oni_charm', 4, 'starter-charm', { requiredStrength: 5, requiredEndurance: 4 }),
+      buildStarterGearEntry('windrunner_daggers', 3, 'starter-daggers', { requiredAgility: 6 }),
+      buildStarterGearEntry('malakor_signet', 5, 'starter-malakor-unique', { requiredStrength: 2, requiredEndurance: 2, requiredAgility: 2 }),
+      {
+        slug: 'vitality_elixir',
+        name: 'Elixir of Peak Output',
+        description: 'Alchemical draught distilled from Sunleaf herbs (+25 Stamina).',
+        rarity: 'RARE',
+        quantity: 2,
+        itemType: 'CONSUMABLE',
+        statBonuses: { maxStamina: 25 },
+      },
+      {
+        slug: 'iron_ore_cluster',
+        name: 'Rich Iron Ore Cluster',
+        description: 'Raw iron ore cluster mined from Iron Crag veins.',
+        rarity: 'COMMON',
+        quantity: 3,
+        itemType: 'MATERIAL',
+      },
+      {
+        slug: 'sunleaf_herb_bundle',
+        name: 'Sunleaf Herb Bundle',
+        description: 'Restorative wild herbs used in stamina alchemy.',
+        rarity: 'COMMON',
+        quantity: 2,
+        itemType: 'MATERIAL',
+      },
+    ];
+  });
 
   const inventory = useMemo<InventoryEntry[]>(() => {
     const slotBySlug = new Map<string, EquipmentSlot>();
@@ -1170,6 +1174,16 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const raidsRef = useRef(raids);
   raidsRef.current = raids;
 
+  const goldRef = useRef(gold);
+  goldRef.current = gold;
+  const rawInventoryRef = useRef(rawInventory);
+  rawInventoryRef.current = rawInventory;
+  const equipmentLoadoutRef = useRef(equipmentLoadout);
+  equipmentLoadoutRef.current = equipmentLoadout;
+  const unlockedTalentRanksRef = useRef(unlockedTalentRanks);
+  unlockedTalentRanksRef.current = unlockedTalentRanks;
+  const hasExplicitlyLoggedOutRef = useRef(false);
+
   const offlineDraftRef = useRef<OfflineWorkoutDraft>(offlineDraft);
   offlineDraftRef.current = offlineDraft;
   const queuedOfflineRef = useRef<QueuedOfflineWorkoutPayload[]>(queuedOfflineWorkouts);
@@ -1210,6 +1224,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         partial.characterProfile !== undefined ? partial.characterProfile : currentProfileRef.current,
       availableCharacters:
         partial.availableCharacters ?? availableCharactersRef.current,
+      deletedCharacters:
+        partial.deletedCharacters ?? deletedCharactersRef.current,
       activeCharacterId:
         partial.activeCharacterId !== undefined ? partial.activeCharacterId : activeCharacterIdRef.current,
     };
@@ -1280,6 +1296,19 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         availableCharactersRef.current = loaded.availableCharacters;
         setAvailableCharacters(loaded.availableCharacters);
       }
+      if (loaded.deletedCharacters && loaded.deletedCharacters.length > 0) {
+        const nowMs = Date.now();
+        const thirtyDaysMs = 30 * 24 * 3600 * 1000;
+        const validDeleted = loaded.deletedCharacters
+          .filter((c) => c.deletedAt && nowMs - new Date(c.deletedAt).getTime() < thirtyDaysMs)
+          .map((c) => {
+            const delMs = new Date(c.deletedAt!).getTime();
+            const daysRemaining = Math.max(0, Math.ceil((delMs + thirtyDaysMs - nowMs) / (24 * 3600 * 1000)));
+            return { ...c, daysRemaining };
+          });
+        deletedCharactersRef.current = validDeleted;
+        setDeletedCharacters(validDeleted);
+      }
       if (loaded.activeCharacterId) {
         activeCharacterIdRef.current = loaded.activeCharacterId;
         setActiveCharacterId(loaded.activeCharacterId);
@@ -1295,12 +1324,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setActiveCharacterId(cp.id);
         setCharacterName(cp.name);
         setGameMode(cp.gameMode);
+        const apper = cp.appearanceId || cp.avatarSpriteId || 'oni_warlord';
+        setAppearanceId(apper);
         if (cp.adventurerRank) setAdventurerRank(cp.adventurerRank as AdventurerRank);
         if (typeof cp.adventurerReputation === 'number') setAdventurerReputation(cp.adventurerReputation);
         if (typeof cp.gold === 'number') setGold(cp.gold);
         if (cp.stats) setStats((prev) => ({ ...prev, ...cp.stats }));
         if (Array.isArray(cp.inventory)) setRawInventory(cp.inventory);
         if (cp.unlockedTalentRanks) setUnlockedTalentRanks(cp.unlockedTalentRanks);
+        if (cp.equipmentLoadout && typeof cp.equipmentLoadout === 'object') {
+          setEquipmentLoadout((prev) => ({ ...prev, ...cp.equipmentLoadout }));
+        }
       }
       setOfflineHydrated(true);
     })();
@@ -1480,6 +1514,47 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLandingToastMessage(null);
   }, []);
 
+  const extractNormalizedStats = (char: any, fullSheet?: any) => {
+    const s = char?.stats || fullSheet?.character?.stats;
+    return {
+      STRENGTH: {
+        level: s?.STRENGTH?.level ?? s?.strengthLevel ?? 1,
+        xp: s?.STRENGTH?.xp ?? s?.strengthXp ?? 0,
+        pointsAvailable: s?.STRENGTH?.pointsAvailable ?? s?.strengthTalentPointsAvailable ?? 0,
+      },
+      ENDURANCE: {
+        level: s?.ENDURANCE?.level ?? s?.enduranceLevel ?? 1,
+        xp: s?.ENDURANCE?.xp ?? s?.enduranceXp ?? 0,
+        pointsAvailable: s?.ENDURANCE?.pointsAvailable ?? s?.enduranceTalentPointsAvailable ?? 0,
+      },
+      AGILITY: {
+        level: s?.AGILITY?.level ?? s?.agilityLevel ?? 1,
+        xp: s?.AGILITY?.xp ?? s?.agilityXp ?? 0,
+        pointsAvailable: s?.AGILITY?.pointsAvailable ?? s?.agilityTalentPointsAvailable ?? 0,
+      },
+      DEXTERITY: {
+        level: s?.DEXTERITY?.level ?? char?.dexLevel ?? fullSheet?.character?.dexLevel ?? 1,
+        xp: s?.DEXTERITY?.xp ?? char?.dexXp ?? fullSheet?.character?.dexXp ?? 0,
+        pointsAvailable: s?.DEXTERITY?.pointsAvailable ?? 0,
+      },
+      CONSTITUTION: {
+        level: s?.CONSTITUTION?.level ?? char?.conLevel ?? fullSheet?.character?.conLevel ?? 1,
+        xp: s?.CONSTITUTION?.xp ?? char?.conXp ?? fullSheet?.character?.conXp ?? 0,
+        pointsAvailable: s?.CONSTITUTION?.pointsAvailable ?? 0,
+      },
+      WISDOM: {
+        level: s?.WISDOM?.level ?? char?.wisLevel ?? fullSheet?.character?.wisLevel ?? 1,
+        xp: s?.WISDOM?.xp ?? char?.wisXp ?? fullSheet?.character?.wisXp ?? 0,
+        pointsAvailable: s?.WISDOM?.pointsAvailable ?? 0,
+      },
+      SPIRIT: {
+        level: s?.SPIRIT?.level ?? char?.sprLevel ?? fullSheet?.character?.sprLevel ?? 1,
+        xp: s?.SPIRIT?.xp ?? char?.sprXp ?? fullSheet?.character?.sprXp ?? 0,
+        pointsAvailable: s?.SPIRIT?.pointsAvailable ?? 0,
+      },
+    };
+  };
+
   const applyCharacterToState = useCallback(
     (char: any, fullSheet?: any) => {
       if (!char) return;
@@ -1495,46 +1570,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       if (typeof char.gold === 'number') {
         setGold(char.gold);
+        goldRef.current = char.gold;
       }
 
-      const s = char.stats || fullSheet?.character?.stats;
-      const nextStats = {
-        STRENGTH: {
-          level: s?.strengthLevel ?? 1,
-          xp: s?.strengthXp ?? 0,
-          pointsAvailable: s?.strengthTalentPointsAvailable ?? 0,
-        },
-        ENDURANCE: {
-          level: s?.enduranceLevel ?? 1,
-          xp: s?.enduranceXp ?? 0,
-          pointsAvailable: s?.enduranceTalentPointsAvailable ?? 0,
-        },
-        AGILITY: {
-          level: s?.agilityLevel ?? 1,
-          xp: s?.agilityXp ?? 0,
-          pointsAvailable: s?.agilityTalentPointsAvailable ?? 0,
-        },
-        DEXTERITY: {
-          level: char.dexLevel ?? 1,
-          xp: char.dexXp ?? 0,
-          pointsAvailable: 0,
-        },
-        CONSTITUTION: {
-          level: char.conLevel ?? 1,
-          xp: char.conXp ?? 0,
-          pointsAvailable: 0,
-        },
-        WISDOM: {
-          level: char.wisLevel ?? 1,
-          xp: char.wisXp ?? 0,
-          pointsAvailable: 0,
-        },
-        SPIRIT: {
-          level: char.sprLevel ?? 1,
-          xp: char.sprXp ?? 0,
-          pointsAvailable: 0,
-        },
-      };
+      const nextStats = extractNormalizedStats(char, fullSheet);
+      statsRef.current = nextStats;
       setStats(nextStats);
 
       if (fullSheet?.character?.fatigueState) {
@@ -1554,31 +1594,138 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
 
+      const existingLocal =
+        availableCharactersRef.current.find((loc) => loc.id === char.id) ||
+        (currentProfileRef.current?.id === char.id ? currentProfileRef.current : null);
+
+      let resolvedUnlockedTalents: Record<string, number> = {};
       if (Array.isArray(fullSheet?.character?.talentUnlocks)) {
-        const ranks: Record<string, number> = {};
         for (const u of fullSheet.character.talentUnlocks) {
-          if (u.talentNode?.slug) {
-            ranks[u.talentNode.slug] = u.currentRank;
+          const slug = u.talentNode?.slug ?? u.nodeSlug ?? u.talentNodeId;
+          if (slug) {
+            resolvedUnlockedTalents[slug] = u.currentRank ?? u.rank ?? 1;
           }
         }
-        setUnlockedTalentRanks(ranks);
+      } else if (char.unlockedTalentRanks && typeof char.unlockedTalentRanks === 'object') {
+        resolvedUnlockedTalents = char.unlockedTalentRanks;
+      } else if (existingLocal?.unlockedTalentRanks && typeof existingLocal.unlockedTalentRanks === 'object') {
+        resolvedUnlockedTalents = existingLocal.unlockedTalentRanks;
       }
+      unlockedTalentRanksRef.current = resolvedUnlockedTalents;
+      setUnlockedTalentRanks(resolvedUnlockedTalents);
+
+      const serverLoadout = fullSheet?.character?.equipmentLoadout;
+      const defaultLoadout: EquipmentLoadoutMap = {
+        mainHand: null,
+        offHand: null,
+        head: null,
+        chest: null,
+        legs: null,
+        boots: null,
+        accessory1: null,
+        accessory2: null,
+      };
+
+      let resolvedEquipmentLoadout: EquipmentLoadoutMap | undefined = undefined;
+
+      if (serverLoadout && typeof serverLoadout === 'object') {
+        const slots: (keyof EquipmentLoadoutMap)[] = [
+          'mainHand',
+          'offHand',
+          'head',
+          'chest',
+          'legs',
+          'boots',
+          'accessory1',
+          'accessory2',
+        ];
+        let hasAnyRelationalOrSlot = false;
+        const mapped: EquipmentLoadoutMap = { ...defaultLoadout };
+
+        for (const slot of slots) {
+          const val = serverLoadout[slot];
+          if (val !== undefined) {
+            hasAnyRelationalOrSlot = true;
+            if (typeof val === 'string') {
+              mapped[slot] = val;
+            } else if (val && typeof val === 'object') {
+              mapped[slot] = val.item?.slug ?? val.itemSlug ?? val.slug ?? val.baseSlug ?? null;
+            } else {
+              mapped[slot] = null;
+            }
+          }
+        }
+
+        if (hasAnyRelationalOrSlot) {
+          const hasNonNullSlot = Object.values(mapped).some((v) => v !== null);
+          if (!hasNonNullSlot && (char.equipmentLoadout || existingLocal?.equipmentLoadout)) {
+            resolvedEquipmentLoadout = (char.equipmentLoadout || existingLocal?.equipmentLoadout) as EquipmentLoadoutMap;
+          } else {
+            resolvedEquipmentLoadout = mapped;
+          }
+        }
+      }
+
+      if (!resolvedEquipmentLoadout) {
+        if (char.equipmentLoadout && typeof char.equipmentLoadout === 'object') {
+          resolvedEquipmentLoadout = char.equipmentLoadout as EquipmentLoadoutMap;
+        } else if (existingLocal?.equipmentLoadout && typeof existingLocal.equipmentLoadout === 'object') {
+          resolvedEquipmentLoadout = existingLocal.equipmentLoadout as EquipmentLoadoutMap;
+        }
+      }
+
+      if (resolvedEquipmentLoadout) {
+        equipmentLoadoutRef.current = resolvedEquipmentLoadout;
+        setEquipmentLoadout(resolvedEquipmentLoadout);
+      }
+
+      let resolvedInventory: InventoryEntry[] = rawInventoryRef.current;
+      if (Array.isArray(char.inventory)) {
+        resolvedInventory = char.inventory;
+      } else if (Array.isArray(existingLocal?.inventory)) {
+        resolvedInventory = existingLocal.inventory;
+      }
+      rawInventoryRef.current = resolvedInventory;
+      setRawInventory(resolvedInventory);
+
+      const incomingAppearance = char.appearanceId || char.avatarSpriteId;
+      const resolvedAppearance =
+        incomingAppearance && incomingAppearance !== 'adventurer_default'
+          ? incomingAppearance
+          : existingLocal?.appearanceId && existingLocal.appearanceId !== 'adventurer_default'
+          ? existingLocal.appearanceId
+          : incomingAppearance || 'oni_warlord';
+      setAppearanceId(resolvedAppearance);
 
       const charProfile: PersistedCharacterProfile = {
         id: char.id,
         name: char.name,
         gameMode: mode,
-        avatarSpriteId: char.avatarSpriteId || 'adventurer_default',
+        appearanceId: resolvedAppearance,
+        avatarSpriteId: resolvedAppearance,
         overallLevel: char.overallLevel ?? 1,
         adventurerRank: char.adventurerRank || 'COPPER',
         adventurerReputation: char.adventurerReputation ?? 0,
         gold: char.gold ?? 100,
         stats: nextStats,
+        inventory: resolvedInventory,
+        unlockedTalentRanks: resolvedUnlockedTalents,
+        equipmentLoadout: resolvedEquipmentLoadout ?? equipmentLoadoutRef.current,
         lastSyncedAtMs: Date.now(),
       };
       currentProfileRef.current = charProfile;
+
+      const inAvailable = availableCharactersRef.current.some((c) => c.id === char.id);
+      let nextAvailable = availableCharactersRef.current;
+      if (inAvailable) {
+        nextAvailable = availableCharactersRef.current.map((c) => (c.id === char.id ? { ...c, ...charProfile } : c));
+        availableCharactersRef.current = nextAvailable;
+        setAvailableCharacters(nextAvailable);
+      }
+
       persistBundleSnapshot({
         characterProfile: charProfile,
+        availableCharacters: nextAvailable,
         activeCharacterId: char.id,
       });
     },
@@ -1586,50 +1733,84 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const syncRemoteCharacters = useCallback(
-    (primaryChar: any, allChars?: any[]) => {
+    (primaryChar: any, allChars?: any[], remoteDeleted?: any[]) => {
       if (!primaryChar && (!allChars || allChars.length === 0)) return;
       const rawList = allChars && allChars.length > 0 ? allChars : [primaryChar];
-      const mappedProfiles: PersistedCharacterProfile[] = rawList.map((c: any) => ({
-        id: c.id,
-        name: c.name,
-        gameMode: c.gameMode,
-        avatarSpriteId: c.avatarSpriteId || 'adventurer_default',
-        overallLevel: c.overallLevel ?? 1,
-        adventurerRank: c.adventurerRank || 'COPPER',
-        adventurerReputation: c.adventurerReputation ?? 0,
-        gold: c.gold ?? 100,
-        stats: {
-          STRENGTH: {
-            level: c.stats?.strengthLevel ?? 1,
-            xp: c.stats?.strengthXp ?? 0,
-            pointsAvailable: c.stats?.strengthTalentPointsAvailable ?? 0,
-          },
-          ENDURANCE: {
-            level: c.stats?.enduranceLevel ?? 1,
-            xp: c.stats?.enduranceXp ?? 0,
-            pointsAvailable: c.stats?.enduranceTalentPointsAvailable ?? 0,
-          },
-          AGILITY: {
-            level: c.stats?.agilityLevel ?? 1,
-            xp: c.stats?.agilityXp ?? 0,
-            pointsAvailable: c.stats?.agilityTalentPointsAvailable ?? 0,
-          },
-          DEXTERITY: { level: c.dexLevel ?? 1, xp: c.dexXp ?? 0, pointsAvailable: 0 },
-          CONSTITUTION: { level: c.conLevel ?? 1, xp: c.conXp ?? 0, pointsAvailable: 0 },
-          WISDOM: { level: c.wisLevel ?? 1, xp: c.wisXp ?? 0, pointsAvailable: 0 },
-          SPIRIT: { level: c.sprLevel ?? 1, xp: c.sprXp ?? 0, pointsAvailable: 0 },
-        },
-      }));
+      // Filter out characters that are marked deleted, locally permanently erased, or locally soft-deleted
+      const activeRawList = rawList.filter((c: any) => {
+        if (c.deletedAt) return false;
+        if (locallyPermanentlyErasedIdsRef.current.has(c.id)) return false;
+        if (deletedCharactersRef.current.some((d) => d.id === c.id)) return false;
+        return true;
+      });
+
+      const mappedProfiles: PersistedCharacterProfile[] = activeRawList.map((c: any) => {
+        // If this character already exists locally with a customized appearance, preserve it
+        const localChar =
+          availableCharactersRef.current.find((loc) => loc.id === c.id) ||
+          (currentProfileRef.current?.id === c.id ? currentProfileRef.current : null);
+        const effectiveAppearance =
+          localChar?.appearanceId && localChar.appearanceId !== 'adventurer_default'
+            ? localChar.appearanceId
+            : c.appearanceId || c.avatarSpriteId || 'oni_warlord';
+
+        return {
+          id: c.id,
+          name: c.name,
+          gameMode: c.gameMode,
+          appearanceId: effectiveAppearance,
+          avatarSpriteId: effectiveAppearance,
+          deletedAt: null,
+          overallLevel: c.overallLevel ?? 1,
+          adventurerRank: c.adventurerRank || 'COPPER',
+          adventurerReputation: c.adventurerReputation ?? 0,
+          gold: c.gold ?? 100,
+          stats: extractNormalizedStats(c),
+          inventory: localChar?.inventory ?? c.inventory,
+          unlockedTalentRanks: localChar?.unlockedTalentRanks ?? c.unlockedTalentRanks,
+          equipmentLoadout: localChar?.equipmentLoadout ?? c.equipmentLoadout,
+        };
+      });
 
       setAvailableCharacters(mappedProfiles);
       availableCharactersRef.current = mappedProfiles;
-      persistBundleSnapshot({ availableCharacters: mappedProfiles });
+
+      // Merge remote deleted characters with any local soft-deleted characters
+      let nextDeleted = [...deletedCharactersRef.current];
+      if (Array.isArray(remoteDeleted)) {
+        for (const c of remoteDeleted) {
+          if (locallyPermanentlyErasedIdsRef.current.has(c.id)) continue;
+          if (!nextDeleted.some((d) => d.id === c.id)) {
+            nextDeleted.push({
+              id: c.id,
+              name: c.name,
+              gameMode: c.gameMode,
+              appearanceId: c.appearanceId || c.avatarSpriteId || 'oni_warlord',
+              avatarSpriteId: c.appearanceId || c.avatarSpriteId || 'oni_warlord',
+              deletedAt: c.deletedAt,
+              daysRemaining: c.daysRemaining ?? 30,
+              overallLevel: c.overallLevel ?? 1,
+              adventurerRank: c.adventurerRank || 'COPPER',
+              adventurerReputation: c.adventurerReputation ?? 0,
+              gold: c.gold ?? 100,
+              stats: extractNormalizedStats(c),
+            });
+          }
+        }
+      }
+      setDeletedCharacters(nextDeleted);
+      deletedCharactersRef.current = nextDeleted;
+
+      persistBundleSnapshot({
+        availableCharacters: mappedProfiles,
+        deletedCharacters: nextDeleted,
+      });
 
       const currentActiveId = activeCharacterIdRef.current;
       const targetChar =
-        (currentActiveId && rawList.find((c: any) => c.id === currentActiveId)) ||
-        primaryChar ||
-        rawList[0];
+        (currentActiveId && mappedProfiles.find((c) => c.id === currentActiveId)) ||
+        (primaryChar && mappedProfiles.find((c) => c.id === primaryChar.id)) ||
+        mappedProfiles[0];
 
       if (targetChar) {
         applyCharacterToState(targetChar);
@@ -1665,9 +1846,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     async (
       name: string,
       mode: 'STANDARD' | 'IRONMAN_VERIFIED',
-      avatarSpriteId?: string
+      appearanceIdOrAvatar?: string
     ): Promise<{ ok: boolean; error?: string }> => {
-      // Enforce the 2-character limit: 1 Standard, 1 Ironman
+      // Enforce the 2-character limit: 1 Standard, 1 Ironman (active only)
       if (availableCharactersRef.current.length >= 2) {
         return {
           ok: false,
@@ -1684,46 +1865,297 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
 
+      const chosenAppearance = appearanceIdOrAvatar || 'oni_warlord';
+
       if (serverOnline) {
-        const res = await createCharacterAccount({
-          name,
-          gameMode: mode,
-          avatarSpriteId: avatarSpriteId ?? 'adventurer_default',
-        });
-        if (!res.ok || !res.data?.character) {
-          return { ok: false, error: res.error || 'Failed to forge hero on realm server.' };
+        try {
+          const res = await createCharacterAccount({
+            name,
+            gameMode: mode,
+            appearanceId: chosenAppearance,
+            avatarSpriteId: chosenAppearance,
+          });
+          if (res.ok && res.data?.character) {
+            const newChar = res.data.character;
+            const nextList = [...availableCharactersRef.current, newChar];
+            syncRemoteCharacters(newChar, nextList);
+            return { ok: true };
+          }
+          console.warn(
+            '[GameContext] Remote createCharacterAccount failed, falling back to local hero creation:',
+            res.error
+          );
+        } catch (err: any) {
+          console.warn(
+            '[GameContext] Remote createCharacterAccount exception, falling back to local hero creation:',
+            err.message
+          );
         }
-        const newChar = res.data.character;
-        const nextList = [...availableCharactersRef.current, newChar];
-        syncRemoteCharacters(newChar, nextList);
-        return { ok: true };
-      } else {
-        // Offline hero creation fallback
-        const localChar: PersistedCharacterProfile = {
-          id: `local_char_${Date.now()}`,
-          name,
-          gameMode: mode,
-          avatarSpriteId: avatarSpriteId ?? 'adventurer_default',
-          overallLevel: 1,
-          adventurerRank: 'COPPER',
-          adventurerReputation: 0,
-          gold: 100,
-          stats: {
-            STRENGTH: { level: 1, xp: 0, pointsAvailable: 0 },
-            ENDURANCE: { level: 1, xp: 0, pointsAvailable: 0 },
-            AGILITY: { level: 1, xp: 0, pointsAvailable: 0 },
-            DEXTERITY: { level: 1, xp: 0, pointsAvailable: 0 },
-            CONSTITUTION: { level: 1, xp: 0, pointsAvailable: 0 },
-            WISDOM: { level: 1, xp: 0, pointsAvailable: 0 },
-            SPIRIT: { level: 1, xp: 0, pointsAvailable: 0 },
-          },
-        };
-        const nextList = [...availableCharactersRef.current, localChar];
-        syncRemoteCharacters(localChar, nextList);
-        return { ok: true };
       }
+
+      // Offline / local fallback hero creation
+      const localChar: PersistedCharacterProfile = {
+        id: `local_char_${Date.now()}`,
+        name,
+        gameMode: mode,
+        appearanceId: chosenAppearance,
+        avatarSpriteId: chosenAppearance,
+        overallLevel: 1,
+        adventurerRank: 'COPPER',
+        adventurerReputation: 0,
+        gold: 100,
+        stats: {
+          STRENGTH: { level: 1, xp: 0, pointsAvailable: 0 },
+          ENDURANCE: { level: 1, xp: 0, pointsAvailable: 0 },
+          AGILITY: { level: 1, xp: 0, pointsAvailable: 0 },
+          DEXTERITY: { level: 1, xp: 0, pointsAvailable: 0 },
+          CONSTITUTION: { level: 1, xp: 0, pointsAvailable: 0 },
+          WISDOM: { level: 1, xp: 0, pointsAvailable: 0 },
+          SPIRIT: { level: 1, xp: 0, pointsAvailable: 0 },
+        },
+      };
+      const nextList = [...availableCharactersRef.current, localChar];
+      syncRemoteCharacters(localChar, nextList);
+      return { ok: true };
     },
     [serverOnline, syncRemoteCharacters]
+  );
+
+  const updateCharacterAppearance = useCallback(
+    async (
+      newAppearanceId: string,
+      targetCharacterId?: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const targetId = targetCharacterId || activeCharacterIdRef.current;
+      if (!targetId) {
+        setAppearanceId(newAppearanceId);
+        return { ok: true };
+      }
+
+      if (targetId === activeCharacterIdRef.current) {
+        setAppearanceId(newAppearanceId);
+      }
+
+      const nextList = availableCharactersRef.current.map((c) =>
+        c.id === targetId
+          ? { ...c, appearanceId: newAppearanceId, avatarSpriteId: newAppearanceId }
+          : c
+      );
+      setAvailableCharacters(nextList);
+      availableCharactersRef.current = nextList;
+
+      if (currentProfileRef.current && currentProfileRef.current.id === targetId) {
+        currentProfileRef.current = {
+          ...currentProfileRef.current,
+          appearanceId: newAppearanceId,
+          avatarSpriteId: newAppearanceId,
+        };
+      }
+
+      persistBundleSnapshot({
+        availableCharacters: nextList,
+        characterProfile: currentProfileRef.current,
+      });
+
+      if (serverOnline && !targetId.startsWith('local_')) {
+        try {
+          const res = await updateCharacterAccount(targetId, { appearanceId: newAppearanceId });
+          if (!res.ok) {
+            if (res.statusCode === 409) {
+              return { ok: false, error: res.error };
+            }
+            console.warn('[GameContext] Remote updateCharacterAccount non-fatal error:', res.error);
+          }
+        } catch (err: any) {
+          console.warn('[GameContext] Remote updateCharacterAccount exception:', err.message);
+        }
+      }
+
+      return { ok: true };
+    },
+    [persistBundleSnapshot, serverOnline]
+  );
+
+  const deleteCharacter = useCallback(
+    async (
+      targetCharacterId: string,
+      permanent?: boolean
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const target = availableCharactersRef.current.find((c) => c.id === targetCharacterId);
+      const fallenTarget = deletedCharactersRef.current.find((c) => c.id === targetCharacterId);
+
+      if (!target && !fallenTarget) {
+        return { ok: false, error: 'Hero not found.' };
+      }
+
+      if (permanent) {
+        locallyPermanentlyErasedIdsRef.current.add(targetCharacterId);
+        const nextAvailable = availableCharactersRef.current.filter((c) => c.id !== targetCharacterId);
+        const nextDeleted = deletedCharactersRef.current.filter((c) => c.id !== targetCharacterId);
+
+        setAvailableCharacters(nextAvailable);
+        availableCharactersRef.current = nextAvailable;
+        setDeletedCharacters(nextDeleted);
+        deletedCharactersRef.current = nextDeleted;
+
+        if (activeCharacterIdRef.current === targetCharacterId) {
+          const nextActive = nextAvailable[0] ?? null;
+          if (nextActive) {
+            applyCharacterToState(nextActive);
+          } else {
+            setActiveCharacterId(null);
+            activeCharacterIdRef.current = null;
+            currentProfileRef.current = null;
+            remoteCharacterIdRef.current = null;
+          }
+        }
+
+        persistBundleSnapshot({
+          availableCharacters: nextAvailable,
+          deletedCharacters: nextDeleted,
+          activeCharacterId: activeCharacterIdRef.current,
+          characterProfile: currentProfileRef.current,
+        });
+
+        if (serverOnline && !targetCharacterId.startsWith('local_')) {
+          try {
+            const res = await deleteCharacterAccount(targetCharacterId, true);
+            if (!res.ok) {
+              if (res.statusCode === 409) {
+                return { ok: false, error: res.error };
+              }
+              console.warn('[GameContext] Remote permanent delete non-fatal error:', res.error);
+            }
+          } catch (err: any) {
+            console.warn('[GameContext] Remote permanent delete exception:', err.message);
+          }
+        }
+        return { ok: true };
+      }
+
+      // Soft-delete
+      if (!target) {
+        return { ok: false, error: 'Active hero not found.' };
+      }
+
+      const nextAvailable = availableCharactersRef.current.filter((c) => c.id !== targetCharacterId);
+      const fallenProfile: PersistedCharacterProfile = {
+        ...target,
+        deletedAt: new Date().toISOString(),
+        daysRemaining: 30,
+      };
+      const nextDeleted = [fallenProfile, ...deletedCharactersRef.current.filter((c) => c.id !== targetCharacterId)];
+
+      setAvailableCharacters(nextAvailable);
+      availableCharactersRef.current = nextAvailable;
+      setDeletedCharacters(nextDeleted);
+      deletedCharactersRef.current = nextDeleted;
+
+      if (activeCharacterIdRef.current === targetCharacterId) {
+        const nextActive = nextAvailable[0] ?? null;
+        if (nextActive) {
+          applyCharacterToState(nextActive);
+        } else {
+          setActiveCharacterId(null);
+          activeCharacterIdRef.current = null;
+          currentProfileRef.current = null;
+          remoteCharacterIdRef.current = null;
+        }
+      }
+
+      persistBundleSnapshot({
+        availableCharacters: nextAvailable,
+        deletedCharacters: nextDeleted,
+        activeCharacterId: activeCharacterIdRef.current,
+        characterProfile: currentProfileRef.current,
+      });
+
+      if (serverOnline && !targetCharacterId.startsWith('local_')) {
+        try {
+          const res = await deleteCharacterAccount(targetCharacterId, false);
+          if (!res.ok) {
+            if (res.statusCode === 409) {
+              return { ok: false, error: res.error };
+            }
+            console.warn('[GameContext] Remote soft-delete non-fatal error:', res.error);
+          }
+        } catch (err: any) {
+          console.warn('[GameContext] Remote soft-delete exception:', err.message);
+        }
+      }
+
+      return { ok: true };
+    },
+    [applyCharacterToState, persistBundleSnapshot, serverOnline]
+  );
+
+  const restoreCharacter = useCallback(
+    async (targetCharacterId: string): Promise<{ ok: boolean; error?: string }> => {
+      const target = deletedCharactersRef.current.find((c) => c.id === targetCharacterId);
+      if (!target) {
+        return { ok: false, error: 'Fallen hero not found in archive.' };
+      }
+
+      const conflict = availableCharactersRef.current.find((c) => c.gameMode === target.gameMode);
+      if (conflict) {
+        return {
+          ok: false,
+          error:
+            'You already have an active hero in this mode slot. Please delete/archive your current active hero in that mode before restoring this fallen hero.',
+        };
+      }
+
+      if (
+        target.deletedAt &&
+        Date.now() - new Date(target.deletedAt).getTime() > 30 * 24 * 3600 * 1000
+      ) {
+        return {
+          ok: false,
+          error: 'The 30-day restoration window for this hero has expired.',
+        };
+      }
+
+      const nextDeleted = deletedCharactersRef.current.filter((c) => c.id !== targetCharacterId);
+      const restoredProfile: PersistedCharacterProfile = {
+        ...target,
+        deletedAt: null,
+        daysRemaining: undefined,
+      };
+      const nextAvailable = [...availableCharactersRef.current, restoredProfile];
+
+      setDeletedCharacters(nextDeleted);
+      deletedCharactersRef.current = nextDeleted;
+      setAvailableCharacters(nextAvailable);
+      availableCharactersRef.current = nextAvailable;
+
+      if (!activeCharacterIdRef.current) {
+        applyCharacterToState(restoredProfile);
+      }
+
+      persistBundleSnapshot({
+        availableCharacters: nextAvailable,
+        deletedCharacters: nextDeleted,
+        activeCharacterId: activeCharacterIdRef.current,
+        characterProfile: currentProfileRef.current,
+      });
+
+      if (serverOnline && !targetCharacterId.startsWith('local_')) {
+        try {
+          const res = await restoreCharacterAccount(targetCharacterId);
+          if (!res.ok) {
+            if (res.statusCode === 409) {
+              return { ok: false, error: res.error || 'Server conflict restoring hero.' };
+            }
+            console.warn('[GameContext] Remote restoreCharacterAccount non-fatal error:', res.error);
+          }
+        } catch (err: any) {
+          console.warn('[GameContext] Remote restoreCharacterAccount exception:', err.message);
+        }
+      }
+
+      return { ok: true };
+    },
+    [applyCharacterToState, persistBundleSnapshot, serverOnline]
   );
 
   const refreshCharacterSheet = useCallback(async () => {
@@ -1737,11 +2169,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = useCallback(
     async (credentials: LoginPayload) => {
+      hasExplicitlyLoggedOutRef.current = false;
       const res = await loginAccount(credentials);
       if (res.ok && res.data) {
         setAuthTokenState(res.data.token);
         setCurrentUser(res.data.user);
-        syncRemoteCharacters(res.data.character, res.data.characters);
+        syncRemoteCharacters(res.data.character, res.data.characters, (res.data as any).deletedCharacters);
         setServerOnline(true);
         return { ok: true };
       }
@@ -1752,11 +2185,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = useCallback(
     async (payload: RegisterPayload) => {
+      hasExplicitlyLoggedOutRef.current = false;
       const res = await registerAccount(payload);
       if (res.ok && res.data) {
         setAuthTokenState(res.data.token);
         setCurrentUser(res.data.user);
-        syncRemoteCharacters(res.data.character, res.data.characters);
+        syncRemoteCharacters(res.data.character, res.data.characters, (res.data as any).deletedCharacters);
         setServerOnline(true);
         return { ok: true };
       }
@@ -1766,6 +2200,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const logout = useCallback(async () => {
+    hasExplicitlyLoggedOutRef.current = true;
     await logoutAccount();
     setAuthTokenState(null);
     setCurrentUser(null);
@@ -1774,10 +2209,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActiveCharacterId(null);
     setAvailableCharacters([]);
     availableCharactersRef.current = [];
+    setDeletedCharacters([]);
+    deletedCharactersRef.current = [];
     currentProfileRef.current = null;
     persistBundleSnapshot({
       characterProfile: null,
       availableCharacters: [],
+      deletedCharacters: [],
       activeCharacterId: null,
     });
   }, [persistBundleSnapshot]);
@@ -1798,9 +2236,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (sessionRes.ok && sessionRes.data) {
           setAuthTokenState(storedToken);
           setCurrentUser(sessionRes.data.user);
-          syncRemoteCharacters(sessionRes.data.character, sessionRes.data.characters);
+          syncRemoteCharacters(sessionRes.data.character, sessionRes.data.characters, (sessionRes.data as any).deletedCharacters);
           return sessionRes.data.character?.id ?? null;
         }
+      }
+
+      if (!storedToken && hasExplicitlyLoggedOutRef.current) {
+        return null;
       }
 
       // 2. If no valid stored session, log in with default hero credentials
@@ -1812,7 +2254,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (loginRes.ok && loginRes.data) {
         setAuthTokenState(loginRes.data.token);
         setCurrentUser(loginRes.data.user);
-        syncRemoteCharacters(loginRes.data.character, loginRes.data.characters);
+        syncRemoteCharacters(loginRes.data.character, loginRes.data.characters, (loginRes.data as any).deletedCharacters);
         return loginRes.data.character?.id ?? null;
       }
 
@@ -1827,7 +2269,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (regRes.ok && regRes.data) {
         setAuthTokenState(regRes.data.token);
         setCurrentUser(regRes.data.user);
-        syncRemoteCharacters(regRes.data.character, regRes.data.characters);
+        syncRemoteCharacters(regRes.data.character, regRes.data.characters, (regRes.data as any).deletedCharacters);
         return regRes.data.character?.id ?? null;
       }
 
@@ -1939,34 +2381,83 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [fetchActiveRaids, serverOnline]);
 
-  const addDropsToInventory = useCallback((drops: LootDrop[]) => {
-    if (drops.length === 0) return;
-    setRawInventory((prev) => {
+  const addDropsToInventory = useCallback(
+    (drops: LootDrop[]) => {
+      if (drops.length === 0) return;
+      const prev = rawInventoryRef.current;
       const next = [...prev];
       for (const d of drops) {
+        const meta = KNOWN_ITEM_METADATA[d.itemSlug];
+        const isEquippable =
+          BASE_EQUIPPABLE_ITEM_BY_SLUG[d.itemSlug] !== undefined ||
+          (meta?.itemType && isEquippableItemType(meta.itemType));
+
+        let rolledDrop: LootDrop = d;
+        if (isEquippable && !d.tier && BASE_EQUIPPABLE_ITEM_BY_SLUG[d.itemSlug]) {
+          const rolled = rollProceduralItemInstance({
+            baseSlug: d.itemSlug,
+            tier: 2,
+            seed: `drop:${Date.now()}:${d.itemSlug}`,
+          });
+          rolledDrop = {
+            ...proceduralItemToLootDrop(rolled),
+            quantity: d.quantity,
+          };
+        }
+
         const idx = next.findIndex((i) => i.slug === d.itemSlug);
-        if (idx >= 0) {
+        if (idx >= 0 && !isEquippable) {
           next[idx] = { ...next[idx]!, quantity: next[idx]!.quantity + d.quantity };
         } else {
-          const meta = KNOWN_ITEM_METADATA[d.itemSlug];
           next.push({
-            slug: d.itemSlug,
-            name: d.itemName,
+            slug: rolledDrop.itemSlug,
+            baseSlug: rolledDrop.baseSlug ?? rolledDrop.itemSlug,
+            name: rolledDrop.itemName,
             description: meta?.description,
-            rarity: d.rarity,
-            quantity: d.quantity,
+            rarity: rolledDrop.rarity,
+            quantity: rolledDrop.quantity,
             itemType: meta?.itemType ?? 'MATERIAL',
             weaponHandedness: meta?.weaponHandedness,
             requiredStrength: meta?.requiredStrength,
             requiredEndurance: meta?.requiredEndurance,
             requiredAgility: meta?.requiredAgility,
-            statBonuses: meta?.statBonuses,
+            statBonuses: rolledDrop.statBonuses ?? meta?.statBonuses,
+            tier: rolledDrop.tier,
+            prefixId: rolledDrop.prefixId,
+            prefixLabel: rolledDrop.prefixLabel,
+            prefixSummary: rolledDrop.prefixSummary,
+            suffixId: rolledDrop.suffixId,
+            suffixLabel: rolledDrop.suffixLabel,
+            suffixSummary: rolledDrop.suffixSummary,
+            baseStatsSummary: rolledDrop.baseStatsSummary,
+            primaryStatBonuses: rolledDrop.primaryStatBonuses,
+            uniquePassive: rolledDrop.uniquePassive,
           });
         }
       }
-      return next;
-    });
-  }, []);
+      rawInventoryRef.current = next;
+      setRawInventory(next);
+
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          inventory: next,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+        persistBundleSnapshot({
+          characterProfile: updatedProfile,
+          availableCharacters: nextAvail,
+        });
+      }
+    },
+    [persistBundleSnapshot]
+  );
 
   const updateOfflineDraft = useCallback(
     (updater: (prev: OfflineWorkoutDraft) => OfflineWorkoutDraft) => {
@@ -2500,10 +2991,29 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setHistoricalPRs(runningPRs);
           consistencyStreakRef.current = runningStreak;
           setConsistencyStreak(runningStreak);
-          if (addedGold > 0) setGold((g) => g + addedGold);
+          if (addedGold > 0) {
+            goldRef.current += addedGold;
+            setGold((g) => g + addedGold);
+          }
           if (addedWorkouts > 0) setWorkoutsLoggedCount((c) => c + addedWorkouts);
           if (addedShields > 0) setResilienceShields((s) => s + addedShields);
           if (collectedDrops.length > 0) addDropsToInventory(collectedDrops);
+
+          if (currentProfileRef.current) {
+            const updatedProfile: PersistedCharacterProfile = {
+              ...currentProfileRef.current,
+              stats: runningStats,
+              gold: goldRef.current,
+              inventory: rawInventoryRef.current,
+              lastSyncedAtMs: Date.now(),
+            };
+            currentProfileRef.current = updatedProfile;
+            const nextAvail = availableCharactersRef.current.map((c) =>
+              c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+            );
+            availableCharactersRef.current = nextAvail;
+            setAvailableCharacters(nextAvail);
+          }
 
           if (localDungeonBuffAccum.length > 0) {
             setActiveDungeonRun((prevRun) => {
@@ -2550,6 +3060,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           queuedOfflineWorkouts: updatedQueue,
           unsyncedServerPayloads: updatedUnsynced,
           pendingWorkoutReceipts: updatedReceipts,
+          characterProfile: currentProfileRef.current,
+          availableCharacters: availableCharactersRef.current,
         });
       } finally {
         isSyncingOfflineRef.current = false;
@@ -2798,22 +3310,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [unlockedTalentRanks]
   );
 
-  const equipmentBonuses = useMemo<EquipmentStatBonuses>(() => {
-    const agg: EquipmentStatBonuses = {};
-    for (const item of inventory) {
-      if (!item.equipped || !item.statBonuses) continue;
-      const b = item.statBonuses;
-      agg.maxHp = (agg.maxHp ?? 0) + (b.maxHp ?? 0);
-      agg.maxStamina = (agg.maxStamina ?? 0) + (b.maxStamina ?? 0);
-      agg.meleePower = (agg.meleePower ?? 0) + (b.meleePower ?? 0);
-      agg.armorRating = (agg.armorRating ?? 0) + (b.armorRating ?? 0);
-      agg.attackSpeedPct = (agg.attackSpeedPct ?? 0) + (b.attackSpeedPct ?? 0);
-      agg.dodgeRating = (agg.dodgeRating ?? 0) + (b.dodgeRating ?? 0);
-      agg.critChance = (agg.critChance ?? 0) + (b.critChance ?? 0);
-      agg.critMultiplier = (agg.critMultiplier ?? 0) + (b.critMultiplier ?? 0);
-    }
-    return agg;
+  const aggregatedEquipment = useMemo(() => {
+    const equippedEntries = inventory.filter((item) => item.equipped);
+    return aggregateEquippedItemModifiers(equippedEntries);
   }, [inventory]);
+
+  const equipmentBonuses = aggregatedEquipment.equipmentBonuses;
 
   const overallLevel = useMemo(
     () =>
@@ -2974,12 +3476,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           strengthLevel: stats.STRENGTH.level,
           enduranceLevel: stats.ENDURANCE.level,
           agilityLevel: stats.AGILITY.level,
+          dexLevel: stats.DEXTERITY?.level ?? 1,
+          conLevel: stats.CONSTITUTION?.level ?? 1,
+          wisLevel: stats.WISDOM?.level ?? 1,
+          sprLevel: stats.SPIRIT?.level ?? 1,
         },
-        equipmentBonuses,
+        equipmentBonuses: aggregatedEquipment.equipmentBonuses,
+        equipmentPrimaryStats: aggregatedEquipment.primaryStatBonuses,
+        uniqueItemModifiers: aggregatedEquipment.uniquePassiveModifiers,
         unlockedTalentRanks,
         systemicFatigueStacks: projectedFatigue.systemicFatigueStacks,
       }),
-    [equipmentBonuses, projectedFatigue.systemicFatigueStacks, stats, unlockedTalentRanks]
+    [aggregatedEquipment, projectedFatigue.systemicFatigueStacks, stats, unlockedTalentRanks]
   );
 
   const travelTo = useCallback((dest: GameLocation) => {
@@ -3167,17 +3675,49 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { ok: false, error: res.error };
       }
 
-      setUnlockedTalentRanks(res.nextState.unlockedNodeRanks);
-      setStats((prev) => ({
-        ...prev,
+      const nextUnlocked = res.nextState.unlockedNodeRanks;
+      unlockedTalentRanksRef.current = nextUnlocked;
+      setUnlockedTalentRanks(nextUnlocked);
+
+      const nextStats = {
+        ...stats,
         [res.governingStat]: {
-          ...prev[res.governingStat],
+          ...stats[res.governingStat],
           pointsAvailable: res.nextState.availablePoints[res.governingStat],
         },
-      }));
+      };
+      statsRef.current = nextStats;
+      setStats(nextStats);
+
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          stats: nextStats,
+          unlockedTalentRanks: nextUnlocked,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+        persistBundleSnapshot({
+          characterProfile: updatedProfile,
+          availableCharacters: nextAvail,
+        });
+      }
+
+      if (serverOnline && remoteCharacterIdRef.current && !remoteCharacterIdRef.current.startsWith('local_')) {
+        apiFetch(`/api/characters/${remoteCharacterIdRef.current}/talents/unlock`, {
+          method: 'POST',
+          body: JSON.stringify({ nodeSlug: nodeId }),
+        }).catch(() => {});
+      }
+
       return { ok: true };
     },
-    [stats, unlockedTalentRanks]
+    [persistBundleSnapshot, serverOnline, stats, unlockedTalentRanks]
   );
 
   const equipItemToSlot = useCallback(
@@ -3221,26 +3761,69 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { ok: false, error: check.error };
       }
 
-      setEquipmentLoadout((prev) => {
-        const next: EquipmentLoadoutMap = { ...prev };
-        // Remove item from any other slot if already equipped (e.g., swapping accessory1 -> accessory2)
-        for (const k of Object.keys(next) as EquipmentSlot[]) {
-          if (next[k] === slug) {
-            next[k] = null;
-          }
+      const currentLoadout = equipmentLoadoutRef.current || equipmentLoadout;
+      const nextLoadout: EquipmentLoadoutMap = { ...currentLoadout };
+      // Remove item from any other slot if already equipped (e.g., swapping accessory1 -> accessory2)
+      for (const k of Object.keys(nextLoadout) as EquipmentSlot[]) {
+        if (nextLoadout[k] === slug) {
+          nextLoadout[k] = null;
         }
-        next[resolvedSlot] = slug;
-        return next;
-      });
+      }
+      nextLoadout[resolvedSlot] = slug;
+
+      equipmentLoadoutRef.current = nextLoadout;
+      setEquipmentLoadout(nextLoadout);
+
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          equipmentLoadout: nextLoadout,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+        persistBundleSnapshot({
+          characterProfile: updatedProfile,
+          availableCharacters: nextAvail,
+        });
+      }
 
       return { ok: true, slot: resolvedSlot };
     },
-    [equipmentLoadout, rawInventory, stats]
+    [equipmentLoadout, persistBundleSnapshot, rawInventory, stats]
   );
 
-  const unequipSlot = useCallback((slot: EquipmentSlot) => {
-    setEquipmentLoadout((prev) => ({ ...prev, [slot]: null }));
-  }, []);
+  const unequipSlot = useCallback(
+    (slot: EquipmentSlot) => {
+      const currentLoadout = equipmentLoadoutRef.current || equipmentLoadout;
+      const nextLoadout: EquipmentLoadoutMap = { ...currentLoadout, [slot]: null };
+      equipmentLoadoutRef.current = nextLoadout;
+      setEquipmentLoadout(nextLoadout);
+
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          equipmentLoadout: nextLoadout,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+        persistBundleSnapshot({
+          characterProfile: updatedProfile,
+          availableCharacters: nextAvail,
+        });
+      }
+    },
+    [equipmentLoadout, persistBundleSnapshot]
+  );
 
   const toggleEquipItem = useCallback(
     (slug: string) => {
@@ -3387,9 +3970,22 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [serverOnline]);
 
   const startDungeonExpedition = useCallback(
-    (selectedPartyIds: string[]) => {
+    (selectedPartyIds: string[], dungeonSlug?: string) => {
       if (activeDungeonRun && activeDungeonRun.status === 'ACTIVE_WINDOW') {
         return { ok: false, error: 'A 24-hour Dungeon Expedition is already underway.' };
+      }
+
+      const targetDungeon =
+        DEFAULT_DUNGEON_CATALOG.find((d) => d.dungeonSlug === dungeonSlug) ??
+        DEFAULT_DUNGEON_CATALOG[0] ??
+        STARTER_DUNGEON;
+
+      const requiredRank = targetDungeon.requiredRank ?? 'COPPER';
+      if (!isAdventurerRankSufficient(adventurerRank, requiredRank)) {
+        return {
+          ok: false,
+          error: `Requires ${requiredRank} Adventurer Rank (currently ${adventurerRank}).`,
+        };
       }
 
       const playerCombatant: CombatantCharacterInput = {
@@ -3414,7 +4010,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setActiveDungeonRun({
         runId: `run_${nowMs}`,
-        dungeon: STARTER_DUNGEON,
+        dungeon: targetDungeon,
         party,
         startedAtMs: nowMs,
         resolvesAtMs: nowMs + 24 * 3600 * 1000,
@@ -3428,6 +4024,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     },
     [
       activeDungeonRun,
+      adventurerRank,
       characterName,
       equipmentBonuses,
       projectedFatigue.systemicFatigueStacks,
@@ -3459,6 +4056,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     setActivityState('IDLE');
   }, [activeDungeonRun, addDropsToInventory]);
+
+  const dismissCompletedDungeonReplay = useCallback(() => {
+    setActiveDungeonRun(null);
+    setActivityState('IDLE');
+  }, []);
 
   const lockDailyRaidStrike = useCallback(
     (raidId: string) => {
@@ -3837,14 +4439,24 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const adjustHybridRestTimer = useCallback(
     (params: { deltaSeconds?: number; newDurationSeconds?: number }) => {
-      setWorkoutMachine((prev) =>
-        transitionHybridWorkoutState(prev, {
+      let firedCue = false;
+      setWorkoutMachine((prev) => {
+        const next = transitionHybridWorkoutState(prev, {
           type: 'ADJUST_REST_TIMER',
           deltaSeconds: params.deltaSeconds,
           newDurationSeconds: params.newDurationSeconds,
           nowMs: Date.now(),
-        })
-      );
+        });
+        if (!firedCue) {
+          firedCue = true;
+          if (prev.phase === 'Resting' && next.phase === 'DungeonActive') {
+            triggerSensoryCue('STAMINA_RECHARGED_PULSE');
+          } else {
+            triggerSensoryCue('SET_MICRO_REWARD_TICK');
+          }
+        }
+        return next;
+      });
     },
     []
   );
@@ -4187,6 +4799,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     gatheringNodes: GATHERING_NODES,
     activeGathering,
     lastGatheringDrop,
+    dungeons: DEFAULT_DUNGEON_CATALOG,
     starterDungeon: STARTER_DUNGEON,
     companionRoster: COMPANION_ROSTER,
     activeDungeonRun,
@@ -4237,6 +4850,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     syncGatheringTicks,
     startDungeonExpedition,
     resolveActiveDungeonNow,
+    dismissCompletedDungeonReplay,
     lockDailyRaidStrike,
     resolveWeeklyRaidRewards,
     completeGuildBounty,
@@ -4246,10 +4860,15 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isLiveSyncConnected,
     gameMode,
     setGameMode,
+    appearanceId,
     characters: availableCharacters,
+    deletedCharacters,
     activeCharacterId,
     switchCharacter,
     createCharacter,
+    updateCharacterAppearance,
+    deleteCharacter,
+    restoreCharacter,
     refreshCharacterSheet,
     login,
     register,

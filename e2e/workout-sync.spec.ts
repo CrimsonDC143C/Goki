@@ -8,7 +8,7 @@ test.describe('Offline-to-Online Workout Loop & Background Sync Queue', () => {
     let networkBlocked = true;
     let serverReceivedWorkout = false;
 
-    await page.route('**/api/workouts', async (route) => {
+    await page.route('**/api/**/workouts', async (route) => {
       if (networkBlocked) {
         await route.abort('failed');
       } else {
@@ -57,6 +57,13 @@ test.describe('Offline-to-Online Workout Loop & Background Sync Queue', () => {
     const finishBtn = page.getByTestId('finish-offline-workout-btn');
     await expect(finishBtn).toBeVisible();
     await finishBtn.click();
+
+    // 5b. Verify Post-Workout Encouragement Summary Modal & Continue
+    const continueBtn = page.getByTestId('post-workout-continue-btn');
+    if (await continueBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await expect(continueBtn).toBeVisible();
+      await continueBtn.click();
+    }
 
     // 6. Assert return to Landing Screen with deferred offline spoils ready
     await expect(page.getByText(/Unclaimed Spoils Ready!|Pending Sync/i)).toBeVisible({

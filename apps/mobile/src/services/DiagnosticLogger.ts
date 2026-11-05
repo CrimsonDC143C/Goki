@@ -47,6 +47,17 @@ export interface CrashReportPayload {
 export const CRASH_REPORT_STORAGE_KEY = '@gymify_pending_crash_report';
 export const BUG_REPORT_OUTBOX_STORAGE_KEY = '@gymify_bug_report_outbox';
 
+function formatConsoleArg(a: unknown): string {
+  if (typeof a === 'string') return a;
+  if (a instanceof Error) return a.stack || `${a.name}: ${a.message}`;
+  try {
+    const json = JSON.stringify(a);
+    return json !== undefined ? json : String(a);
+  } catch {
+    return String(a);
+  }
+}
+
 class DiagnosticLoggerService {
   private ringBuffer = new BreadcrumbRingBuffer(100);
   private stateProvider: (() => Record<string, unknown>) | null = null;
@@ -140,7 +151,7 @@ class DiagnosticLoggerService {
       try {
         if (!this.isCapturingConsole) {
           this.isCapturingConsole = true;
-          const msg = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+          const msg = args.map(formatConsoleArg).join(' ');
           this.logWarn('console.warn', msg.slice(0, 500));
         }
       } catch {
@@ -155,7 +166,7 @@ class DiagnosticLoggerService {
       try {
         if (!this.isCapturingConsole) {
           this.isCapturingConsole = true;
-          const msg = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+          const msg = args.map(formatConsoleArg).join(' ');
           this.logError('console.error', msg.slice(0, 500));
         }
       } catch {
@@ -382,26 +393,29 @@ class DiagnosticLoggerService {
     try {
       const raw = await AsyncStorage.getItem(BUG_REPORT_OUTBOX_STORAGE_KEY);
       if (!raw) {
-        this.isFlushing = false;
         return { flushed: 0, remaining: 0 };
       }
 
       const queue: BugReportSubmissionPayload[] = JSON.parse(raw);
       if (!Array.isArray(queue) || queue.length === 0) {
-        this.isFlushing = false;
         return { flushed: 0, remaining: 0 };
       }
 
+      const initialCount = queue.length;
       const remaining: BugReportSubmissionPayload[] = [];
       let flushedCount = 0;
 
       for (const item of queue) {
         try {
-          const res = await apiFetch('/api/diagnostics/report', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(item),
-          }, 8000);
+          const res = await apiFetch(
+            '/api/diagnostics/report',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(item),
+            },
+            8000
+          );
 
           if (res.ok) {
             flushedCount++;
@@ -416,17 +430,26 @@ class DiagnosticLoggerService {
         }
       }
 
-      if (remaining.length > 0) {
-        await AsyncStorage.setItem(BUG_REPORT_OUTBOX_STORAGE_KEY, JSON.stringify(remaining));
+      // Check for concurrent additions during the async flush loop
+      const latestRaw = await AsyncStorage.getItem(BUG_REPORT_OUTBOX_STORAGE_KEY);
+      const latestQueue: BugReportSubmissionPayload[] = latestRaw ? JSON.parse(latestRaw) : [];
+      const concurrentItems =
+        Array.isArray(latestQueue) && latestQueue.length > initialCount
+          ? latestQueue.slice(initialCount)
+          : [];
+      const finalQueue = [...remaining, ...concurrentItems];
+
+      if (finalQueue.length > 0) {
+        await AsyncStorage.setItem(BUG_REPORT_OUTBOX_STORAGE_KEY, JSON.stringify(finalQueue));
       } else {
         await AsyncStorage.removeItem(BUG_REPORT_OUTBOX_STORAGE_KEY);
       }
 
-      this.isFlushing = false;
-      return { flushed: flushedCount, remaining: remaining.length };
+      return { flushed: flushedCount, remaining: finalQueue.length };
     } catch {
-      this.isFlushing = false;
       return { flushed: 0, remaining: 0 };
+    } finally {
+      this.isFlushing = false;
     }
   }
 }

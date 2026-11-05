@@ -1,5 +1,9 @@
 import { createSeededRng } from './rng';
 import { LootDrop } from './types';
+import {
+  BASE_EQUIPPABLE_ITEM_BY_SLUG,
+  rollRaidProceduralGearDrop,
+} from './item-affix-engine';
 
 // ============================================================================
 // CONSTANTS & TIER DEFINITIONS
@@ -315,6 +319,17 @@ export function calculateRaidRewards(
           const existing = lootDrops.find((d) => d.itemSlug === picked.itemSlug);
           if (existing) {
             existing.quantity += picked.quantity;
+          } else if (BASE_EQUIPPABLE_ITEM_BY_SLUG[picked.itemSlug]) {
+            const rolled = rollRaidProceduralGearDrop({
+              contributionTier: rewardTier,
+              isBossDefeated,
+              seed: `raid-gear:${input.seed ?? 'seed'}:${p.characterId}:${r}:${picked.itemSlug}`,
+              baseSlug: picked.itemSlug,
+            });
+            lootDrops.push({
+              ...rolled,
+              quantity: picked.quantity,
+            });
           } else {
             lootDrops.push({
               itemSlug: picked.itemSlug,

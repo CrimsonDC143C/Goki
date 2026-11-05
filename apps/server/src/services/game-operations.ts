@@ -45,7 +45,31 @@ export async function depositLootToInventory(
     });
   }
 
-  if (item.stackable) {
+  const itemMetadata =
+    drop.tier ||
+    drop.prefixId ||
+    drop.suffixId ||
+    drop.statBonuses ||
+    drop.primaryStatBonuses ||
+    drop.uniquePassive
+      ? {
+          tier: drop.tier ?? 1,
+          prefixId: drop.prefixId ?? null,
+          prefixLabel: drop.prefixLabel ?? null,
+          prefixSummary: drop.prefixSummary ?? null,
+          suffixId: drop.suffixId ?? null,
+          suffixLabel: drop.suffixLabel ?? null,
+          suffixSummary: drop.suffixSummary ?? null,
+          baseStatsSummary: drop.baseStatsSummary ?? null,
+          rolledName: drop.itemName,
+          rarity: drop.rarity,
+          statBonuses: drop.statBonuses ?? {},
+          primaryStatBonuses: drop.primaryStatBonuses ?? {},
+          uniquePassive: drop.uniquePassive ?? null,
+        }
+      : null;
+
+  if (item.stackable && !itemMetadata) {
     const existing = await db.inventoryItem.findFirst({
       where: { characterId, itemId: item.id },
     });
@@ -63,6 +87,7 @@ export async function depositLootToInventory(
       characterId,
       itemId: item.id,
       quantity: drop.quantity,
+      itemMetadata: itemMetadata as any,
     },
   });
 }

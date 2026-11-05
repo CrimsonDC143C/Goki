@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HolisticStatType, StatType, isIntraWorkoutFocusLocked } from '@gymify/game-engine';
 import { BugReportModal } from './src/components/BugReportModal';
 import { CharacterPortraitFrame } from './src/components/CharacterPortraitFrame';
@@ -64,17 +64,20 @@ interface MainShellProps {
   tab: ActiveTab;
   onChangeTab: (next: ActiveTab) => void;
   onReturnToLanding: () => void;
+  onOpenOfflineLogger?: () => void;
 }
 
 const MainShell: React.FC<MainShellProps> = ({
   tab,
   onChangeTab,
   onReturnToLanding,
+  onOpenOfflineLogger,
 }) => {
   const {
     serverOnline,
     characterName,
     characterArtUri,
+    appearanceId,
     overallLevel,
     gold,
     location,
@@ -84,6 +87,8 @@ const MainShell: React.FC<MainShellProps> = ({
     requestFocusOverride,
     cancelFocusOverride,
     confirmFocusOverride,
+    activeCharacterId,
+    currentUser,
   } = useGame();
 
   const [talentFocusStat, setTalentFocusStat] = useState<HolisticStatType | StatType | undefined>(
@@ -91,6 +96,7 @@ const MainShell: React.FC<MainShellProps> = ({
   );
   const [bugReportVisible, setBugReportVisible] = useState(false);
   const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const focusLocked = isIntraWorkoutFocusLocked(workoutMachine.phase);
   const pendingTargetTab = workoutMachine.activeSession?.pendingFocusOverrideTarget as
@@ -168,6 +174,7 @@ const MainShell: React.FC<MainShellProps> = ({
                   height={56}
                   isCircle
                   isActive={tab === 'PROFILE'}
+                  appearanceId={appearanceId}
                   imageSource={characterArtUri}
                 />
                 {/* Mini Level badge */}
@@ -234,7 +241,10 @@ const MainShell: React.FC<MainShellProps> = ({
           onRequestClose={() => setLocationDropdownOpen(false)}
         >
           <Pressable
-            style={styles.dropdownBackdrop}
+            style={[
+              styles.dropdownBackdrop,
+              { paddingTop: Math.max(insets.top + 62, 92) },
+            ]}
             onPress={() => setLocationDropdownOpen(false)}
           >
             <View
@@ -297,7 +307,13 @@ const MainShell: React.FC<MainShellProps> = ({
               }}
             />
           )}
-          {tab === 'WORKOUT' && <WorkoutLoggerScreen />}
+          {tab === 'WORKOUT' && (
+            <WorkoutLoggerScreen
+              onOpenOfflineLogger={onOpenOfflineLogger}
+              onNavigateToTalents={() => handleTabPress('TALENTS')}
+              onNavigateToPaperdoll={() => handleTabPress('PROFILE')}
+            />
+          )}
           {tab === 'TALENTS' && (
             <TalentBuilderScreen
               initialStat={talentFocusStat}
@@ -341,7 +357,15 @@ const MainShell: React.FC<MainShellProps> = ({
           animationType="fade"
           onRequestClose={cancelFocusOverride}
         >
-          <View style={styles.modalBackdrop}>
+          <View
+            style={[
+              styles.modalBackdrop,
+              {
+                paddingTop: Math.max(insets.top + 16, 44),
+                paddingBottom: Math.max(insets.bottom + 16, 24),
+              },
+            ]}
+          >
             <View style={styles.frictionDialog}>
               <Text style={styles.frictionTitle}>🛡️ Break Dungeon Focus?</Text>
               <Text style={styles.frictionBody}>
@@ -379,6 +403,8 @@ const MainShell: React.FC<MainShellProps> = ({
         <BugReportModal
           visible={bugReportVisible}
           onClose={() => setBugReportVisible(false)}
+          characterId={activeCharacterId}
+          userId={currentUser?.id ?? null}
         />
       </View>
     </SafeAreaView>
@@ -395,10 +421,16 @@ const AppRouter: React.FC = () => {
   const [appMode, setAppMode] = useState<AppMode>('LANDING');
   const [worldTab, setWorldTab] = useState<ActiveTab>(DEFAULT_WORLD_ENTRY_TAB);
 
-  // Initialize dual-layer Auto-Update subsystem and wire Zero-Lost-Sets guards
+  // Initialize dual-layer Auto-Update subsystem
   useEffect(() => {
     autoUpdateManager.init();
+    return () => {
+      autoUpdateManager.destroy();
+    };
+  }, []);
 
+  // Register Zero-Lost-Sets guards reactively when workout state updates
+  useEffect(() => {
     autoUpdateManager.registerWorkoutGuards(
       () => {
         const isLocked = isIntraWorkoutFocusLocked(workoutMachine.phase);
@@ -415,10 +447,6 @@ const AppRouter: React.FC = () => {
         }
       }
     );
-
-    return () => {
-      autoUpdateManager.destroy();
-    };
   }, [workoutMachine.phase, offlineDraft, syncOfflineWorkouts]);
 
   // When active workout completes, auto-apply any staged background update
@@ -480,6 +508,7 @@ const AppRouter: React.FC = () => {
         tab={worldTab}
         onChangeTab={setWorldTab}
         onReturnToLanding={() => setAppMode('LANDING')}
+        onOpenOfflineLogger={() => setAppMode('OFFLINE_WORKOUT')}
       />
     );
   };

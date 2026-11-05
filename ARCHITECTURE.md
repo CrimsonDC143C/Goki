@@ -41,7 +41,7 @@ Gymify RPG/
 | **Database** | PostgreSQL 16 + Prisma ORM 6.4 | 31 relational models, 26 enums, automated seed migrations (1,034 lines schema) |
 | **Backend API** | Fastify 5.2 (Node.js) | Zod 3.24 schema validation, `@fastify/jwt`, `@fastify/websocket`, `@fastify/cors`, BigInt JSON serializers |
 | **Async Queues** | Redis 7 + BullMQ 5.34 | Scheduled workers for 2h gathering, 24h dungeons, 24h rest, 7d raids with in-memory test fallback |
-| **Mobile Client** | React Native 0.88 (Expo SDK 58) | `react-native-web` (Web), `expo-audio`, `expo-image`, `expo-secure-store`, `expo-notifications`, `expo-haptics`, `react-native-svg`, `react-native-health`, `react-native-health-connect`, `expo-build-properties` |
+| **Mobile Client** | React Native 0.88 (Expo SDK 58) | `react-native-web` (Web), `react-native-reanimated` (runtime TurboModule detection with 60 FPS `RNAnimated` native-driver fallback for OTA binary compatibility), `expo-audio`, `expo-image`, `expo-secure-store`, `expo-notifications`, `expo-haptics`, `react-native-svg`, `react-native-health`, `react-native-health-connect`, `expo-build-properties` |
 
 ---
 
@@ -80,13 +80,16 @@ Gymify RPG/
 * **Equal Arrival Boon (1.25x):** Awarded identically whether the athlete logs via a registered gym geofence or open-world manual session, preventing home/outdoor penalties.
 * **Focus Lock:** While in `DungeonActive` or `Resting`, navigation to other tabs is restricted by an explicit confirmation dialog to maintain gym focus.
 * **Micro-Reward Ticks:** Logging a set immediately executes a sensory tick (haptic/audio chime), ticks micro-XP/gold, and inflicts damage on a mini-encounter boss.
-* **Dynamic Rest & Stamina Ring Timers:** Calculates target rest (45s warmup, 90s–180s compound/heavy sets, RPE-scaled) and counts down on a visual SVG stamina ring. Local push notifications and haptics fire when stamina is full.
+* **Two-Stage Unified Rest Timer (`DynamicRestTimer.tsx`, `StaminaRingTimer.tsx`, `OfflineWorkoutScreen.tsx`, `WorkoutLoggerScreen.tsx`):**
+  * **Stage 1 (Center-Screen Focus Overlay):** High-focus modal overlay (`rgba(10, 12, 18, 0.82)` backdrop) triggered immediately upon set logging. Features an SVG stamina ring countdown, elapsed-time-preserving adjustments (`-15s`, `+15s`, `+30s`, and quick-tap preset buttons `1m`, `1.5m`, `2m`, `3m`, `4m` highlighting recommended duration), compact `(i)` physiological rationale tooltip toggle, and state-aware action buttons (`"View Workout / Minimize Timer"` + muted `"Skip Rest & Begin Next Set"` while counting down, transitioning to emerald `"⚡ STAMINA FULL — BEGIN NEXT SET"` at `0:00` with somatic haptic and audio chime triggers).
+  * **Stage 2 (Pinned Parallax Floating HUD Pill/Ring):** Anchored to the viewport header with scroll-reactive parallax depth (`scrollOffsetY`) when minimized or during intra-workout browsing. Features a compact SVG stamina ring, remaining time countdown, emerald completion flash, and tap-to-expand gesture.
+  * **Elapsed-Time-Preserving Math (`ADJUST_REST_TIMER`):** Mid-rest adjustments—whether switching preset durations (`45s`, `60s`, `90s`, `120s`, `180s`, `240s`), entering custom second intervals, or tapping `-15s` / `+15s` / `+30s`—preserve all time already rested (`elapsedMs = max(0, nowMs - restStartedAtMs)`) and dynamically recalculate `remainingMs = max(0, newDurationMs - elapsedMs)` (instantly completing if `elapsedMs >= newDurationMs`), operating identically across both live hybrid dungeon workouts (`hybrid-reward-protocol.ts`, `DynamicRestTimer.tsx`) and standalone offline workouts (`OfflineWorkoutScreen.tsx`).
 * **Resilience Bonus (Anti-Streak Collapse):** Returning after $\ge 72\text{ hours}$ or training in "Low Energy Mode" grants a flat bonus (+50 XP, +35 Gold, +15% XP) and resilience shields, combating the "what-the-hell" abandonment effect.
 * **Effort-Gated Loot Chests:** Post-workout chest tiers (**Common**, **Rare**, **Epic**) depend on an effort score (0–100) derived from progressive overload, RPE, and relative intensity—**not** empty volume bloat.
 
 ### E. Metagame Systems
 
-1. **Multi-Class Talent Trees (10 Stat-Bound Archetypes across 7 Stats):**
+1. **Multi-Class Talent Trees (10 Stat-Bound Archetypes across 7 Stats, 55 Pts/Tree, 110 Total Nodes):**
    * **Strength:** *Juggernaut* (armor, threat, damage barriers) & *Vanguard* (burst damage, armor-piercing cleaves).
    * **Endurance:** *Warden* (hazard mitigation, sustained party regen) & *Outrider* (cooldown haste, initiative, trailblazing).
    * **Agility:** *Berserker* (crit multiplier, execute damage, low-HP rage) & *Assassin* (crit chance, backstab bleed, dodge counter).
@@ -94,16 +97,63 @@ Gymify RPG/
    * **Constitution:** *Guardian* (iron fortitude, maximum health pool, damage mitigation).
    * **Wisdom:** *Cleric* (divine healing power multiplier, restorative party preservation).
    * **Spirit:** *Mage* (arcane focus, maximum mana boost, spellcasting efficiency).
-2. **2-Hour Idle Gathering & Crafting:**
+   * **5-Tier, 11-Node Structure per Tree:** Each tree contains 11 nodes spanning 5 distinct tiers where the sum of `maxRank` across all nodes equals **55 talent points** (550 talent points across all 10 trees, 110 nodes total):
+     * *Tier 1: Foundation* (0 pts spent required; 3 starter nodes, max rank 5 each = 15 pts).
+     * *Tier 2: Early Conditioning* (5 pts spent required in tree; 2 nodes, max rank 5 each = 10 pts).
+     * *Tier 3: Combat Specialization* (15 pts spent required in tree; 2 nodes including 1 Active Combat Skill, max rank 5 each = 10 pts).
+     * *Tier 4: Veteran Mastery* (30 pts spent required in tree; 2 nodes, max rank 5 each = 10 pts).
+     * *Tier 5: Apex Capstone* (40 pts spent required in tree; 2 powerful keystone capstone nodes, max rank 5 each = 10 pts).
+   * **Inverted Bottom-to-Top Node Graph (`TalentBuilderScreen.tsx`):** Renders nodes vertically inverted matching authentic RPG progression trees, with *Tier 1 Foundation* at the bottom (`y = 474`) climbing upward via dynamic SVG Bezier connection curves to *Tier 5 Apex Capstone* at the summit (`y = 58`), complete with active node inspector, unspent point badges, and tier unlock thresholds.
+
+2. **Procedural Itemization & 5-Tier Affix Engine (`item-affix-engine.ts`):**
+   * **32 Base Equippable Items (`BASE_EQUIPPABLE_ITEMS`):** Comprehensive equipment catalog covering all 8 equipment slots (`TWO_HANDED` & `ONE_HANDED` weapons, `OFFHAND` shields/relics, `HEAD`, `CHEST`, `LEGS`, `BOOTS`, `ACCESSORY`).
+   * **5-Tier Scaling (`ITEM_TIER_CONFIG`):**
+     * **Tier 1 (`COMMON`, `T1`, Roman `I`):** `1.00x` base stat multiplier, `1.00x` affix multiplier, `1.0x` gold multiplier. At most one affix (Prefix XOR Suffix, never both).
+     * **Tier 2 (`UNCOMMON`, `T2`, Roman `II`):** `1.20x` base stat multiplier, `1.25x` affix multiplier, `1.6x` gold multiplier. Independent 65% prefix / 65% suffix roll allowing dual affixes.
+     * **Tier 3 (`RARE`, `T3`, Roman `III`):** `1.45x` base stat multiplier, `1.55x` affix multiplier, `2.6x` gold multiplier. 85% prefix / 85% suffix roll with at least one affix guaranteed.
+     * **Tier 4 (`EPIC`, `T4`, Roman `IV`):** `1.80x` base stat multiplier, `2.00x` affix multiplier, `4.5x` gold multiplier. 100% guaranteed Prefix AND Suffix.
+     * **Tier 5 (`MYTHIC`, `T5`, Roman `V`):** `2.25x` base stat multiplier, `2.50x` affix multiplier, `8.0x` gold multiplier. 100% guaranteed Prefix + Suffix + transforms into a **Unique Named Counterpart** (`★ <Unique Name>`) with unique lore and an innate **Unique Passive Effect** (e.g. *Ashbringer*, *Aegis of the Sun*, *Malakor's Signet*, *Windrunner's Reflex*).
+   * **Affix Pools:**
+      * **12 Secondary Combat Prefixes (`ITEM_PREFIXES`):** E.g. *Brutal* (+Melee Power), *Stalwart* (+Armor), *Swift* (+Attack Speed), *Deadly* (+Crit Chance), *Savage* (+Crit Damage), *Unyielding* (+Damage Mitigation), *Sundering* (+Armor Pen), *Vampiric* (+Life on Hit).
+      * **10 Primary 7-Stat Suffixes (`ITEM_SUFFIXES`):** E.g. *of the Titan* (+STR), *of the Juggernaut* (+END), *of the Wind* (+AGI), *of the Duelist* (+DEX), *of the Colossus* (+CON), *of the Sage* (+WIS), *of the Seraph* (+SPR).
+   * **40 Bespoke `1:1` Dark-Fantasy RPG Item Icon Pipeline & Registry (`itemArtRegistry.ts`, `assets/items/*.png`, `scripts/generate-layer-icons.mjs`):**
+     * 40 bespoke `512x512` (`1:1`) Oni-style dark-fantasy PNG icons covering all 32 Base Equippable Items plus 8 Consumables & Crafting Materials (`vitality_elixir`, `berserker_draught`, `ironwood_stew`, `hearty_trail_rations`, `shadowsilk_spool`, `moonstone_crystal`, `void_essence_vial`, `obsidian_iron_ingot`).
+     * `ITEM_ICON_REGISTRY`, `ITEM_ICON_ALIASES`, and `getItemIconSource()` provide instant, zero-overhead asset resolution across Paperdoll `58x58` slots, Satchel `44x44` rows, Pinned Bottom Tooltip `56x56` header, Post-Workout Spoils Receipt (`WorkoutLoggerScreen.tsx`), Gathering yield projections (`GatheringNodeScreen.tsx`), and Expedition Spoils Fanfare cards (`AutoBattlerArena.tsx`).
+   * **Integration:** Direct mathematical feeding into `aggregateEquippedItemModifiers` and `calculateDerivedCombatStats` for full dynamic combat attribute scaling.
+
+3. **2-Hour Idle Gathering & Crafting:**
    * Professions: Mining, Foraging, Smelting, Alchemy.
    * Player stats reduce the tick interval (from a base 5 min down to 1 min) and boost yield (e.g., AGI accelerates foraging cadence; END sustains mining stamina; STR boosts ore yields).
    * Supports custom duration goals, push notification alerts on completion, and retroactive offline tick reconciliation.
-3. **24-Hour Dungeons & Auto-Battler Replay:**
+
+4. **24-Hour Dungeons & Auto-Battler Replay:**
    * 1–5 player party expeditions spanning a 24-hour real-time window.
    * Real-world workouts completed mid-window inject live buffs into the expedition party (e.g., *Titanic Force*, *Tailwind Haste*).
    * Deterministic auto-battler engine simulates combat tick-by-tick ($250\text{ms}$ ticks) with RNG seeds.
-   * Replayed visually on the mobile client using a 2D canvas animator (`AutoBattlerCanvas.tsx`).
-4. **Guilds, Rank Trials, & 7-Day Raid Sanctums:**
+   * **Boss-Then-Chest Room Sequence (`N - 1` Boss -> `N` Treasure Chest):**
+     * Across all 5 rank-gated expeditions (`COPPER` Obsidian Catacombs, `IRON` Bloodfang Warcamp, `BRONZE` Traitors' Garrison, `SILVER` Blighted Ossuary, `GOLD` Hellforge Sanctum), all Mob/Hazard rooms precede the climax, the **Boss Encounter (`roomType: 'BOSS'`) is always the second-to-last room (`N - 1`)**, and the **Treasure Cache (`roomType: 'LOOT_CHEST'`) is always the final room (`N`)** with sequential room numbers.
+     * Both the Boss room and final Loot Chest room are eligible for boss-tier procedural item roll odds.
+   * **5 Rank-Gated 24-Hour Expeditions (`DEFAULT_DUNGEON_CATALOG`):**
+     1. **`COPPER` — *Obsidian Catacombs*:** 4 Rooms (Room 1 Mob, Room 2 Hazard, Room 3 Boss *Malakor, Warden of the Ash Vault*, Room 4 Loot Chest *Sunken Reliquary Chest*).
+     2. **`IRON` — *Bloodfang Warcamp*:** 6 Rooms (Rooms 1–4 Mobs/Hazard, Room 5 Boss *Warchief Gromkhar the Gore-Crowned*, Room 6 Loot Chest *War-Spoils Cache*).
+     3. **`BRONZE` — *Traitors' Garrison*:** 8 Rooms (Rooms 1–6 Mobs/Hazard, Room 7 Boss *Lord Commander Vaelen the Forsworn*, Room 8 Loot Chest *Garrison Armory Chest*).
+     4. **`SILVER` — *Blighted Ossuary*:** 10 Rooms (Rooms 1–8 Mobs/Hazard, Room 9 Boss *Arch-Lich Vorathis, Sovereign of Bone*, Room 10 Loot Chest *Ancient Ossuary Reliquary*).
+     5. **`GOLD` — *Hellforge Sanctum*:** 12 Rooms (Rooms 1–10 Mobs/Hazard, Room 11 Boss *Ignis-Vorr, The Hellforge Colossus*, Room 12 Loot Chest *Mythic Hellforge Vault*).
+   * **Rank Gating & UI Experience (`DungeonScreen.tsx`):**
+     * Expeditions are strictly gated by athlete Adventurer Rank (`isAdventurerRankSufficient`).
+     * Horizontal expedition tier selector bar displaying Rank badges, room counts, and lock status with decluttered headers.
+   * **Interactive Expedition Spoils Fanfare Modal & Single Claim Flow (`AutoBattlerArena.tsx` & `DungeonScreen.tsx`):**
+     * Automatically triggers when the combat replay reaches and unseals the final Treasure Chest room after the boss (or when tapping `⏭ Skip to End`).
+     * Features an illustrated Mythic Treasure Chest SVG header (`LOOT_CHEST_SVGS.MYTHIC`), Victory banner, dungeon title, and gold reward badge.
+     * **Interactive Tap-to-Unseal / Flip Loot Cards:** Sealed cards display a glowing reliquary border with `"🔒 Tap to Unseal Spoils"`. Tapping any card (or tapping `"✨ Reveal All Spoils"`) triggers somatic haptics and audio level-up chimes (`CHEST_OPEN_REVEAL`), revealing the `1:1` bespoke item icon, `T1–T5` tier badge, rarity border, full rolled name, Prefix/Suffix/Unique badges, and stat bonuses.
+     * **Single Primary CTA (`"✨ Claim Spoils & Complete Expedition"`):** Closes the fanfare modal, claims all rewards, and calls `onDismiss` (`dismissCompletedDungeonReplay`) to immediately exit the arena and return cleanly to the Expedition Lobby (eliminating redundant bottom close buttons, with a `"🎁 Open Expedition Spoils Chest"` button remaining in the arena for log review).
+   * **2D Sprite Combat & Multi-Layer Parallax Auto-Battler Arena (`AutoBattlerArena.tsx` / `AutoBattlerCanvas.tsx`):**
+     * **6-Layer Seamless Parallax Environment:** Rendered via `ParallaxBackground.tsx` and `ParallaxLayer.tsx` with twin-strip seamless looping and dynamic scroll modes (`marching` during wave transitions and live patrol, `combat` atmospheric micro-drift during clashes, and `paused`).
+     * **Hardware-Accelerated Sprite Sheet Slicer:** Implemented in `SpriteAnimator.tsx` and `spriteManifest.ts` slicing 100×100 px PNG sprite sheets across 7 rigs (`knight`, `swordsman`, `archer`, `skeleton`, `orc`, `greatsword_skeleton`, `demon_boss`) and 5 animation states (`idle`, `walk`, `attack`, `hurt`, `death`) with pixel-accurate foot-row ground alignment (`footRow: 59`).
+     * **Multi-Hero & Multi-Enemy Formations:** Simultaneous rendering of all living and defeated party heroes and room enemies with per-unit state machines, inline enemy mini HP bars, and two-phase frame-accurate strike synchronization (`attackImpactFrame` + `resolvedImpactCursor`). Lunges, weapon contact frames, HP/shield drops, target `hurt`/`death` reactions, floating combat popups, and `expo-audio` SFX align to the exact millisecond of weapon impact.
+     * **Dual-Driver Motion Runtime Adapter (`reanimatedRuntime.ts`):** Dynamically probes for native worklet TurboModules (`WorkletsModule`), executing UI-thread `react-native-reanimated` physics when available while seamlessly falling back to 60 FPS `RNAnimated` (`useNativeDriver: true`) on existing `0.1.0` standalone binaries to maintain 100% crash-free OTA compatibility.
+
+5. **Guilds, Rank Trials, & 7-Day Raid Sanctums:**
    * Adventurer ranks from **Copper** to **Mythic**, unlocked via specific guild bounties and physical rank-up trials.
    * Public and Guild-only raid bosses with millions of HP. Athletes channel daily attack cooldowns and physical workout energy. End-of-week reward distributions scale by contribution tiers (**S**, **A**, **B**, **C**, **Participation**).
 
@@ -128,7 +178,7 @@ Gymify RPG/
 ```
 
 ### Test Suite & Typecheck Health
-* **Vitest Suite:** `11/11` test files passing in `packages/game-engine` (79 tests), `6/6` test files passing in `apps/server` (21 tests). Total: **100 passing tests, 0 failures**.
+* **Vitest Suite:** `14/14` test files passing in `packages/game-engine` (126 tests), `7/7` test files passing in `apps/server` (27 tests). Total: **21 test files, 153 passing tests, 0 failures**.
 * **Playwright E2E Suite:** Automated end-to-end integration covering full-stack authentication, offline workout set logging, and background queue synchronization. Orchestrated via `playwright.config.ts` (multi-process web servers for Fastify and Expo Web), deterministic Prisma database seeding via `global-setup.ts`, and network route interception (`page.route()`) to simulate offline-to-online transitions.
 * **TypeScript:** Strict typechecking passes cleanly across all 4 workspaces (`@gymify/mobile`, `@gymify/server`, `@gymify/database`, `@gymify/game-engine`).
 * **Monorepo Build:** `npm run build` succeeds across all workspaces without bundling errors.
@@ -139,22 +189,29 @@ Gymify RPG/
    * 5-state Hybrid FSM, 1.25x arrival boon, resilience comeback logic, chest quality evaluator (`hybrid-reward-protocol.ts`).
    * Superset block definitions (A1/A2), set type metadata ([N], [W], [D], [F], [AMRAP]), 4 top-level workout categories (GYM, CARDIO, SPORT, RECOVERY), and 5 tailored starter presets (`workout-presets-rest.ts`).
    * Dynamic gathering cadence and stat affinity calculation (`gathering-calculator.ts`).
-   * 10 stat-bound talent trees across all 7 holistic stats, point spending constraints, combat modifier aggregation, and tier prerequisite validation (`talent-engine.ts`).
-   * Deterministic auto-battler simulation with room hazards, boss cleaves, and combat logs (`auto-battler-sim.ts`).
+   * 10 stat-bound talent trees across all 7 holistic stats with 5-tier, 11-node bottom-up graphs totaling 55 talent points per tree (550 points total), active skills, keystones, and combat modifier aggregation (`talent-engine.ts`).
+   * Procedural Itemization & 5-Tier Affix Engine with 32 base equippable items, 12 secondary combat prefixes, 10 primary stat suffixes, 32 Tier 5 Mythic Uniques with unique passives, and affix roll generators (`item-affix-engine.ts`, 9 unit tests).
+   * 5 rank-gated 24-hour expeditions (`DEFAULT_DUNGEON_CATALOG`) covering Copper, Iron, Bronze, Silver, and Gold with boss-then-chest sequencing (Room $N-1$ Boss $\rightarrow$ Room $N$ Loot Chest), procedural drop scaling, and boss-tier odds on both final rooms (`auto-battler-sim.ts`).
    * 7-day raid contribution scoring and tier reward resolution (`raid-rewards.ts`).
    * Equipment stat bonus aggregation and requirement checking (`character-loadout-spoils.ts`).
    * Biometric telemetry verification, physiological sanity filtering (35–240 BPM), flatline variance checks, cardiovascular zone confidence scoring (`verifyTelemetry`), mind-body activity verification via OS cryptographic classification and stable heart rate variance (`verifyMindBodyTelemetry`), and recovery telemetry verification via sleep stage validation and pedometer step verification (`verifyRecoveryTelemetry`) (`ironman-verifier.ts`, 15 unit tests).
+   * Training History & Progression Matrix engine (`training-history-tracker.ts`, 27 unit tests): Pure deterministic progression evaluation featuring `calculateSetE1RM` (Epley formula with raw weight fallback at 0/1 reps), `selectSessionTopSet` (best e1RM candidate filtering zero-weight/rep entries), `computeProgressionDelta` (delta e1RM, weight, reps, single-set volume, and percentage gains against personal history), `buildTrainingHistoryMatrix` (multi-exercise progression mapping across chronologically sorted sessions), and `evaluatePostWorkoutSummary` (evaluates lift progression, PRs, tonnage gains, or effort/streak sustaining dialogue to generate deterministic post-workout encouragement summaries).
 2. **Database & Persistence Layer (`packages/database`):**
    * Complete 1,034-line Prisma schema with 31 models and 26 enums for all domain entities.
-   * Fully functional seed script (`seed.ts`) populating exercise catalog (adapted for Altas AL-3058G smith/cable machine, Pepin dumbbells, badminton, boxing, cycling), 10 talent trees across all 7 stats with tier-1 starter nodes, items, gathering nodes, dungeon catacombs, guild trials, and 2 active weekly raids.
+   * Fully functional seed script (`seed.ts`) populating exercise catalog, 10 55-pt talent trees across all 7 stats, 32 base equippable items from `BASE_EQUIPPABLE_ITEMS`, gathering nodes, 5 rank-scaled expeditions, and 2 active weekly raids.
+   * Soft-delete archival timestamp (`deletedAt`) on `Character` model supporting 30-day retention and restoration.
    * Configured with aligned `rootDir` and explicit export maps for seamless monorepo TypeScript/JavaScript compilation.
 3. **Backend API & Queue Layer (`apps/server`):**
    * Fastify application with Zod validation on all workout, character, preset, dungeon, gathering, and raid routes.
    * Production JWT authentication and password hashing via `@fastify/jwt` and `bcryptjs` (`/api/auth/register`, `/api/auth/login`, `/api/auth/me`), route protection with `requireAuth` middleware, and user context attachment.
    * **Dual-Character Account Constraint & Roster Routes (`/api/characters`):**
      * Strict account ceiling enforcing exactly 2 characters per user account: one for `STANDARD` mode (100% manual honesty) and one for `IRONMAN_VERIFIED` mode (wearable biometric verified).
-     * `GET /api/characters`: Protected endpoint returning all characters belonging to the authenticated account.
+     * `GET /api/characters`: Protected endpoint returning active and archived characters belonging to the authenticated account.
      * `POST /api/characters`: Protected endpoint allowing users to forge their second hero in the complementary game mode, rejecting duplicate game modes (409) and rejecting creation when account capacity (2 heroes) is reached (400).
+     * `PATCH /api/characters/:id`: Live character updates including cosmetic appearance switching (`appearanceId`).
+     * `DELETE /api/characters/:id`: 30-day soft-delete archival setting `deletedAt = now()`.
+     * `POST /api/characters/:id/restore`: Restores archived fallen heroes within the 30-day retention window.
+   * Procedural item metadata (`prefixId`, `suffixId`, `tier`, `uniquePassive`) preservation in `InventoryItem.itemMetadata` JSON upon inventory mutation.
    * Real-time bi-directional synchronization via `@fastify/websocket` and `websocketManager` with room multicasting (`raid:{raidId}`, `dungeon:{dungeonId}`), BigInt-safe serialization, and JWT connection authentication (`GET /api/ws/connect`).
    * Telemetry payload ingestion and server-side biometric re-verification routed dynamically across `verifyTelemetry`, `verifyMindBodyTelemetry`, and `verifyRecoveryTelemetry` on `POST /api/workouts`, setting hardware verification sources (`APPLE_HEALTHKIT`, `GOOGLE_HEALTH_CONNECT`, `WEARABLE_TELEMETRY`), tagging verified stat XP, and tagging verified mode.
    * Pre-serialization hook for converting `BigInt` (raid damage, HP) into JSON-compatible values.
@@ -164,15 +221,48 @@ Gymify RPG/
    * **Full Parity Character Hydration & Local Storage Persistence:**
      * `GameContext` hydrates the active character sheet (`characterName`, `stats`, `adventurerRank`, `adventurerReputation`, `gold`, `overallLevel`, `inventory`, `unlockedTalentRanks`, `fatigueState`) directly from server responses (`/api/auth/me`, `/api/auth/login`, `/api/characters/:id`).
      * Offline bundle persistence (`offlineStorage.ts`) snapshots the full `PersistedCharacterProfile` and `availableCharacters` to `gymify_offline_bundle_v1.json` (`expo-file-system`), ensuring local RPG stat gains and character customization persist durably across restarts without cell/Wi-Fi connection.
-     * **Hall of Heroes Manager Modal (`CharacterManagerModal.tsx`):**
-       * Accessible directly from the Landing Screen and Character Profile HUD.
-       * Displays both hero slots (Standard Honesty vs. Ironman Verified) with live active status, level, rank, and gold.
-       * Provides an interactive hero forging flow with archetype sprite selection (Juggernaut, Berserker, Vanguard, Warden, Outrider, Assassin) and seamless hero switching.
+     * **Paired Bust/Standing Character Appearance Registry (`characterArtRegistry.ts`) & Hall of Heroes Manager Modal (`CharacterManagerModal.tsx`):**
+       * 10 paired 1:1 Bust Portrait and 2:3 Full-Body Standing PNG character appearances (`oni_warlord`, `dread_knight`, `oath_sentinel`, `wayfarer`, `northern_reaver`, `dusk_shinobi`, `blade_dancer`, `bastion_ironclad`, `sun_templar`, `void_walker`).
+       * Appearance selection decoupled from archetype class, with live cosmetic appearance switching (`PATCH /api/characters/:id`).
+       * Displays active and archived hero slots with live active status, level, rank, and gold.
+       * 30-Day Soft-Delete & Fallen Hero Archive Restoration (`DELETE /api/characters/:id`, `POST /api/characters/:id/restore`) with visual 30-day countdown timer pills and instant recovery.
+   * **40 Bespoke `1:1` Dark-Fantasy RPG Item Icon Pipeline & Registry (`itemArtRegistry.ts`, `assets/items/*.png`, `scripts/generate-layer-icons.mjs`):**
+     * 40 bespoke `512x512` (`1:1`) Oni-style dark-fantasy PNG icons covering all 32 Base Equippable Items plus 8 Consumables & Crafting Materials (`vitality_elixir`, `berserker_draught`, `ironwood_stew`, `hearty_trail_rations`, `shadowsilk_spool`, `moonstone_crystal`, `void_essence_vial`, `obsidian_iron_ingot`).
+     * `ITEM_ICON_REGISTRY`, `ITEM_ICON_ALIASES`, and `getItemIconSource()` provide instant, zero-overhead asset resolution across Paperdoll `58x58` slots, Satchel `44x44` rows, Pinned Bottom Tooltip `56x56` header, Post-Workout Spoils Receipt (`WorkoutLoggerScreen.tsx`), Gathering yield projections (`GatheringNodeScreen.tsx`), and Expedition Spoils Fanfare cards (`AutoBattlerArena.tsx`).
    * Real-time WebSocket synchronization via `GymifyWebSocketClient` and `useWebSocket` hook featuring auto-reconnect logic with exponential backoff, room subscriptions, and instant live raid UI updates.
    * Hardware wearable integration via `UnifiedWearableService` interfacing with Apple HealthKit (`react-native-health`) and Google Health Connect (`react-native-health-connect`), featuring permission requests, live session BPM polling, intra-workout HUD metrics, fetching OS Activity Classifications, Sleep Stages (Core, Deep, REM, Awake), and Pedometer step data, and payload bundling into the sync queue.
-   * High-fidelity audio and 2D sprite asset pipeline utilizing modern `expo-audio` for native sound playback and `expo-image` for hardware-accelerated sprite rendering, orchestrated by the `AudioManager` singleton with procedural synthesizer fallbacks, haptic-synchronized SFX via `sensoryFeedback.ts`, floating damage numbers and hit-flash animations in `AutoBattlerCanvas.tsx`, and a persistent Gym Silence toggle in `CharacterProfileScreen.tsx`.
+   * High-fidelity audio and 2D sprite asset pipeline utilizing modern `expo-audio` for native sound playback and `expo-image` for hardware-accelerated sprite rendering, orchestrated by the `AudioManager` singleton with procedural synthesizer fallbacks, haptic-synchronized SFX via `sensoryFeedback.ts`, two-phase weapon strike impact sync and floating combat telemetry in `AutoBattlerArena.tsx` (wrapped by `AutoBattlerCanvas.tsx`), sprite sheet clipping and foot-row ground alignment in `SpriteAnimator.tsx` and `spriteManifest.ts`, seamless 6-layer background parallax in `ParallaxBackground.tsx`, dual-driver motion runtime in `reanimatedRuntime.ts`, and a persistent Gym Silence toggle in `CharacterProfileScreen.tsx`.
+   * **Two-Stage Unified Rest Timer (`DynamicRestTimer.tsx`, `StaminaRingTimer.tsx`, `OfflineWorkoutScreen.tsx`, `WorkoutLoggerScreen.tsx`):**
+     * **Stage 1 (Center-Screen Focus Overlay):** High-focus modal overlay (`rgba(10, 12, 18, 0.82)` backdrop) triggered on set log across both live hybrid dungeon and offline logging sessions. Features an SVG stamina ring countdown, elapsed-time-preserving interval controls (`-15s`, `+15s`, `+30s`, and quick-tap presets `1m`, `1.5m`, `2m`, `3m`, `4m` highlighting recommended rest duration), compact `(i)` physiological rationale tooltip toggle, and state-aware action buttons (`"View Workout / Minimize Timer"` + muted `"Skip Rest & Begin Next Set"` while counting down, transitioning automatically to emerald `"⚡ STAMINA FULL — BEGIN NEXT SET"` at `0:00` with somatic haptic and audio chime triggers).
+     * **Stage 2 (Pinned Parallax Floating HUD Pill/Ring):** Anchored to the viewport header with scroll-reactive parallax depth (`scrollOffsetY`) when minimized or during ambient browsing. Displays a miniature SVG stamina ring, remaining countdown, emerald completion flash, and tap-to-expand gesture.
+   * **Visual RPG Paperdoll Equipment Screen, 2–3–2 Hexagonal Stat Honeycomb, & Non-Blocking Scroll-Through Parallax Tooltip (`CharacterProfileScreen.tsx`):**
+     * **Single-Row Utility Header Bar:** Cleanly deduplicated bar housing the Standard/Ironman roster pill, persistent SFX mute toggle, `Report Bug`, `Dev Triage`, and `Updates` with inline version pill.
+     * **2–3–2 Pointy-Top Hexagonal Stat Honeycomb Grid:** Replaces rectangular stat cards with a centered 3-row SVG `<Polygon>` honeycomb (`AGI, DEX` on top; `STR, CON, END` in the middle; `SPR, WIS` on the bottom). Each `96x108` hexagon renders a dark track (`#141722`), inner border track (`#2A2F3D`), and a **glowing purple XP progress outline** (`stroke="#A855F7"`, outer glow `#C084FC`) proportional to `currentXp / xpToNextLevel`, stat glyph, 3-letter code, level, and gold `+N` unspent talent point badge, paired with a clean headerless Attribute Radar card (`height={210}`).
+     * **True `2:3` Character Art Frame & Relocated Appearance (`🎨`) Button:** `CharacterPortraitFrame.tsx` (`variant="hero"`), `CharacterProfileScreen.tsx`, and `LandingScreen.tsx` constrain the standing hero frame to explicit `aspectRatio: 2 / 3` (`contentFit="cover"`, `contentPosition="top center"`), eliminating side pillarbox bars. The `🎨 Appearance` button (`testID="profile-customize-appearance-btn"`) is relocated off the artwork into the Paperdoll section header row next to the `⚡ Power {totalItemPower}` badge.
+     * **Wide Full-Art Paperdoll with 58x58 Square Frames:** Dual-layer hero composition flanked by Left Column (Helm, Chest, Greaves, Boots) and Right Column (Main Hand, Off-Hand, Ring 1, Amulet 2) with uniform 58x58 px slot frames, rarity-colored glow borders, 1:1 bespoke icons, and `T1`–`T5` corner badges.
+     * **6-Category Satchel Filter & Compact 58px Rows:** Filter satchel inventory into `All`, `Weapons`, `Armor`, `Accessories`, `Consumables`, and `Materials`. Rows are streamlined to sleek 58px rows (`[44x44 Icon + T1–T5 Badge] | Rolled Item Name + Rarity/Slot Subtitle | Stack Count / Status`) removing inline clutter.
+     * **Non-Blocking Scroll-Through Parallax Item Tooltip:** Rendered as an absolute-positioned bottom `Animated.View` (`pointerEvents="box-none"`, `zIndex: 50`) with dynamic `paddingBottom: 420` on the background `ScrollView` and a scroll-linked `Animated.Value` (`scrollY`) parallax micro-shift (`tooltipParallaxY`). Displays full item breakdown upon slot or satchel selection: Base Armament Box, Prefix/Suffix affix pills, Tier 5 Unique Passive Box with gold badge and passive description, and Roman Numeral tier pill. Supports instant item switching on tap, toggle-off on re-tap, stationary background tap dismissal (`Math.hypot(dx, dy) < 6`), and an interactive Compare view with the equipped slot.
+     * **Interactive Slot Inspector Modal:** Detailed inspection modal displaying equipped item stats, `Unequip` action, and compatible bag swap candidates.
+   * **Interactive Bottom-Up Constellation Talent Tree (`TalentBuilderScreen.tsx`):**
+     * **Sticky 7-Stat Horizontal Icon Selector Bar:** Sticky navigation strip (`STR | END | AGI | DEX | CON | WIS | SPR` using `STAT_GLYPH_SVGS`) with unspent talent point badges and compact single-row stat summary.
+     * **5-Tier, 11-Node Inverted Graph:** Vertical flow climbing upward from Tier 1 Foundation (`y = 474`) to Tier 5 Apex Capstone (`y = 58`) via dynamic SVG Bezier connection curves, totaling 55 points per tree.
+     * **Node Inspector Card:** Interactive bottom card displaying rank progression, stat modifiers, active skill details, and unlock requirements.
+   * **5 Rank-Scaled Expeditions & Replay Arena (`DungeonScreen.tsx` & `AutoBattlerArena.tsx`):**
+     * Rank-gated expedition selection covering Copper, Iron, Bronze, Silver, and Gold dungeons with decluttered headers.
+     * Horizontal rank selector bar displaying expedition room counts, themes, bosses, and lock status.
+     * **Boss-Then-Chest Sequence & Loot Fanfare:** Mob/hazard encounters precede the climax, the Boss Encounter (`roomType: 'BOSS'`) is always room `N - 1`, and the Treasure Cache (`roomType: 'LOOT_CHEST'`) is always final room `N`, both eligible for boss-tier item rolls.
+     * **Interactive Expedition Spoils Fanfare Modal:** Auto-triggers at replay conclusion (or on `⏭ Skip to End`), featuring a Mythic Treasure Chest SVG, gold reward pill, interactive tap-to-unseal / flip loot cards (`"🔒 Tap to Unseal Spoils"` / `"✨ Reveal All"`), and a single primary `"✨ Claim Spoils & Complete Expedition"` CTA that closes the modal, claims rewards, and automatically dismisses the arena to return cleanly to the lobby (with `"🎁 Open Expedition Spoils Chest"` button remaining in the arena for log review).
+   * **Streamlined Workout Flows & World UI Polish:**
+     * **Readiness & Intra-Workout Table (`WorkoutLoggerScreen.tsx`):** Compact 4-row Pre-Flight Readiness Summary Card in `Idle` phase keeping the gold `⚔️ ENTER ...` CTA above the fold; Hybrid Tabular + Accordion intra-workout set logging (`Set # | Type | KG | Reps | RPE | Status` table with inline active set controller); consolidated `LootReview` phase with direct navigation banner to Talents and Paperdoll.
+     * **Relocated Finish Workout Button & Zero-Clutter Canvas (`WorkoutLoggerScreen.tsx`):** Relocated the primary `Finish Workout` action button to the bottom of the workout logger where the preset button previously sat, and removed the inline save-preset button to eliminate distraction and cognitive clutter during active gym floor logging.
+     * **Post-Workout Encouragement Pop-Up Modal (`PostWorkoutCelebrationModal.tsx` / `WorkoutLoggerScreen.tsx`):** High-impact celebratory modal that triggers upon workout completion, evaluating deterministic lift progression, personal records (PRs), tonnage gains, or effort/streak sustaining dialogue to provide encouraging narrative feedback.
+     * **Embedded Session Routine Preset Creation:** Features an embedded `"💾 Save Session as Routine Preset"` CTA directly within the post-workout encouragement modal that seamlessly opens and pre-populates `PresetDesignerModal` with the session's completed exercise blocks, sets, and cardio segments.
+     * **Relocated Layoff Simulation (`DeveloperTriageModal.tsx`):** Relocated the `"Simulate 96h Missed-Session Gap"` debug tool (`simulateLayoffHours(96)`) into the Developer Sanctum to test Tavern Well-Rested and comeback boosts without cluttering athlete profile views.
+     * **Routine Designer & Activity Picker (`PresetDesignerModal.tsx` & `ActivityPickerModal.tsx`):** 90%-height bottom-sheet Routine Designer with sticky header/footer and compact ~54px 2-line exercise rows (displaying 9–10 visible exercises simultaneously).
+     * **Gathering Duration Step Slider (`GatheringNodeScreen.tsx`):** Decluttered subheaders, 1:1 bespoke material icons, smooth interactive Horizontal Step Slider (`15m` to `120m` in `5m` increments) with `30m / 60m / 120m` quick-tap labels.
+     * **Expedition & Workout Buff Banners (`DungeonScreen.tsx` & `AutoBattlerArena.tsx`):** Unified top-attached expedition status & live workout buff banner.
+     * **Guild Boss Sprite Avatars (`GuildHallScreen.tsx` & `SpriteAnimator.tsx`):** Animated boss sprite avatars rendered alongside *Ignisrax* and *Vaelgor* HP bars. Features portrait-mode (`size={56}`) single-frame clipping and worklet-safe `useAnimatedStyle` dependency array (`[activeClip.frameCount, cellWidth]`) ensuring *Ignisrax* and *Vaelgor* render a crisp centered cropped `100x100` frame inside their `56x56` avatar boxes without off-center clipping or sprite sheet shrinking.
    * Real-time exercise search and filtering in `OfflineWorkoutScreen.tsx` with instant substring matching, active pill highlighting, and scroll containment.
-   * Custom Routine Designer modal (`PresetDesignerModal.tsx`) allowing users to compose, customize, and persist tailored multi-exercise workout templates.
    * Workout Category Gateway (`WorkoutCategoryGateway.tsx`) enabling athletes to select between Gym/Resistance, Cardio, Sport, and Active Recovery logging workflows.
    * Three top-level modes on Landing Screen:
      * **Quick Offline Workout:** Zero latency, local storage persistence, set types, superset groupings, real-time exercise search filter, and automatic queueing for server sync.
@@ -180,7 +270,7 @@ Gymify RPG/
      * **Enter World:** Complete RPG navigation hub featuring a 7-Stat UI overhaul in the Character Profile (displaying STR, END, AGI, DEX, CON, WIS, SPR with levels and XP progress bars), dynamic multi-stat XP receipts in post-workout summaries, TalentBuilder across all 10 trees, GatheringNode, Dungeon, and GuildHall.
    * Low-latency (<15ms) haptic feedback (iOS/Android) and Web Audio harmonic synth fallback (Web).
    * Local push notifications for rest timer completion and gathering node capacity.
-   * Visual 2D auto-battler combat replay screen (`AutoBattlerCanvas.tsx`).
+   * Visual 2D auto-battler combat replay arena (`AutoBattlerArena.tsx`, with backward-compatible re-export in `AutoBattlerCanvas.tsx`).
 
 ---
 
@@ -207,19 +297,22 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
 
 ## 6. Key File & Symbol Index
 
-* **Deployment & Cloud Infrastructure:**
+* **Deployment, Cloud Infrastructure, & Asset Pipelines:**
   * [`render.yaml`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/render.yaml) — Render blueprint orchestrating PostgreSQL (`free`), Redis (`free`), and Fastify API web service (`free`).
   * [`apps/mobile/eas.json`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/eas.json) — Expo Application Services (EAS) build profiles for standalone Android APK and iOS preview distributions.
   * [`apps/mobile/app.json`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/app.json) — Expo native configuration, HealthKit / Health Connect permissions, `expo-build-properties` (`minSdkVersion: 26`, Proguard disabled).
+  * [`scripts/generate-layer-icons.mjs`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/scripts/generate-layer-icons.mjs) — Standalone generation and asset processing script connecting to Layer.ai MCP for batch 1:1 dark fantasy RPG icon synthesis.
 * **Game Engine Core:**
+  * [`packages/game-engine/src/item-affix-engine.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/item-affix-engine.ts) — Procedural Itemization & 5-Tier Affix Engine: 32 base equippable items, 12 prefixes, 10 suffixes, 32 T5 Mythic Uniques with passives, affix scaling, and equipment modifier aggregation.
   * [`packages/game-engine/src/hybrid-reward-protocol.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/hybrid-reward-protocol.ts) — 5-state FSM, 1.25x arrival boon, chest scoring, resilience logic.
   * [`packages/game-engine/src/workout-calculator.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/workout-calculator.ts) — e1RM formulas, PR criteria, XP calculations across all 7 holistic stats.
   * [`packages/game-engine/src/workout-presets-rest.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/workout-presets-rest.ts) — Superset groupings, set type badges, workout categories, starter presets, dynamic rest intervals.
-  * [`packages/game-engine/src/auto-battler-sim.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/auto-battler-sim.ts) — Tick-by-tick deterministic dungeon simulator and combat replay engine.
+  * [`packages/game-engine/src/auto-battler-sim.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/auto-battler-sim.ts) — Tick-by-tick deterministic dungeon simulator, combat replay engine, and 5 rank-gated 24h expeditions (Obsidian Catacombs, Bloodfang Warcamp, Traitors' Garrison, Blighted Ossuary, Hellforge Sanctum) with boss-then-chest ordering (Room $N-1$ Boss $\rightarrow$ Room $N$ Loot Chest) and dual boss-tier loot roll eligibility.
   * [`packages/game-engine/src/gathering-calculator.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/gathering-calculator.ts) — Stat-affinity gathering cadence and yield formulas.
-  * [`packages/game-engine/src/talent-engine.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/talent-engine.ts) — 10 stat-bound talent trees across 7 stats, rank spending rules, modifier aggregation.
+  * [`packages/game-engine/src/talent-engine.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/talent-engine.ts) — 10 stat-bound talent trees across 7 stats, 5-tier 11-node bottom-up graphs totaling 55 pts/tree, active skills, keystones, and combat modifier aggregation.
   * [`packages/game-engine/src/fatigue-manager.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/fatigue-manager.ts) — Systemic fatigue penalties, tavern rest transitions, active recovery buffs.
   * [`packages/game-engine/src/ironman-verifier.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/ironman-verifier.ts) — Pure telemetry verification function, physiological anomaly detection, and confidence scoring (15 unit tests).
+  * [`packages/game-engine/src/training-history-tracker.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/training-history-tracker.ts) — Training History & Progression Matrix engine: e1RM formulas, top set selection, progression deltas, multi-exercise history matrices, and deterministic post-workout encouragement summaries (27 unit tests).
 * **Database & Server:**
   * [`packages/database/prisma/schema.prisma`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/database/prisma/schema.prisma) — Complete PostgreSQL schema definition (31 models, 26 enums, 1,034 lines).
   * [`packages/database/prisma/seed.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/database/prisma/seed.ts) — Exercises, starter presets, 10 talent trees, starter items, 24h dungeon, and 7d raids.
@@ -234,7 +327,10 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
 * **Mobile Client:**
   * [`apps/mobile/App.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/App.tsx) — Top-level shell, overhauled HUD with aesthetic Japanese Oni `TopMenuBorderArt` header offset, centered circular character portrait medallion with Lv and spoils indicators (tapping routes to Character Profile), right-aligned gold and instant transit dropdown menu, intra-workout focus lock banner, and streamlined 5-tab bottom navigation (`Workout`, `Talents`, `Artisan`, `Expeditions`, `Guild`).
   * [`apps/mobile/src/components/TopMenuBorderArt.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/TopMenuBorderArt.tsx) — Dark fantasy Japanese Oni architectural SVG trim providing an ornamental header cushion protecting HUD elements and update banners from screen notches and bezels.
-  * [`apps/mobile/src/components/CharacterPortraitFrame.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/CharacterPortraitFrame.tsx) — Multi-variant character frame supporting full hero frame, rounded avatar, and circular HUD medallion with active golden aura.
+  * [`apps/mobile/src/assets/characterArtRegistry.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/assets/characterArtRegistry.ts) — Paired character appearance registry housing 10 paired 1:1 Bust Portraits and 2:3 Full-Body Standing PNG character artworks, display metadata, and archetype presets.
+  * [`apps/mobile/src/assets/itemArtRegistry.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/assets/itemArtRegistry.ts) — Bespoke 1:1 Dark-Fantasy RPG item artwork registry mapping 40 512x512 Oni-style PNG icons across all 32 base equipment items plus 8 consumables and crafting materials, providing instant resolution via `getItemIconSource()`.
+  * [`apps/mobile/src/components/CharacterManagerModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/CharacterManagerModal.tsx) — Hall of Heroes manager modal: archetype-decoupled appearance selection, live appearance switching, dual-hero management (Standard vs. Ironman), and 30-day soft-delete fallen hero archive restoration.
+  * [`apps/mobile/src/components/CharacterPortraitFrame.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/CharacterPortraitFrame.tsx) — Multi-variant character frame supporting full hero frame with explicit 2:3 aspect ratio (eliminating side pillarbox bars via edge-to-edge cover layout), rounded avatar, and circular HUD medallion with active golden aura.
   * [`apps/mobile/src/components/UpdateBanner.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/UpdateBanner.tsx) — OTA and binary update banner with dynamic `useSafeAreaInsets` top offset and expanded 44px+ hit targets on the restart action button.
   * [`apps/mobile/src/api/apiClient.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/api/apiClient.ts) — Dynamic API URL resolution (`resolveApiBaseUrl`) with automatic Bearer token injection.
   * [`apps/mobile/src/api/tokenStorage.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/api/tokenStorage.ts) — Multi-platform secure token persistence.
@@ -244,13 +340,24 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
   * [`apps/mobile/src/services/AudioManager.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/services/AudioManager.ts) — Cross-platform audio manager with `expo-audio`, sound presets, procedural synthesis fallback, and gym silence mute persistence.
   * [`apps/mobile/assets/sprites/index.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/assets/sprites/index.ts) — 2D sprite asset registry supporting drop-in PNG/WebP files and vector data URIs for heroes, enemies, and loot chests.
   * [`apps/mobile/src/utils/sensoryFeedback.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/utils/sensoryFeedback.ts) — Low-latency somatic haptics combined with `AudioManager` SFX cues.
-  * [`apps/mobile/src/state/GameContext.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/state/GameContext.tsx) — Monolithic state manager coordinating local engine fallback, offline sync queue, and server API calls.
-  * [`apps/mobile/src/screens/WorkoutLoggerScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/WorkoutLoggerScreen.tsx) — Live hybrid workout interface with boss damage, micro-ticks, dynamic rest, and loot chest opening.
-  * [`apps/mobile/src/screens/OfflineWorkoutScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/OfflineWorkoutScreen.tsx) — Local-first standalone logger with instant local storage persistence and exercise search filter.
-  * [`apps/mobile/src/screens/CharacterProfileScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/CharacterProfileScreen.tsx) — 7-stat character progression HUD, equipment loadouts, Ironman badge, Gym Silence audio toggle.
-  * [`apps/mobile/src/screens/TalentBuilderScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/TalentBuilderScreen.tsx) — Interactive multi-class talent builder spanning all 10 trees.
-  * [`apps/mobile/src/components/AutoBattlerCanvas.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/AutoBattlerCanvas.tsx) — 2D replay canvas animating combat logs generated by the engine.
-  * [`apps/mobile/src/components/PresetDesignerModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/PresetDesignerModal.tsx) — Custom routine creation modal with exercise search and superset block configuration.
+  * [`apps/mobile/src/state/GameContext.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/state/GameContext.tsx) — Monolithic state manager coordinating local engine fallback, offline sync queue, server API calls, procedural gear drops, and aggregated equipment combat modifiers.
+  * [`apps/mobile/src/screens/WorkoutLoggerScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/WorkoutLoggerScreen.tsx) — Live hybrid workout interface featuring a compact 4-row Pre-Flight Readiness Summary in `Idle` keeping gold CTA above the fold, hybrid tabular + accordion intra-workout set logging (`Set # | Type | KG | Reps | RPE | Status` table + inline active set controller), two-stage dynamic rest timer, boss encounter damage, and consolidated `LootReview` phase with direct transit banners.
+  * [`apps/mobile/src/screens/OfflineWorkoutScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/OfflineWorkoutScreen.tsx) — Local-first standalone logger with instant local storage persistence, exercise search filter, and integrated two-stage dynamic rest timer with elapsed-time preservation.
+  * [`apps/mobile/src/screens/CharacterProfileScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/CharacterProfileScreen.tsx) — 7-stat progression HUD with 2–3–2 pointy-top SVG hexagonal honeycomb grid and purple XP glow, true 2:3 full-art paperdoll frame with relocated Appearance button, 58x58 square equipment slot frames with T1–T5 badges, compact 58px satchel rows, non-blocking scroll-through parallax bottom tooltip, and interactive Slot Inspector modal.
+  * [`apps/mobile/src/screens/TalentBuilderScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/TalentBuilderScreen.tsx) — Interactive 5-tier 11-node inverted bottom-up constellation talent tree (Tier 1 Foundation at y = 474 climbing to Tier 5 Apex Capstone at y = 58) across 10 trees (55 pts/tree), sticky stat selector bar, SVG bezier dependency lines, and bottom Node Inspector card.
+  * [`apps/mobile/src/components/DynamicRestTimer.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/DynamicRestTimer.tsx) & [`StaminaRingTimer.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/StaminaRingTimer.tsx) — Two-stage rest timer: Stage 1 center-screen focus overlay (`rgba(10, 12, 18, 0.82)`) with preset selector, rationale tooltip toggle, and state-aware action buttons; Stage 2 pinned parallax floating HUD pill/ring with scroll-reactive depth (`scrollOffsetY`) and tap-to-expand.
+  * [`apps/mobile/src/screens/Battle/AutoBattlerArena.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/Battle/AutoBattlerArena.tsx) — 2D multi-layer parallax & sprite auto-battler arena with two-phase strike synchronization, multi-unit formations, interactive Expedition Spoils Fanfare Modal with tap-to-unseal flip loot cards, and single Claim-and-Complete expedition flow.
+  * [`apps/mobile/src/components/AutoBattlerCanvas.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/AutoBattlerCanvas.tsx) — Backward-compatible wrapper forwarding props directly to `AutoBattlerArena`.
+  * [`apps/mobile/src/components/battle/reanimatedRuntime.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/battle/reanimatedRuntime.ts) — Runtime TurboModule guard and dual-driver motion adapter (`react-native-reanimated` UI-thread driver + 60 FPS `RNAnimated` native-driver fallback).
+  * [`apps/mobile/src/components/battle/background/ParallaxBackground.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/battle/background/ParallaxBackground.tsx) & [`ParallaxLayer.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/battle/background/ParallaxLayer.tsx) — Seamless 6-layer twin-strip parallax renderer with `marching`, `combat`, and `paused` scroll modes.
+  * [`apps/mobile/src/components/battle/sprites/SpriteAnimator.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/battle/sprites/SpriteAnimator.tsx) & [`spriteManifest.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/battle/sprites/spriteManifest.ts) — 100×100 px hardware-accelerated sprite sheet slicer, worklet-safe animated style dependencies, portrait-mode (size=56) single-frame centering, foot-row baseline alignment, and attackImpactFrame manifest.
+  * [`apps/mobile/src/components/PresetDesignerModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/PresetDesignerModal.tsx) & [`ActivityPickerModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/ActivityPickerModal.tsx) — 90%-height bottom-sheet Routine Designer and exercise selector with sticky header/footer and compact ~54px 2-line exercise rows (displaying 9–10 visible exercises simultaneously).
+  * [`apps/mobile/src/components/PostWorkoutCelebrationModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/PostWorkoutCelebrationModal.tsx) — Post-workout encouragement pop-up modal displaying deterministic lift progression callouts, PR breaks, streak sustaining dialogue, and embedded routine preset saving.
+  * [`apps/mobile/src/components/DeveloperTriageModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/DeveloperTriageModal.tsx) — In-app diagnostics and developer sanctum connecting to `/api/diagnostics/reports`, featuring multi-dimensional status/severity/type filters, triage actions, and the relocated 96h missed-session gap debug simulator (`simulateLayoffHours(96)`).
+  * [`apps/mobile/src/screens/GatheringNodeScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/GatheringNodeScreen.tsx) — Idle gathering screen with decluttered subheaders, 1:1 material item icons, interactive Horizontal Step Slider (15m to 120m in 5m increments), and quick-tap duration labels (30m, 60m, 120m).
+  * [`apps/mobile/src/screens/DungeonScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/DungeonScreen.tsx) — 24-hour dungeon expeditions across 5 rank-gated tiers with boss-then-chest sequence (N-1 Boss $\rightarrow$ N Loot Cache), horizontal rank selector bar, uncluttered header, and streamlined battle replay player.
+  * [`apps/mobile/src/screens/GuildHallScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/GuildHallScreen.tsx) — Guild hub and weekly raid sanctum featuring crisp 56x56 cropped boss sprite avatars (SpriteAnimator with DEMON_BOSS_SPRITE_CONFIG and GREATSWORD_SKELETON_SPRITE_CONFIG) alongside Ignisrax and Vaelgor HP bars.
+  * [`apps/mobile/src/assets/v0Vault.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/assets/v0Vault.ts) — Vector SVG asset registry including Japanese Oni header trim (`ONI_HEADER_SVG`), 8-slot equipment paperdoll silhouette (`CHARACTER_SILHOUETTE_SVG`), 7-stat glyphs (`STAT_GLYPH_SVGS`), and constellation background art (`HUD_SVGS.talentTreeConstellation`).
   * [`apps/mobile/src/components/WorkoutCategoryGateway.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/WorkoutCategoryGateway.tsx) — Gateway selector routing workouts into GYM, CARDIO, SPORT, or RECOVERY modalities.
 * **E2E Testing & Orchestration:**
   * [`playwright.config.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/playwright.config.ts) — Monorepo E2E web server orchestration (Fastify + Expo Web).
@@ -345,7 +452,7 @@ Mobile builds are automated and configured using [`apps/mobile/eas.json`](file:/
 
 ---
 
-## 6. Offline-First Bug Reporting, Breadcrumb Logging, & Fatal Exception Subsystem
+## 8. Offline-First Bug Reporting, Breadcrumb Logging, & Fatal Exception Subsystem
 
 To guarantee the **"Zero Lost Sets Guarantee"** and provide enterprise observability without telemetry vendor lock-in, Gymify RPG incorporates a unified diagnostic subsystem spanning `@gymify/database`, `@gymify/server`, `@gymify/game-engine`, and `@gymify/mobile`.
 
@@ -408,8 +515,9 @@ The Prisma schema (`packages/database/prisma/schema.prisma`) defines the persist
   * Dynamically pivots modal UI when **💡 Feature Suggestion** is selected: sets severity to `INFO`, adjusts placeholders for gameplay/mechanic proposals, and styles the submission button with a positive emerald theme.
   * Contains an expandable **"View Recent Logs & Telemetry"** accordion with a **"Copy JSON"** button allowing athletes and QA testers to inspect or export their diagnostic bundle directly.
 * **`DeveloperTriageModal.tsx` ("Developer Sanctum"):**
-  * Accessible directly from `CharacterProfileScreen` via the **🛠️ Dev Triage** badge button.
+  * Accessible directly from `CharacterProfileScreen` via the **🛠️ Dev Triage** badge button in the deduplicated single-row utility bar.
   * Connects to `GET /api/diagnostics/reports` to inspect live reports directly from mobile or desktop browser without needing database GUI clients.
+  * Houses the relocated debug action **"Simulate 96h Missed-Session Gap"** (`simulateLayoffHours(96)`), moving it out of the main athlete profile to test Tavern Well-Rested and comeback anti-abandonment bonuses without UI clutter.
   * Provides multi-dimensional filter chips (`Status`: `ALL`, `OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`; `Severity`: `ALL`, `FATAL`, `ERROR`, `WARNING`, `INFO`; `Type`: `All Items`, `💡 Suggestions`, `🐛 Bugs Only`, `💥 Crashes`, `🔄 Sync`, `🎨 UI/UX`).
   * Visual separation: **Feature Suggestions** are highlighted with emerald card borders and badges to immediately stand out from red crash exceptions and critical warnings.
   * Expanding a card reveals full stack traces, component stacks, sanitized state snapshots, and rolling breadcrumb event timelines.
@@ -417,7 +525,7 @@ The Prisma schema (`packages/database/prisma/schema.prisma`) defines the persist
 
 ---
 
-## VIII. Workout-Safe Dual-Layer Auto-Update System
+## 9. Workout-Safe Dual-Layer Auto-Update System
 
 ### A. Dual-Layer Update Architecture
 Gymify RPG targets diverse deployment targets including Standalone Android APKs, iOS builds (via EAS), and Expo Web. Updates are classified into two distinct operational layers:

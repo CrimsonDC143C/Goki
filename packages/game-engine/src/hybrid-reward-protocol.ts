@@ -1,6 +1,12 @@
 import { createSeededRng } from './rng';
 import { HeartRateZone, ItemRarity, LootDrop, StatType, WorkoutSessionType } from './types';
 import {
+  BASE_EQUIPPABLE_ITEM_BY_SLUG,
+  ItemTier,
+  proceduralItemToLootDrop,
+  rollProceduralItemInstance,
+} from './item-affix-engine';
+import {
   CardioSegmentInput,
   EvaluatedResistanceSet,
   HistoricalExercisePR,
@@ -781,12 +787,40 @@ export function evaluatePostWorkoutLootChest(params: {
     if (existing) {
       existing.quantity += picked.quantity;
     } else {
-      dropsMap.set(picked.itemSlug, {
-        itemSlug: picked.itemSlug,
-        itemName: picked.itemName,
-        rarity: picked.rarity as ItemRarity,
-        quantity: picked.quantity,
-      });
+      if (BASE_EQUIPPABLE_ITEM_BY_SLUG[picked.itemSlug]) {
+        const roll = rng.nextFloat();
+        let itemTier: ItemTier = 1;
+        if (tier === 'COMMON') {
+          itemTier = roll < 0.75 ? 1 : 2;
+        } else if (tier === 'RARE') {
+          if (roll < 0.55) itemTier = 2;
+          else if (roll < 0.9) itemTier = 3;
+          else itemTier = 4;
+        } else {
+          // EPIC
+          if (roll < 0.45) itemTier = 3;
+          else if (roll < 0.85) itemTier = 4;
+          else itemTier = 5;
+        }
+
+        const rolled = rollProceduralItemInstance({
+          baseSlug: picked.itemSlug,
+          tier: itemTier,
+          seed: `chest-gear:${params.rngSeed}:${i}:${picked.itemSlug}`,
+        });
+
+        dropsMap.set(picked.itemSlug, {
+          ...proceduralItemToLootDrop(rolled),
+          quantity: picked.quantity,
+        });
+      } else {
+        dropsMap.set(picked.itemSlug, {
+          itemSlug: picked.itemSlug,
+          itemName: picked.itemName,
+          rarity: picked.rarity as ItemRarity,
+          quantity: picked.quantity,
+        });
+      }
     }
   }
 
@@ -1431,15 +1465,108 @@ export function transitionHybridWorkoutState(
       const nowMs = event.nowMs ?? Date.now();
       const rt = state.activeSession.restTimer;
 
-      const updatedRemaining =
-        event.newDurationSeconds !== undefined
-          ? clamp(event.newDurationSeconds, 10, 600)
-          : clamp(rt.remainingSeconds + (event.deltaSeconds ?? 0), 5, 600);
+      if (!rt.isActive) {
+        const targetConfigured =
+          event.newDurationSeconds !== undefined
+            ? clamp(event.newDurationSeconds, 10, 600)
+            : clamp(rt.configuredSeconds + (event.deltaSeconds ?? 0), 10, 600);
 
-      const updatedConfigured =
-        event.newDurationSeconds !== undefined
-          ? clamp(event.newDurationSeconds, 10, 600)
-          : Math.max(rt.configuredSeconds, updatedRemaining);
+        return {
+          ...state,
+          activeSession: {
+            ...state.activeSession,
+            restTimer: {
+              ...rt,
+              configuredSeconds: targetConfigured,
+              remainingSeconds: targetConfigured,
+              startedAtMs: null,
+              endsAtMs: null,
+            },
+          },
+        };
+      }
+
+      const anchorStartMs =
+        rt.startedAtMs ??
+        (rt.endsAtMs !== null
+          ? rt.endsAtMs - rt.configuredSeconds * 1000
+          : nowMs - Math.max(0, rt.configuredSeconds - rt.remainingSeconds) * 1000);
+
+      if (event.newDurationSeconds !== undefined) {
+        const targetConfigured = clamp(event.newDurationSeconds, 10, 600);
+        const nextEndsAtMs = anchorStartMs + targetConfigured * 1000;
+        const remainingMs = nextEndsAtMs - nowMs;
+
+        if (remainingMs <= 0) {
+          return {
+            ...state,
+            phase: state.phase === 'Resting' ? 'DungeonActive' : state.phase,
+            lastError: null,
+            activeSession: {
+              ...state.activeSession,
+              restTimer: {
+                ...rt,
+                isActive: false,
+                configuredSeconds: targetConfigured,
+                remainingSeconds: 0,
+                startedAtMs: null,
+                endsAtMs: null,
+              },
+            },
+          };
+        }
+
+        const nextRemainingSeconds = Math.min(
+          targetConfigured,
+          Math.max(1, Math.ceil(remainingMs / 1000))
+        );
+
+        return {
+          ...state,
+          activeSession: {
+            ...state.activeSession,
+            restTimer: {
+              ...rt,
+              configuredSeconds: targetConfigured,
+              remainingSeconds: nextRemainingSeconds,
+              startedAtMs: anchorStartMs,
+              endsAtMs: nextEndsAtMs,
+            },
+          },
+        };
+      }
+
+      const deltaSec = event.deltaSeconds ?? 0;
+      const currentEndsAtMs = rt.endsAtMs ?? nowMs + rt.remainingSeconds * 1000;
+      const rawNextEndsAtMs = currentEndsAtMs + deltaSec * 1000;
+      const remainingMs = rawNextEndsAtMs - nowMs;
+
+      if (remainingMs <= 0) {
+        return {
+          ...state,
+          phase: state.phase === 'Resting' ? 'DungeonActive' : state.phase,
+          lastError: null,
+          activeSession: {
+            ...state.activeSession,
+            restTimer: {
+              ...rt,
+              isActive: false,
+              remainingSeconds: 0,
+              startedAtMs: null,
+              endsAtMs: null,
+            },
+          },
+        };
+      }
+
+      const cappedRemainingMs = Math.min(600_000, remainingMs);
+      const nextEndsAtMs = nowMs + cappedRemainingMs;
+      const nextRemainingSeconds = Math.max(1, Math.ceil(cappedRemainingMs / 1000));
+      const nextConfiguredSeconds = clamp(
+        Math.round((nextEndsAtMs - anchorStartMs) / 1000),
+        10,
+        600
+      );
 
       return {
         ...state,
@@ -1447,9 +1574,10 @@ export function transitionHybridWorkoutState(
           ...state.activeSession,
           restTimer: {
             ...rt,
-            configuredSeconds: updatedConfigured,
-            remainingSeconds: updatedRemaining,
-            endsAtMs: rt.isActive ? nowMs + updatedRemaining * 1000 : null,
+            configuredSeconds: nextConfiguredSeconds,
+            remainingSeconds: nextRemainingSeconds,
+            startedAtMs: anchorStartMs,
+            endsAtMs: nextEndsAtMs,
           },
         },
       };

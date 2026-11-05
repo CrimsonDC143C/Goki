@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   CombatantCharacterInput,
+  DEFAULT_DUNGEON_CATALOG,
   DungeonDefinition,
   createLiveDungeonWorkoutBuff,
+  isAdventurerRankSufficient,
   simulateDungeonRun,
 } from '../src/auto-battler-sim';
 
@@ -48,29 +50,6 @@ const SAMPLE_DUNGEON: DungeonDefinition = {
     },
     {
       roomNumber: 3,
-      roomName: 'Sunken Reliquary',
-      roomType: 'LOOT_CHEST',
-      guaranteedGold: 75,
-      lootRolls: 1,
-      lootTable: [
-        {
-          itemSlug: 'obsidian_ingot',
-          itemName: 'Obsidian Ingot',
-          rarity: 'UNCOMMON',
-          quantity: 2,
-          weight: 70,
-        },
-        {
-          itemSlug: 'catacomb_blade',
-          itemName: 'Catacomb Greatsword',
-          rarity: 'RARE',
-          quantity: 1,
-          weight: 30,
-        },
-      ],
-    },
-    {
-      roomNumber: 4,
       roomName: 'Sanctum of the Bone Lord',
       roomType: 'BOSS',
       guaranteedGold: 150,
@@ -101,6 +80,29 @@ const SAMPLE_DUNGEON: DungeonDefinition = {
           rarity: 'RARE',
           quantity: 3,
           weight: 60,
+        },
+      ],
+    },
+    {
+      roomNumber: 4,
+      roomName: 'Sunken Reliquary',
+      roomType: 'LOOT_CHEST',
+      guaranteedGold: 75,
+      lootRolls: 1,
+      lootTable: [
+        {
+          itemSlug: 'obsidian_ingot',
+          itemName: 'Obsidian Ingot',
+          rarity: 'UNCOMMON',
+          quantity: 2,
+          weight: 70,
+        },
+        {
+          itemSlug: 'catacomb_blade',
+          itemName: 'Catacomb Greatsword',
+          rarity: 'RARE',
+          quantity: 1,
+          weight: 30,
         },
       ],
     },
@@ -211,10 +213,10 @@ describe('auto-battler-sim', () => {
     expect(runA.events[0]!.type).toBe('EXPEDITION_START');
     expect(runA.events[runA.events.length - 1]!.type).toBe('EXPEDITION_END');
 
-    // Verify Titanic Force Boss Shield triggered specifically on Room 4 (BOSS)
+    // Verify Titanic Force Boss Shield triggered specifically on Room 3 (BOSS)
     const bossShieldEvents = runA.events.filter(
       (e) =>
-        e.roomNumber === 4 &&
+        e.roomNumber === 3 &&
         e.type === 'SHIELD_APPLIED' &&
         e.message.includes('Titanic Force')
     );
@@ -266,5 +268,88 @@ describe('auto-battler-sim', () => {
     expect(buffed.partySummaries[0]!.totalDamageDealt).toBeGreaterThan(
       unbuffed.partySummaries[0]!.totalDamageDealt
     );
+  });
+
+  describe('DEFAULT_DUNGEON_CATALOG & Adventurer Rank Gating', () => {
+    it('contains all 5 rank-gated dungeons with room counts [4, 6, 8, 10, 12]', () => {
+      expect(DEFAULT_DUNGEON_CATALOG).toHaveLength(5);
+      const slugs = DEFAULT_DUNGEON_CATALOG.map((d) => d.dungeonSlug);
+      expect(slugs).toEqual([
+        'obsidian_catacombs',
+        'bloodfang_warcamp',
+        'traitors_garrison',
+        'blighted_ossuary',
+        'hellforge_sanctum',
+      ]);
+
+      const roomCounts = DEFAULT_DUNGEON_CATALOG.map((d) => d.rooms.length);
+      expect(roomCounts).toEqual([4, 6, 8, 10, 12]);
+
+      const ranks = DEFAULT_DUNGEON_CATALOG.map((d) => d.requiredRank);
+      expect(ranks).toEqual(['COPPER', 'IRON', 'BRONZE', 'SILVER', 'GOLD']);
+
+      for (const d of DEFAULT_DUNGEON_CATALOG) {
+        expect(d.recommendedPower).toBeGreaterThan(0);
+        expect(d.rewardMultiplierLabel).toBeDefined();
+        expect(d.themeLabel).toBeDefined();
+        expect(d.rooms[d.rooms.length - 2]!.roomType).toBe('BOSS');
+        expect(d.rooms[d.rooms.length - 1]!.roomType).toBe('LOOT_CHEST');
+      }
+    });
+
+    it('correctly checks adventurer rank sufficiency', () => {
+      expect(isAdventurerRankSufficient('COPPER', 'COPPER')).toBe(true);
+      expect(isAdventurerRankSufficient('COPPER', 'IRON')).toBe(false);
+      expect(isAdventurerRankSufficient('BRONZE', 'IRON')).toBe(true);
+      expect(isAdventurerRankSufficient('GOLD', 'COPPER')).toBe(true);
+      expect(isAdventurerRankSufficient('SILVER', 'GOLD')).toBe(false);
+      expect(isAdventurerRankSufficient('MYTHIC', 'GOLD')).toBe(true);
+    });
+
+    it('executes a deterministic 12-room run of hellforge_sanctum', () => {
+      const hellforge = DEFAULT_DUNGEON_CATALOG.find((d) => d.dungeonSlug === 'hellforge_sanctum')!;
+      expect(hellforge.rooms.length).toBe(12);
+
+      const highTierParty: CombatantCharacterInput[] = [
+        {
+          characterId: 'warrior_1',
+          name: 'Oni Warlord',
+          coreStats: { strengthLevel: 40, enduranceLevel: 35, agilityLevel: 30 },
+          equipmentBonuses: { meleePower: 120, armorRating: 80, maxHp: 500 },
+        },
+        {
+          characterId: 'paladin_2',
+          name: 'Oath Sentinel',
+          coreStats: { strengthLevel: 30, enduranceLevel: 45, agilityLevel: 25 },
+          equipmentBonuses: { meleePower: 90, armorRating: 110, maxHp: 650 },
+        },
+        {
+          characterId: 'assassin_3',
+          name: 'Duskblade Shinobi',
+          coreStats: { strengthLevel: 25, enduranceLevel: 25, agilityLevel: 50 },
+          equipmentBonuses: { meleePower: 130, critChance: 0.25, attackSpeedPct: 0.3 },
+        },
+      ];
+
+      const simA = simulateDungeonRun({
+        dungeon: hellforge,
+        party: highTierParty,
+        seed: 'hellforge-deterministic-seed-42',
+        tickIntervalMs: 250,
+      });
+
+      const simB = simulateDungeonRun({
+        dungeon: hellforge,
+        party: highTierParty,
+        seed: 'hellforge-deterministic-seed-42',
+        tickIntervalMs: 250,
+      });
+
+      expect(simA).toEqual(simB);
+      expect(simA.totalRooms).toBe(12);
+      expect(simA.events.length).toBeGreaterThan(12);
+      expect(simA.events[0]!.type).toBe('EXPEDITION_START');
+      expect(simA.events[simA.events.length - 1]!.type).toBe('EXPEDITION_END');
+    });
   });
 });

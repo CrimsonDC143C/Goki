@@ -29,5 +29,8 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@shopify/react-native-skia": "2.14.0"
   }
 }

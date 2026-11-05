@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
+import {
+  Modal,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 import {
   WorkoutCategory,
@@ -51,6 +61,14 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
   onOpenPresetDesigner,
   onOpenTrainingHistory,
 }) => {
+  const insets = useSafeAreaInsets();
+  const safeTop =
+    Platform.OS === 'web'
+      ? 0
+      : Math.max(insets.top, Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 28) + 4);
+  const safeBottom =
+    Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 12);
+
   const [showSecondaryPicker, setShowSecondaryPicker] = useState<boolean>(false);
   const [showPresetsDrawer, setShowPresetsDrawer] = useState<boolean>(false);
 
@@ -189,30 +207,19 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
 
         <View style={[styles.activeCategoryPill, { borderColor: activeColor }]}>
           {CATEGORY_BADGE_SVGS[activeCatMeta.key] ? (
-            <SvgXml xml={CATEGORY_BADGE_SVGS[activeCatMeta.key]} width={18} height={18} />
+            <SvgXml xml={CATEGORY_BADGE_SVGS[activeCatMeta.key]} width={16} height={16} />
           ) : (
             <Text style={styles.activePillIcon}>{activeCatMeta.icon}</Text>
           )}
-          <Text style={[styles.activePillLabel, { color: activeColor }]}>
+          <Text
+            style={[styles.activePillLabel, { color: activeColor }]}
+            numberOfLines={1}
+          >
             {activeCatMeta.shortTitle}
           </Text>
         </View>
 
         <View style={styles.headerRightActions}>
-          {onOpenTrainingHistory && (
-            <TouchableOpacity
-              style={styles.historyBtn}
-              onPress={() => {
-                triggerSensoryCue('SET_MICRO_REWARD_TICK');
-                onOpenTrainingHistory();
-              }}
-              activeOpacity={0.7}
-              testID="gateway-history-btn"
-            >
-              <Text style={styles.historyBtnText}>📊 History</Text>
-            </TouchableOpacity>
-          )}
-
           <TouchableOpacity
             style={styles.presetsBtn}
             onPress={() => setShowPresetsDrawer(true)}
@@ -262,7 +269,12 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         animationType="fade"
         onRequestClose={() => setShowSecondaryPicker(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View
+          style={[
+            styles.modalOverlay,
+            { paddingTop: safeTop + 16, paddingBottom: safeBottom + 16 },
+          ]}
+        >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add Secondary Segment</Text>
             <Text style={styles.modalSub}>
@@ -319,7 +331,12 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         animationType="slide"
         onRequestClose={() => setShowPresetsDrawer(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View
+          style={[
+            styles.modalOverlay,
+            { paddingTop: safeTop + 16, paddingBottom: safeBottom + 16 },
+          ]}
+        >
           <View style={styles.modalCard}>
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>Select Workout Routine</Text>
@@ -554,7 +571,7 @@ const styles = StyleSheet.create({
   compactMainRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 6,
   },
   switchCategoryBtn: {
     paddingHorizontal: 8,
@@ -565,34 +582,40 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   switchCategoryText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '800',
     color: '#D1D5DB',
   },
   activeCategoryPill: {
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    justifyContent: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
+    gap: 5,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 14,
     borderWidth: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
   activePillIcon: {
-    fontSize: 14,
+    fontSize: 13,
   },
   activePillBadgeIcon: {
-    width: 16,
-    height: 16,
+    width: 15,
+    height: 15,
   },
   activePillLabel: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    flexShrink: 1,
   },
   headerRightActions: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
   },
   historyBtn: {

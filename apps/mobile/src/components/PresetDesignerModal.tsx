@@ -8,7 +8,10 @@ import {
   ScrollView,
   Modal,
   Alert,
+  Platform,
+  StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   WorkoutCategory,
   WORKOUT_CATEGORIES,
@@ -55,6 +58,14 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
   onDeletePreset,
   onClose,
 }) => {
+  const insets = useSafeAreaInsets();
+  const safeTop =
+    Platform.OS === 'web'
+      ? 0
+      : Math.max(insets.top, Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 28) + 4);
+  const safeBottom =
+    Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 12);
+
   const [name, setName] = useState<string>(editingPreset?.name || '');
   const [category, setCategory] = useState<WorkoutCategory>(editingPreset?.category || 'GYM');
   const [notes, setNotes] = useState<string>(editingPreset?.notes || '');
@@ -269,13 +280,17 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={styles.container}>
+      <View style={[styles.overlay, { paddingTop: safeTop + 12 }]}>
+        <View style={[styles.modalCard, { maxHeight: '88%' }]}>
           {/* Header */}
           <View style={styles.header}>
             <View>
               <Text style={styles.title}>
-                {editingPreset ? 'Edit Workout Preset' : 'Workout Preset Designer'}
+                {editingPreset
+                  ? editingPreset.id
+                    ? 'Edit Workout Preset'
+                    : 'Save Session as Routine Preset'
+                  : 'Workout Preset Designer'}
               </Text>
               <Text style={styles.subtitle}>
                 Define supersets, set types, and target loads for quick loading.
@@ -286,7 +301,11 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={styles.bodyScroll}
+            contentContainerStyle={{ paddingBottom: 24 }}
+            showsVerticalScrollIndicator={false}
+          >
             {/* Routine Name & Category */}
             <View style={styles.formGroup}>
               <Text style={styles.inputLabel}>Routine Name</Text>
@@ -545,8 +564,8 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
           </ScrollView>
 
           {/* Footer Actions */}
-          <View style={styles.footer}>
-            {editingPreset && onDeletePreset && !editingPreset.isSystemSeed ? (
+          <View style={[styles.footer, { paddingBottom: Math.max(safeBottom, 14) }]}>
+            {editingPreset && editingPreset.id && onDeletePreset && !editingPreset.isSystemSeed ? (
               <TouchableOpacity
                 style={styles.deleteBtn}
                 onPress={() => {
@@ -592,19 +611,38 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(10, 12, 18, 0.82)',
+    justifyContent: 'flex-end',
     alignItems: 'center',
-    padding: 12,
+    padding: 0,
+  },
+  modalCard: {
+    backgroundColor: '#161518',
+    borderColor: '#3D3842',
+    borderWidth: 1,
+    width: '100%',
+    maxWidth: 560,
+    height: '90%',
+    maxHeight: '92%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    display: 'flex',
+    flexDirection: 'column',
   },
   container: {
     backgroundColor: '#161518',
     borderColor: '#3D3842',
     borderWidth: 1,
-    borderRadius: 14,
     width: '100%',
-    maxWidth: 520,
+    maxWidth: 560,
+    height: '90%',
     maxHeight: '92%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     display: 'flex',
     flexDirection: 'column',
   },
@@ -633,6 +671,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#9CA3AF',
     fontWeight: '700',
+  },
+  bodyScroll: {
+    padding: 16,
+    flex: 1,
   },
   body: {
     padding: 16,
@@ -961,8 +1003,10 @@ const styles = StyleSheet.create({
     borderColor: '#383540',
     borderWidth: 1,
     borderRadius: 8,
-    padding: 10,
-    marginBottom: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    marginBottom: 4,
+    minHeight: 50,
   },
   pickerItemName: {
     fontSize: 13,

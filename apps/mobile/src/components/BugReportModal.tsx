@@ -4,12 +4,14 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { diagnosticLogger } from '../services/DiagnosticLogger';
 import { COLORS, CRIMSON_ONI } from '../theme';
 
@@ -47,6 +49,14 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
   characterId,
   userId,
 }) => {
+  const insets = useSafeAreaInsets();
+  const safeTop =
+    Platform.OS === 'web'
+      ? 0
+      : Math.max(insets.top, Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 28) + 4);
+  const safeBottom =
+    Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 12);
+
   const [category, setCategory] = useState<BugReportCategoryType>('UI_UX');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -99,7 +109,7 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
       stateSnapshot: diagnosticLogger.getStateSnapshot(),
       deviceMetadata: diagnosticLogger.getDeviceMetadata(),
     };
-  }, [showLogsAccordion]);
+  }, [visible, showLogsAccordion]);
 
   const rawJsonString = useMemo(() => {
     return JSON.stringify(diagnosticBundle, null, 2);
@@ -135,14 +145,18 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
     setSubmitResult(null);
 
     try {
+      const freshBreadcrumbs = includeDiagnostics ? diagnosticLogger.getBreadcrumbs() : [];
+      const freshSnapshot = includeDiagnostics ? diagnosticLogger.getStateSnapshot() : {};
+      const freshDevice = diagnosticLogger.getDeviceMetadata();
+
       const res = await diagnosticLogger.submitDiagnosticReport({
         severity: isSuggestion ? 'INFO' : 'WARNING',
         category,
         title: title.trim(),
         userDescription: description.trim() || undefined,
-        breadcrumbs: includeDiagnostics ? diagnosticBundle.breadcrumbs : [],
-        stateSnapshot: includeDiagnostics ? diagnosticBundle.stateSnapshot : {},
-        deviceMetadata: diagnosticBundle.deviceMetadata,
+        breadcrumbs: freshBreadcrumbs,
+        stateSnapshot: freshSnapshot,
+        deviceMetadata: freshDevice,
         characterId,
         userId,
       });
@@ -195,7 +209,12 @@ export const BugReportModal: React.FC<BugReportModalProps> = ({
       animationType="fade"
       onRequestClose={handleCloseAndReset}
     >
-      <View style={styles.modalBackdrop}>
+      <View
+        style={[
+          styles.modalBackdrop,
+          { paddingTop: safeTop + 12, paddingBottom: safeBottom + 12 },
+        ]}
+      >
         <View style={styles.cardContainer}>
           {/* Header */}
           <View style={styles.headerRow}>
@@ -447,7 +466,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     maxWidth: 600,
     width: '100%',
-    maxHeight: '90%',
+    maxHeight: '88%',
     overflow: 'hidden',
   },
   headerRow: {

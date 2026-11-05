@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import {
+  BASE_EQUIPPABLE_ITEMS,
+  DEFAULT_DUNGEON_CATALOG,
   DEFAULT_EXERCISE_CATALOG,
   DEFAULT_TALENT_TREES,
   STARTER_WORKOUT_PRESETS,
@@ -56,7 +58,7 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
   }
 
   // --------------------------------------------------------------------------
-  // 2. Multi-Class Stat-Bound Talent Trees & Starter Nodes (STR, END, AGI, DEX, CON, WIS, SPR)
+  // 2. Multi-Class Stat-Bound Talent Trees & Nodes (10 archetypes across 7 stats, 40 nodes total)
   // --------------------------------------------------------------------------
   const dbNodeIdByEngineSlug = new Map<string, string>();
 
@@ -94,6 +96,9 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
           effectConfig: {
             passivePerRank: nodeDef.passivePerRank ?? null,
             activeSkill: nodeDef.activeSkill ?? null,
+            modifiers: nodeDef.modifiers ?? null,
+            grantedSkillId: nodeDef.grantedSkillId ?? null,
+            keystonePenalty: nodeDef.keystonePenalty ?? null,
           } as object,
         },
         create: {
@@ -109,6 +114,9 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
           effectConfig: {
             passivePerRank: nodeDef.passivePerRank ?? null,
             activeSkill: nodeDef.activeSkill ?? null,
+            modifiers: nodeDef.modifiers ?? null,
+            grantedSkillId: nodeDef.grantedSkillId ?? null,
+            keystonePenalty: nodeDef.keystonePenalty ?? null,
           } as object,
         },
       });
@@ -128,18 +136,25 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
       }
     }
   }
+  const totalTalentNodes = DEFAULT_TALENT_TREES.reduce((sum, t) => sum + t.nodes.length, 0);
+  console.log(`✅ Seeded ${DEFAULT_TALENT_TREES.length} talent trees and ${totalTalentNodes} talent nodes across 7 stats.`);
 
   // --------------------------------------------------------------------------
-  // 3. Starter Items (Materials, Consumables, & Stat-Gated Gear)
+  // 3. Starter Items (Materials, Consumables, & 32 Base Equippable Items)
   // --------------------------------------------------------------------------
-  const items = [
+  const consumableAndMaterialItems = [
     {
       slug: 'iron_ore_cluster',
       name: 'Rich Iron Ore Cluster',
       description: 'Raw iron ore mined from mountain veins.',
       itemType: 'CRAFTING_MATERIAL' as const,
+      weaponHandedness: null,
       rarity: 'COMMON' as const,
+      requiredStrength: 0,
+      requiredEndurance: 0,
+      requiredAgility: 0,
       stackable: true,
+      maxStack: 999,
       goldValue: 12,
       statBonuses: {},
     },
@@ -148,8 +163,13 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
       name: 'Sunleaf Herb Bundle',
       description: 'Restorative wild herbs used in stamina elixirs.',
       itemType: 'CRAFTING_MATERIAL' as const,
+      weaponHandedness: null,
       rarity: 'COMMON' as const,
+      requiredStrength: 0,
+      requiredEndurance: 0,
+      requiredAgility: 0,
       stackable: true,
+      maxStack: 999,
       goldValue: 12,
       statBonuses: {},
     },
@@ -158,8 +178,13 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
       name: 'Obsidian Steel Ingot',
       description: 'Smelted alloy prized by guild blacksmiths.',
       itemType: 'CRAFTING_MATERIAL' as const,
+      weaponHandedness: null,
       rarity: 'UNCOMMON' as const,
+      requiredStrength: 0,
+      requiredEndurance: 0,
+      requiredAgility: 0,
       stackable: true,
+      maxStack: 999,
       goldValue: 45,
       statBonuses: {},
     },
@@ -168,8 +193,13 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
       name: 'Elixir of Peak Output',
       description: 'Alchemical draught brewed from Sunleaf herbs.',
       itemType: 'CONSUMABLE' as const,
+      weaponHandedness: null,
       rarity: 'RARE' as const,
+      requiredStrength: 0,
+      requiredEndurance: 0,
+      requiredAgility: 0,
       stackable: true,
+      maxStack: 99,
       goldValue: 85,
       statBonuses: { maxStamina: 25 },
     },
@@ -178,92 +208,58 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
       name: 'Raid Boss Essence Crystal',
       description: 'Crystallized power harvested from weekly Raid Bosses.',
       itemType: 'CRAFTING_MATERIAL' as const,
-      rarity: 'RARE' as const,
-      stackable: true,
-      goldValue: 120,
-      statBonuses: {},
-    },
-    {
-      slug: 'ironbound_greatsword',
-      name: 'Ironbound Greatsword',
-      description: 'Heavy two-handed blade forged for strength builds.',
-      itemType: 'WEAPON' as const,
-      weaponHandedness: 'TWO_HANDED' as const,
-      rarity: 'UNCOMMON' as const,
-      requiredStrength: 3,
-      requiredEndurance: 0,
-      requiredAgility: 0,
-      stackable: false,
-      maxStack: 1,
-      goldValue: 180,
-      statBonuses: { meleePower: 22, critChance: 0.03 },
-    },
-    {
-      slug: 'warden_chainmail',
-      name: "Warden's Tempered Hauberk",
-      description: 'Endurance-fitted armor built for long dungeon expeditions.',
-      itemType: 'CHEST' as const,
-      rarity: 'RARE' as const,
-      requiredStrength: 2,
-      requiredEndurance: 3,
-      requiredAgility: 0,
-      stackable: false,
-      maxStack: 1,
-      goldValue: 260,
-      statBonuses: { armorRating: 24, maxHp: 90, maxStamina: 30 },
-    },
-    {
-      slug: 'windrunner_daggers',
-      name: 'Twin Windrunner Blades',
-      description: 'Featherweight blades scaling with high Agility.',
-      itemType: 'WEAPON' as const,
-      weaponHandedness: 'ONE_HANDED' as const,
+      weaponHandedness: null,
       rarity: 'RARE' as const,
       requiredStrength: 0,
       requiredEndurance: 0,
-      requiredAgility: 4,
-      stackable: false,
-      maxStack: 1,
-      goldValue: 275,
-      statBonuses: { meleePower: 17, attackSpeedPct: 0.14, dodgeRating: 0.05, critChance: 0.06 },
-    },
-    {
-      slug: 'malakor_signet',
-      name: "Malakor's Signet Ring",
-      description: 'Trophy ring dropped by Bone Lord Malakor.',
-      itemType: 'ACCESSORY' as const,
-      rarity: 'EPIC' as const,
-      requiredStrength: 2,
-      requiredEndurance: 2,
-      requiredAgility: 2,
-      stackable: false,
-      maxStack: 1,
-      goldValue: 500,
-      statBonuses: { meleePower: 14, maxHp: 65, critChance: 0.05 },
-    },
-    {
-      slug: 'crown_of_the_wyrm',
-      name: 'Crown of the World Wyrm',
-      description: 'Mythic helm awarded exclusively to slayers of Ignisrax.',
-      itemType: 'HEAD' as const,
-      rarity: 'MYTHIC' as const,
-      requiredStrength: 5,
-      requiredEndurance: 5,
-      requiredAgility: 5,
-      stackable: false,
-      maxStack: 1,
-      goldValue: 2500,
-      statBonuses: { meleePower: 35, armorRating: 35, maxHp: 180, critChance: 0.08 },
+      requiredAgility: 0,
+      stackable: true,
+      maxStack: 999,
+      goldValue: 120,
+      statBonuses: {},
     },
   ];
 
-  for (const item of items) {
+  const equippableItems = BASE_EQUIPPABLE_ITEMS.map((base) => ({
+    slug: base.baseSlug,
+    name: base.baseName,
+    description: base.description,
+    itemType: base.itemType as any,
+    weaponHandedness: (base.handedness as any) ?? null,
+    rarity: 'COMMON' as const,
+    requiredStrength: base.statRequirements?.STR ?? 0,
+    requiredEndurance: base.statRequirements?.END ?? 0,
+    requiredAgility: base.statRequirements?.AGI ?? 0,
+    stackable: false,
+    maxStack: 1,
+    goldValue: base.baseGoldValue,
+    statBonuses: {
+      meleePower: base.baseStats.meleePower,
+      armorRating: base.baseStats.armor,
+      maxHp: base.baseStats.maxHp,
+      maxStamina: base.baseStats.maxStamina,
+      attackSpeedPct: base.baseStats.attackSpeedPct,
+      dodgeRating: base.baseStats.dodgeChancePct,
+      critChance: base.baseStats.critChancePct,
+      damageMitigationPct: base.baseStats.damageMitigationPct,
+      lifeOnHit: base.baseStats.lifeOnHit,
+      armorPenetrationPct: base.baseStats.armorPenetrationPct,
+      skillPotencyPct: base.baseStats.skillPotencyPct,
+      startOfCombatShieldHp: base.baseStats.startOfCombatShieldHp,
+      hazardResistancePct: base.baseStats.hazardResistancePct,
+    },
+  }));
+
+  const allItems = [...consumableAndMaterialItems, ...equippableItems];
+
+  for (const item of allItems) {
     await db.item.upsert({
       where: { slug: item.slug },
       update: item,
       create: item,
     });
   }
+  console.log(`✅ Seeded ${allItems.length} items (${equippableItems.length} equippable weapons/armor/accessories + ${consumableAndMaterialItems.length} materials/consumables).`);
 
   // --------------------------------------------------------------------------
   // 4. Starter 2-Hour Idle Gathering & Crafting Nodes
@@ -370,130 +366,43 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
   }
 
   // --------------------------------------------------------------------------
-  // 5. Starter 24-Hour Dungeon Expeditions
+  // 5. 24-Hour Dungeon Expeditions (5 Rank-Gated Dungeons)
   // --------------------------------------------------------------------------
-  const obsidianCatacombsRooms = [
-    {
-      roomNumber: 1,
-      roomName: 'Crypt Gatehouse',
-      roomType: 'MOB_ENCOUNTER',
-      guaranteedGold: 45,
-      enemies: [
-        {
-          enemyId: 'skeleton_vanguard',
-          name: 'Skeletal Vanguard',
-          maxHp: 210,
-          attackPower: 22,
-          armor: 12,
-          attackIntervalSeconds: 1.8,
-        },
-        {
-          enemyId: 'crypt_archer',
-          name: 'Crypt Bone-Archer',
-          maxHp: 150,
-          attackPower: 26,
-          armor: 6,
-          attackIntervalSeconds: 1.5,
-        },
-      ],
-    },
-    {
-      roomNumber: 2,
-      roomName: 'Corridor of Scything Pendulums',
-      roomType: 'HAZARD_EVENT',
-      guaranteedGold: 30,
-      hazardConfig: {
-        hazardName: 'Swinging Obsidian Blades',
-        baseDamage: 55,
-        staminaDrain: 18,
-      },
-    },
-    {
-      roomNumber: 3,
-      roomName: 'Forgotten Reliquary',
-      roomType: 'LOOT_CHEST',
-      guaranteedGold: 80,
-      lootRolls: 1,
-      lootTable: [
-        {
-          itemSlug: 'obsidian_ingot',
-          itemName: 'Obsidian Steel Ingot',
-          rarity: 'UNCOMMON',
-          quantity: 2,
-          weight: 70,
-        },
-        {
-          itemSlug: 'vitality_elixir',
-          itemName: 'Elixir of Peak Output',
-          rarity: 'RARE',
-          quantity: 1,
-          weight: 30,
-        },
-      ],
-    },
-    {
-      roomNumber: 4,
-      roomName: 'Throne of Bone Lord Malakor',
-      roomType: 'BOSS',
-      guaranteedGold: 160,
-      lootRolls: 2,
-      enemies: [
-        {
-          enemyId: 'bone_lord_malakor',
-          name: 'Bone Lord Malakor',
-          isBoss: true,
-          maxHp: 680,
-          attackPower: 42,
-          armor: 24,
-          attackIntervalSeconds: 1.6,
-          cleaveTargets: 2,
-        },
-      ],
-      lootTable: [
-        {
-          itemSlug: 'malakor_signet',
-          itemName: "Malakor's Signet Ring",
-          rarity: 'EPIC',
-          quantity: 1,
-          weight: 35,
-        },
-        {
-          itemSlug: 'obsidian_ingot',
-          itemName: 'Obsidian Steel Ingot',
-          rarity: 'UNCOMMON',
-          quantity: 3,
-          weight: 65,
-        },
-      ],
-    },
-  ];
+  for (const dungeon of DEFAULT_DUNGEON_CATALOG) {
+    const finalRoom = dungeon.rooms[dungeon.rooms.length - 1];
+    const dungeonLoot = finalRoom?.lootTable ?? [];
 
-  await db.dungeon.upsert({
-    where: { slug: 'obsidian_catacombs' },
-    update: {
-      name: 'Obsidian Catacombs',
-      description: '24-hour undead sanctum for 1-5 adventurers. Rewards balanced mitigation and trap resistance.',
-      minPlayers: 1,
-      maxPlayers: 5,
-      recommendedPower: 100,
-      requiredAdventurerRank: 'COPPER',
-      durationHours: 24,
-      roomsConfig: obsidianCatacombsRooms,
-      lootTable: obsidianCatacombsRooms[3]!.lootTable ?? [],
-    },
-    create: {
-      slug: 'obsidian_catacombs',
-      name: 'Obsidian Catacombs',
-      description: '24-hour undead sanctum for 1-5 adventurers. Rewards balanced mitigation and trap resistance.',
-      minPlayers: 1,
-      maxPlayers: 5,
-      recommendedPower: 100,
-      requiredAdventurerRank: 'COPPER',
-      durationHours: 24,
-      roomsConfig: obsidianCatacombsRooms,
-      lootTable: obsidianCatacombsRooms[3]!.lootTable ?? [],
-    },
-  });
+    await db.dungeon.upsert({
+      where: { slug: dungeon.dungeonSlug },
+      update: {
+        name: dungeon.dungeonName,
+        description:
+          dungeon.description ??
+          `24-hour expedition with ${dungeon.rooms.length} rooms for 1-5 adventurers.`,
+        minPlayers: 1,
+        maxPlayers: 5,
+        recommendedPower: dungeon.recommendedPower ?? 100,
+        requiredAdventurerRank: (dungeon.requiredRank ?? 'COPPER') as any,
+        durationHours: 24,
+        roomsConfig: dungeon.rooms as any,
+        lootTable: dungeonLoot as any,
+      },
+      create: {
+        slug: dungeon.dungeonSlug,
+        name: dungeon.dungeonName,
+        description:
+          dungeon.description ??
+          `24-hour expedition with ${dungeon.rooms.length} rooms for 1-5 adventurers.`,
+        minPlayers: 1,
+        maxPlayers: 5,
+        recommendedPower: dungeon.recommendedPower ?? 100,
+        requiredAdventurerRank: (dungeon.requiredRank ?? 'COPPER') as any,
+        durationHours: 24,
+        roomsConfig: dungeon.rooms as any,
+        lootTable: dungeonLoot as any,
+      },
+    });
+  }
 
   // --------------------------------------------------------------------------
   // 6. Adventurer Guild Bounties & Rank-Up Trials

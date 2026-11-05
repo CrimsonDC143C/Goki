@@ -273,7 +273,9 @@ model Character {
   id                   String                 @id @default(cuid())
   userId               String
   name                 String                 @unique
-  avatarSpriteId       String                 @default("adventurer_default")
+  appearanceId         String                 @default("oni_warlord")
+  avatarSpriteId       String                 @default("oni_warlord")
+  deletedAt            DateTime?
   gameMode             GameMode               @default(STANDARD)
   adventurerRank       AdventurerRank         @default(COPPER)
   adventurerReputation Int                    @default(0)
@@ -313,7 +315,7 @@ model Character {
   bountyCompletions     CharacterBountyCompletion[]
   raidContributions     RaidParticipantContribution[]
 
-  @@unique([userId, gameMode])
+  @@index([userId, gameMode, deletedAt])
   @@index([adventurerRank])
 }
 

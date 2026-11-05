@@ -15,3 +15,4 @@ export * from './version';
 export * from './stat-radar';
 export * from './training-history-tracker';
 export * from './strengthlog-exercise-catalog';
+export * from './item-affix-engine';

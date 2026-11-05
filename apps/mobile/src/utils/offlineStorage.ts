@@ -58,7 +58,10 @@ export interface PersistedCharacterProfile {
   id: string;
   name: string;
   gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
+  appearanceId?: string;
   avatarSpriteId?: string;
+  deletedAt?: string | null;
+  daysRemaining?: number;
   overallLevel: number;
   adventurerRank: string;
   adventurerReputation: number;
@@ -86,6 +89,7 @@ export interface PersistedOfflineBundle {
   customPresets: WorkoutPresetDefinition[];
   characterProfile?: PersistedCharacterProfile | null;
   availableCharacters?: PersistedCharacterProfile[];
+  deletedCharacters?: PersistedCharacterProfile[];
   activeCharacterId?: string | null;
   workoutHistory?: CompletedWorkoutRecord[];
   customExercises?: SeedExerciseDefinition[];
@@ -111,6 +115,7 @@ let memoryFallbackBundle: PersistedOfflineBundle = {
   customPresets: [],
   characterProfile: null,
   availableCharacters: [],
+  deletedCharacters: [],
   activeCharacterId: null,
   workoutHistory: DEFAULT_SAMPLE_WORKOUT_HISTORY,
   customExercises: [],
@@ -214,6 +219,7 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
       customPresets: [],
       characterProfile: null,
       availableCharacters: [],
+      deletedCharacters: [],
       activeCharacterId: null,
       workoutHistory: DEFAULT_SAMPLE_WORKOUT_HISTORY,
       customExercises: [],
@@ -243,6 +249,7 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
         ? obj.characterProfile
         : null,
     availableCharacters: Array.isArray(obj.availableCharacters) ? obj.availableCharacters : [],
+    deletedCharacters: Array.isArray(obj.deletedCharacters) ? obj.deletedCharacters : [],
     activeCharacterId: typeof obj.activeCharacterId === 'string' ? obj.activeCharacterId : null,
     workoutHistory:
       Array.isArray(obj.workoutHistory) && obj.workoutHistory.length > 0

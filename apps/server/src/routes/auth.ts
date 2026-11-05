@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
+import { SOFT_DELETE_RETENTION_MS, computeDaysRemaining } from './characters';
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -10,7 +11,8 @@ const registerSchema = z.object({
   password: z.string().min(6).max(128),
   characterName: z.string().min(2).max(32).optional(),
   gameMode: z.enum(['STANDARD', 'IRONMAN_VERIFIED']).default('STANDARD').optional(),
-  avatarSpriteId: z.string().default('adventurer_default').optional(),
+  appearanceId: z.string().default('oni_warlord').optional(),
+  avatarSpriteId: z.string().default('oni_warlord').optional(),
   timezone: z.string().default('UTC').optional(),
 });
 
@@ -58,12 +60,14 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
 
     const chosenCharacterName = body.characterName?.trim() || `${body.username}'s Hero`;
     const chosenGameMode = body.gameMode ?? 'STANDARD';
+    const chosenAppearance = body.appearanceId || body.avatarSpriteId || 'oni_warlord';
     const character = await db.character.create({
       data: {
         userId: user.id,
         name: chosenCharacterName,
         gameMode: chosenGameMode,
-        avatarSpriteId: body.avatarSpriteId ?? 'adventurer_default',
+        appearanceId: chosenAppearance,
+        avatarSpriteId: chosenAppearance,
         stats: { create: {} },
         fatigueState: { create: {} },
         equipmentLoadout: { create: {} },
@@ -92,13 +96,15 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       },
       character,
       characters: [character],
+      activeCharacters: [character],
+      deletedCharacters: [],
     });
   });
 
   /**
    * POST /api/auth/login
    * Validates credentials against stored bcrypt passwordHash, updates lastLoginAt,
-   * loads character sheet(s), and returns a signed JWT token.
+   * loads active character sheet(s) and restorable soft-deleted characters, and returns a signed JWT token.
    */
   app.post('/api/auth/login', async (request, reply) => {
     const body = loginSchema.parse(request.body);
@@ -121,7 +127,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       data: { lastLoginAt: new Date() },
     });
 
-    const characters = await db.character.findMany({
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - SOFT_DELETE_RETENTION_MS);
+
+    const allCharacters = await db.character.findMany({
       where: { userId: user.id },
       include: {
         stats: true,
@@ -131,13 +140,22 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       orderBy: { createdAt: 'asc' },
     });
 
-    let character = characters[0];
-    if (!character) {
-      character = await db.character.create({
+    let activeCharacters = allCharacters.filter((c) => !c.deletedAt);
+    const deletedCharacters = allCharacters
+      .filter((c) => c.deletedAt && new Date(c.deletedAt).getTime() >= cutoff.getTime())
+      .map((c) => ({
+        ...c,
+        daysRemaining: computeDaysRemaining(new Date(c.deletedAt!)),
+      }));
+
+    if (activeCharacters.length === 0 && deletedCharacters.length === 0) {
+      const character = await db.character.create({
         data: {
           userId: user.id,
           name: `${user.username}'s Hero`,
           gameMode: 'STANDARD',
+          appearanceId: 'oni_warlord',
+          avatarSpriteId: 'oni_warlord',
           stats: { create: {} },
           fatigueState: { create: {} },
           equipmentLoadout: { create: {} },
@@ -148,8 +166,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
           equipmentLoadout: true,
         },
       });
-      characters.push(character);
+      activeCharacters = [character];
     }
+
+    const character = activeCharacters[0] ?? null;
 
     const token = app.jwt.sign({
       userId: user.id,
@@ -167,13 +187,16 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
         lastLoginAt: user.lastLoginAt,
       },
       character,
-      characters,
+      characters: activeCharacters,
+      activeCharacters,
+      deletedCharacters,
     });
   });
 
   /**
    * GET /api/auth/me
-   * Protected route: returns the authenticated user session profile & character sheet(s).
+   * Protected route: returns the authenticated user session profile, active character sheet(s),
+   * and restorable soft-deleted characters.
    */
   app.get('/api/auth/me', { preHandler: [requireAuth] }, async (request, reply) => {
     const { userId } = request.user;
@@ -186,7 +209,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       return reply.status(404).send({ error: 'User not found' });
     }
 
-    const characters = await db.character.findMany({
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - SOFT_DELETE_RETENTION_MS);
+
+    const allCharacters = await db.character.findMany({
       where: { userId: user.id },
       include: {
         stats: true,
@@ -196,7 +222,15 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       orderBy: { createdAt: 'asc' },
     });
 
-    const character = characters[0] ?? null;
+    const activeCharacters = allCharacters.filter((c) => !c.deletedAt);
+    const deletedCharacters = allCharacters
+      .filter((c) => c.deletedAt && new Date(c.deletedAt).getTime() >= cutoff.getTime())
+      .map((c) => ({
+        ...c,
+        daysRemaining: computeDaysRemaining(new Date(c.deletedAt!)),
+      }));
+
+    const character = activeCharacters[0] ?? null;
 
     return reply.status(200).send({
       user: {
@@ -207,7 +241,9 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
         lastLoginAt: user.lastLoginAt,
       },
       character,
-      characters,
+      characters: activeCharacters,
+      activeCharacters,
+      deletedCharacters,
     });
   });
 }

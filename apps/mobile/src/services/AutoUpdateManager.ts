@@ -171,6 +171,10 @@ class AutoUpdateManagerService {
    * @param isManual True if triggered by the user tapping "Check for Updates"
    */
   public async checkForUpdates(isManual = false): Promise<AutoUpdateState> {
+    if (!isManual && this.state.isStagedForWorkoutEnd) {
+      return this.getState();
+    }
+
     if (
       this.state.status === 'DOWNLOADING_OTA' ||
       this.state.status === 'CHECKING'
@@ -291,11 +295,18 @@ class AutoUpdateManagerService {
         }
       }
 
-      // If we reached here without returning, the client is up-to-date
-      this.updateState({
-        status: 'UP_TO_DATE',
-        isStagedForWorkoutEnd: false,
-      });
+      // If we reached here without returning, check if an update is already staged
+      if (this.state.isStagedForWorkoutEnd) {
+        this.updateState({
+          status: 'WAITING_FOR_WORKOUT',
+          isStagedForWorkoutEnd: true,
+        });
+      } else {
+        this.updateState({
+          status: isManual ? 'UP_TO_DATE' : 'IDLE',
+          isStagedForWorkoutEnd: false,
+        });
+      }
       return this.getState();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

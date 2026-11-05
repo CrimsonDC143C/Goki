@@ -6,10 +6,14 @@
 export interface SeededRng {
   /** Next float in [0, 1) */
   next(): number;
+  /** Next float in [0, 1) (alias of next) */
+  nextFloat(): number;
   /** Random integer in [min, max] inclusive */
   nextInt(min: number, max: number): number;
   /** Roll probability check in [0, 1] */
   chance(probability: number): boolean;
+  /** Pick random element from non-empty items */
+  pick<T>(items: readonly T[]): T;
   /** Pick weighted entry from non-empty items */
   pickWeighted<T extends { weight: number }>(items: readonly T[]): T;
 }
@@ -70,5 +74,15 @@ export function createSeededRng(seed: string): SeededRng {
     return items[items.length - 1]!;
   };
 
-  return { next, nextInt, chance, pickWeighted };
+  const nextFloat = next;
+
+  const pick = <T>(items: readonly T[]): T => {
+    if (items.length === 0) {
+      throw new Error('Cannot pick from an empty list.');
+    }
+    const idx = Math.floor(next() * items.length);
+    return items[Math.min(idx, items.length - 1)]!;
+  };
+
+  return { next, nextFloat, nextInt, chance, pick, pickWeighted };
 }

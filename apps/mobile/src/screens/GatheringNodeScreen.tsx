@@ -17,8 +17,11 @@ import {
   formatTickInterval,
   MAX_GATHERING_DURATION_MS,
   MIN_GATHERING_DURATION_MS,
+  LootDrop,
 } from '@gymify/game-engine';
+import { Image as ExpoImage } from 'expo-image';
 import { GatheringNodeItem, useGame } from '../state/GameContext';
+import { getItemIconSource } from '../assets/itemArtRegistry';
 import { COLORS, CRIMSON_ONI, RARITY_COLORS } from '../theme';
 
 export type GoalMode = 'TIME' | 'RESOURCE';
@@ -40,6 +43,32 @@ function formatClock(seconds: number): string {
     return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
   return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function getNodeCompactLabel(node: { slug: string; name?: string; title?: string; professionType?: string }): string {
+  const s = node.slug.toLowerCase().replace(/_/g, '-');
+  if (s.includes('iron') || s.includes('mine') || node.professionType === 'MINING') {
+    return '⛏️ Mine Iron';
+  }
+  if (s.includes('whisperwood') || s.includes('forag') || node.professionType === 'FORAGING') {
+    return '🌿 Forage Herbs';
+  }
+  if (s.includes('smelt') || s.includes('obsidian') || s.includes('foundry') || node.professionType === 'SMELTING') {
+    return '🔥 Smelt Ingots';
+  }
+  if (s.includes('alchem') || s.includes('brew') || node.professionType === 'ALCHEMY') {
+    return '⚗️ Brew Elixirs';
+  }
+  const icon =
+    node.professionType === 'MINING'
+      ? '⛏️'
+      : node.professionType === 'FORAGING'
+      ? '🌿'
+      : node.professionType === 'SMELTING'
+      ? '🔥'
+      : '⚗️';
+  const text = (node.name || node.title || 'Gathering Node').trim();
+  return `${icon} ${text.split(' ').slice(0, 2).join(' ')}`;
 }
 
 export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
@@ -89,9 +118,18 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
   // Mode: TIME vs RESOURCE
   const [goalMode, setGoalMode] = useState<GoalMode>('TIME');
   const [targetMinutes, setTargetMinutes] = useState<number>(45);
+  const [sliderTrackWidth, setSliderTrackWidth] = useState<number>(240);
   const [targetResourceCount, setTargetResourceCount] = useState<number>(20);
   const [notifyOnCompletion, setNotifyOnCompletion] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const handleTrackTouch = (locationX: number) => {
+    const width = Math.max(1, sliderTrackWidth);
+    const ratio = Math.max(0, Math.min(1, locationX / width));
+    const raw = 15 + ratio * (120 - 15);
+    const snapped = Math.round(raw / 5) * 5;
+    handleTimeChange(snapped);
+  };
 
   // Live timer tick for active UI
   const [nowMs, setNowMs] = useState<number>(Date.now());
@@ -208,13 +246,17 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
             </Pressable>
           )}
           <View>
-            <Text style={styles.eyebrow}>CRIMSON FORGE • PROFESSION SYSTEM</Text>
             <Text style={styles.title}>{selectedNode.name}</Text>
           </View>
         </View>
 
         {/* Node selector pills */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.nodePillsScroll}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.nodePillsScroll}
+          contentContainerStyle={styles.nodeSelectorRow}
+        >
           {gatheringNodes.map((node) => {
             const isSelected = node.slug === selectedNode.slug;
             const isActive = activeGathering?.node.slug === node.slug;
@@ -223,6 +265,7 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
                 key={node.slug}
                 style={[
                   styles.nodePill,
+                  styles.nodeSelectorPill,
                   isSelected && styles.nodePillSelected,
                   isActive && styles.nodePillActive,
                 ]}
@@ -239,7 +282,7 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
                   ]}
                 >
                   {isActive ? '⏳ ' : ''}
-                  {node.name}
+                  {getNodeCompactLabel(node)}
                 </Text>
               </Pressable>
             );
@@ -314,6 +357,13 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
               <View style={[styles.progressBarFill, { width: `${masterProgressPct}%` }]} />
             </View>
             <View style={styles.accruedRow}>
+              {getItemIconSource(primaryDropItem?.itemSlug) && (
+                <ExpoImage
+                  source={getItemIconSource(primaryDropItem?.itemSlug) as any}
+                  style={{ width: 28, height: 28, borderRadius: 6, marginRight: 8 }}
+                  contentFit="cover"
+                />
+              )}
               <Text style={styles.accruedLabel}>Accrued Yield So Far:</Text>
               <Text style={styles.accruedValue}>
                 +{activeGathering.accumulatedTicks * tickCalc.yieldPerTick}x {primaryItemName}
@@ -331,8 +381,6 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
         <View style={styles.configContainer}>
           {/* Projections Display Card */}
           <View style={styles.projectionCard}>
-            <Text style={styles.sectionHeader}>HERO EFFICIENCY PROJECTIONS</Text>
-
             <View style={styles.metricGrid}>
               <View style={styles.metricCell}>
                 <Text style={styles.metricLabel}>TICK INTERVAL</Text>
@@ -355,13 +403,30 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
 
             {/* Summary Text Callout */}
             <View style={styles.summaryCallout}>
-              <Text style={styles.summaryText}>
-                🗡️ You will complete <Text style={styles.summaryHighlight}>{projection.totalSteps} steps</Text> over{' '}
-                <Text style={styles.summaryHighlight}>{formatDurationSummary(effectiveDurationMs)}</Text>.
-              </Text>
-              <Text style={styles.summaryYieldSub}>
-                Projected Gain: ~{projection.totalYield}x {primaryItemName} • {projection.totalSteps * tickCalc.xpPerTick} XP
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                {getItemIconSource(primaryDropItem?.itemSlug) && (
+                  <ExpoImage
+                    source={getItemIconSource(primaryDropItem?.itemSlug) as any}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 8,
+                      borderWidth: 1.5,
+                      borderColor: CRIMSON_ONI.agedGold,
+                    }}
+                    contentFit="cover"
+                  />
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.summaryText}>
+                    🗡️ You will complete <Text style={styles.summaryHighlight}>{projection.totalSteps} steps</Text> over{' '}
+                    <Text style={styles.summaryHighlight}>{formatDurationSummary(effectiveDurationMs)}</Text>.
+                  </Text>
+                  <Text style={styles.summaryYieldSub}>
+                    Projected Gain: ~{projection.totalYield}x {primaryItemName} • {projection.totalSteps * tickCalc.xpPerTick} XP
+                  </Text>
+                </View>
+              </View>
             </View>
           </View>
 
@@ -390,42 +455,90 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
             </View>
 
             {goalMode === 'TIME' ? (
-              /* TIME GOAL INPUT */
+              /* TIME GOAL INPUT: Smooth Horizontal Step Slider */
               <View style={styles.inputGroup}>
                 <View style={styles.stepperHeader}>
                   <Text style={styles.inputLabel}>Target Time Duration (Cap: 120m):</Text>
                   <Text style={styles.stepperCurrentVal}>{targetMinutes} mins</Text>
                 </View>
 
-                {/* Quick Presets */}
-                <View style={styles.presetsRow}>
-                  {TIME_PRESET_MINUTES.map((m) => (
-                    <Pressable
-                      key={m}
-                      style={[styles.presetChip, targetMinutes === m && styles.presetChipActive]}
-                      onPress={() => handleTimeChange(m)}
-                    >
-                      <Text style={[styles.presetChipText, targetMinutes === m && styles.presetChipTextActive]}>
-                        {m}m
-                      </Text>
-                    </Pressable>
-                  ))}
+                {/* Horizontal Step Slider Control Row */}
+                <View style={styles.sliderControlRow}>
+                  {/* -5m End Cap Button */}
+                  <Pressable
+                    style={styles.sliderEndCapBtn}
+                    onPress={() => handleTimeChange(targetMinutes - 5)}
+                    accessibilityLabel="Decrease 5 minutes"
+                  >
+                    <Text style={styles.sliderEndCapText}>−5m</Text>
+                  </Pressable>
+
+                  {/* Interactive Slider Track */}
+                  <View
+                    style={styles.sliderTrackContainer}
+                    onLayout={(e) => setSliderTrackWidth(e.nativeEvent.layout.width)}
+                    onStartShouldSetResponder={() => true}
+                    onMoveShouldSetResponder={() => true}
+                    onResponderGrant={(e) => handleTrackTouch(e.nativeEvent.locationX)}
+                    onResponderMove={(e) => handleTrackTouch(e.nativeEvent.locationX)}
+                  >
+                    <View style={styles.sliderTrackBackdrop}>
+                      <View
+                        style={[
+                          styles.sliderTrackFill,
+                          {
+                            width: `${Math.max(
+                              0,
+                              Math.min(100, ((targetMinutes - 15) / (120 - 15)) * 100)
+                            )}%`,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <View
+                      style={[
+                        styles.sliderThumb,
+                        {
+                          left: `${Math.max(
+                            0,
+                            Math.min(100, ((targetMinutes - 15) / (120 - 15)) * 100)
+                          )}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+
+                  {/* +5m End Cap Button */}
+                  <Pressable
+                    style={styles.sliderEndCapBtn}
+                    onPress={() => handleTimeChange(targetMinutes + 5)}
+                    accessibilityLabel="Increase 5 minutes"
+                  >
+                    <Text style={styles.sliderEndCapText}>+5m</Text>
+                  </Pressable>
                 </View>
 
-                {/* Fine Adjustment Controls */}
-                <View style={styles.adjustmentRow}>
-                  <Pressable style={styles.adjustBtn} onPress={() => handleTimeChange(targetMinutes - 15)}>
-                    <Text style={styles.adjustBtnText}>−15m</Text>
-                  </Pressable>
-                  <Pressable style={styles.adjustBtn} onPress={() => handleTimeChange(targetMinutes - 5)}>
-                    <Text style={styles.adjustBtnText}>−5m</Text>
-                  </Pressable>
-                  <Pressable style={styles.adjustBtn} onPress={() => handleTimeChange(targetMinutes + 5)}>
-                    <Text style={styles.adjustBtnText}>+5m</Text>
-                  </Pressable>
-                  <Pressable style={styles.adjustBtn} onPress={() => handleTimeChange(targetMinutes + 15)}>
-                    <Text style={styles.adjustBtnText}>+15m</Text>
-                  </Pressable>
+                {/* Canonical Quick-Tap Labels: 30m / 60m / 120m */}
+                <View style={styles.canonicalPresetsRow}>
+                  {[30, 60, 120].map((mins) => {
+                    const active = targetMinutes === mins;
+                    return (
+                      <Pressable
+                        key={mins}
+                        style={[styles.canonicalChip, active && styles.canonicalChipActive]}
+                        onPress={() => handleTimeChange(mins)}
+                      >
+                        <Text
+                          style={[
+                            styles.canonicalChipText,
+                            active && styles.canonicalChipTextActive,
+                          ]}
+                        >
+                          {mins}m
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </View>
             ) : (
@@ -518,19 +631,69 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
       )}
 
       {/* Last Gathering Loot Receipt */}
-      {lastGatheringDrop && (
-        <View style={styles.recentSpoilsCard}>
-          <Text style={styles.recentSpoilsTitle}>🏆 RECENT EXPEDITION SPOILS</Text>
-          {lastGatheringDrop.map((d) => (
-            <Text
-              key={d.itemSlug}
-              style={[styles.recentSpoilsItem, { color: RARITY_COLORS[d.rarity] ?? CRIMSON_ONI.agedGoldBright }]}
-            >
-              +{d.quantity}x {d.itemName} [{d.rarity}]
-            </Text>
-          ))}
-        </View>
-      )}
+      {lastGatheringDrop && (() => {
+        const aggregatedMap = new Map<
+          string,
+          {
+            itemSlug: string;
+            itemName: string;
+            rarity: LootDrop['rarity'];
+            quantity: number;
+            ticks: number;
+          }
+        >();
+
+        for (const drop of lastGatheringDrop) {
+          const existing = aggregatedMap.get(drop.itemSlug);
+          if (existing) {
+            existing.quantity += drop.quantity;
+            existing.ticks += 1;
+          } else {
+            aggregatedMap.set(drop.itemSlug, {
+              itemSlug: drop.itemSlug,
+              itemName: drop.itemName,
+              rarity: drop.rarity,
+              quantity: drop.quantity,
+              ticks: 1,
+            });
+          }
+        }
+
+        const aggregatedList = Array.from(aggregatedMap.values());
+
+        return (
+          <View style={styles.recentSpoilsCard}>
+            <Text style={styles.recentSpoilsTitle}>🏆 RECENT EXPEDITION SPOILS</Text>
+            {aggregatedList.map((d) => {
+              const tickLabel =
+                d.rarity !== 'COMMON' && d.ticks === 1
+                  ? '(1 bonus tick)'
+                  : `(${d.ticks} ${d.ticks === 1 ? 'tick' : 'ticks'})`;
+              const iconSrc = getItemIconSource(d.itemSlug);
+
+              return (
+                <View key={d.itemSlug} style={styles.recentSpoilsItemRow}>
+                  {iconSrc && (
+                    <ExpoImage
+                      source={iconSrc as any}
+                      style={styles.recentSpoilsItemIcon}
+                      contentFit="cover"
+                    />
+                  )}
+                  <Text
+                    style={[
+                      styles.recentSpoilsItem,
+                      { color: RARITY_COLORS[d.rarity] ?? CRIMSON_ONI.agedGoldBright, flex: 1 },
+                    ]}
+                  >
+                    +{d.quantity}x {d.itemName} [{d.rarity}] {tickLabel}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        );
+      })()}
 
       {/* Inventory Satchel Quick View */}
       <View style={styles.satchelCard}>
@@ -540,14 +703,26 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
         ) : (
           inventory
             .filter((i) => i.itemType === 'MATERIAL' || i.itemType === 'CONSUMABLE')
-            .map((item) => (
-              <View key={item.slug} style={styles.satchelRow}>
-                <Text style={[styles.satchelName, { color: RARITY_COLORS[item.rarity] ?? CRIMSON_ONI.ghostWhite }]}>
-                  {item.name}
-                </Text>
-                <Text style={styles.satchelQty}>x{item.quantity}</Text>
-              </View>
-            ))
+            .map((item) => {
+              const iconSrc = getItemIconSource(item.slug);
+              return (
+                <View key={item.slug} style={styles.satchelRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                    {iconSrc && (
+                      <ExpoImage
+                        source={iconSrc as any}
+                        style={styles.satchelItemIcon}
+                        contentFit="cover"
+                      />
+                    )}
+                    <Text style={[styles.satchelName, { color: RARITY_COLORS[item.rarity] ?? CRIMSON_ONI.ghostWhite }]}>
+                      {item.name}
+                    </Text>
+                  </View>
+                  <Text style={styles.satchelQty}>x{item.quantity}</Text>
+                </View>
+              );
+            })
         )}
       </View>
     </ScrollView>
@@ -599,8 +774,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   nodePillsScroll: {
-    flexDirection: 'row',
     marginTop: 4,
+  },
+  nodeSelectorRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
   },
   nodePill: {
     backgroundColor: CRIMSON_ONI.charcoalCard,
@@ -609,7 +789,12 @@ const styles = StyleSheet.create({
     borderColor: CRIMSON_ONI.border,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    marginRight: 8,
+    gap: 5,
+  },
+  nodeSelectorPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 5,
   },
   nodePillSelected: {
     borderColor: CRIMSON_ONI.agedGold,
@@ -1028,6 +1213,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: 6,
   },
+  recentSpoilsItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  recentSpoilsItemIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
+  },
   recentSpoilsItem: {
     fontSize: 13,
     fontWeight: '800',
@@ -1047,10 +1245,19 @@ const styles = StyleSheet.create({
   },
   satchelRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: CRIMSON_ONI.border,
+  },
+  satchelItemIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 4,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
   },
   satchelName: {
     fontSize: 12,
@@ -1059,6 +1266,90 @@ const styles = StyleSheet.create({
   satchelQty: {
     color: CRIMSON_ONI.ghostWhite,
     fontSize: 12,
+    fontWeight: '900',
+  },
+  sliderControlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 10,
+  },
+  sliderEndCapBtn: {
+    backgroundColor: CRIMSON_ONI.charcoalElevated,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minWidth: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sliderEndCapText: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  sliderTrackContainer: {
+    flex: 1,
+    height: 36,
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  sliderTrackBackdrop: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: CRIMSON_ONI.charcoalDeep,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
+    overflow: 'hidden',
+  },
+  sliderTrackFill: {
+    height: '100%',
+    backgroundColor: CRIMSON_ONI.agedGoldBright,
+    borderRadius: 4,
+  },
+  sliderThumb: {
+    position: 'absolute',
+    top: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: CRIMSON_ONI.agedGoldBright,
+    borderWidth: 2,
+    borderColor: CRIMSON_ONI.ghostWhite,
+    marginLeft: -12,
+    shadowColor: CRIMSON_ONI.agedGoldBright,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  canonicalPresetsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 6,
+  },
+  canonicalChip: {
+    backgroundColor: CRIMSON_ONI.charcoalElevated,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  canonicalChipActive: {
+    borderColor: CRIMSON_ONI.agedGoldBright,
+    backgroundColor: 'rgba(212, 160, 23, 0.16)',
+  },
+  canonicalChipText: {
+    color: CRIMSON_ONI.ashMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  canonicalChipTextActive: {
+    color: CRIMSON_ONI.agedGoldBright,
     fontWeight: '900',
   },
 });

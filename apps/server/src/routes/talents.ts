@@ -35,8 +35,16 @@ export function registerTalentRoutes(app: FastifyInstance, db: PrismaClient): vo
     }
 
     const unlockedNodeRanks: Record<string, number> = {};
+    const spentByStat: Record<string, number> = {};
     for (const unlock of character.talentUnlocks) {
       unlockedNodeRanks[unlock.talentNode.slug] = unlock.currentRank;
+      const tree = DEFAULT_TALENT_TREES.find((t) =>
+        t.nodes.some((n) => n.id === unlock.talentNode.slug)
+      );
+      if (tree) {
+        const spent = unlock.pointsSpent ?? unlock.currentRank ?? 0;
+        spentByStat[tree.governingStat] = (spentByStat[tree.governingStat] ?? 0) + spent;
+      }
     }
 
     const spendRes = spendTalentPoint(
@@ -45,6 +53,18 @@ export function registerTalentRoutes(app: FastifyInstance, db: PrismaClient): vo
           STRENGTH: character.stats.strengthTalentPointsAvailable,
           ENDURANCE: character.stats.enduranceTalentPointsAvailable,
           AGILITY: character.stats.agilityTalentPointsAvailable,
+          DEXTERITY:
+            (character.stats as any).dexterityTalentPointsAvailable ??
+            Math.max(0, (character.dexLevel ?? 5) - (spentByStat.DEXTERITY ?? 0)),
+          CONSTITUTION:
+            (character.stats as any).constitutionTalentPointsAvailable ??
+            Math.max(0, (character.conLevel ?? 5) - (spentByStat.CONSTITUTION ?? 0)),
+          WISDOM:
+            (character.stats as any).wisdomTalentPointsAvailable ??
+            Math.max(0, (character.wisLevel ?? 5) - (spentByStat.WISDOM ?? 0)),
+          SPIRIT:
+            (character.stats as any).spiritTalentPointsAvailable ??
+            Math.max(0, (character.sprLevel ?? 5) - (spentByStat.SPIRIT ?? 0)),
         },
         unlockedNodeRanks,
       },
@@ -112,26 +132,25 @@ export function registerTalentRoutes(app: FastifyInstance, db: PrismaClient): vo
       },
     });
 
-    const statUpdateData =
-      spendRes.governingStat === 'STRENGTH'
-        ? {
-            strengthTalentPointsAvailable: { decrement: spendRes.pointsSpent },
-            strengthTalentPointsSpent: { increment: spendRes.pointsSpent },
-          }
-        : spendRes.governingStat === 'ENDURANCE'
-          ? {
-              enduranceTalentPointsAvailable: { decrement: spendRes.pointsSpent },
-              enduranceTalentPointsSpent: { increment: spendRes.pointsSpent },
-            }
-          : {
-              agilityTalentPointsAvailable: { decrement: spendRes.pointsSpent },
-              agilityTalentPointsSpent: { increment: spendRes.pointsSpent },
-            };
+    let updatedStats = character.stats;
+    const statUpdateData: any = {};
+    if (spendRes.governingStat === 'STRENGTH') {
+      statUpdateData.strengthTalentPointsAvailable = { decrement: spendRes.pointsSpent };
+      statUpdateData.strengthTalentPointsSpent = { increment: spendRes.pointsSpent };
+    } else if (spendRes.governingStat === 'ENDURANCE') {
+      statUpdateData.enduranceTalentPointsAvailable = { decrement: spendRes.pointsSpent };
+      statUpdateData.enduranceTalentPointsSpent = { increment: spendRes.pointsSpent };
+    } else if (spendRes.governingStat === 'AGILITY') {
+      statUpdateData.agilityTalentPointsAvailable = { decrement: spendRes.pointsSpent };
+      statUpdateData.agilityTalentPointsSpent = { increment: spendRes.pointsSpent };
+    }
 
-    const updatedStats = await db.characterStats.update({
-      where: { characterId },
-      data: statUpdateData,
-    });
+    if (Object.keys(statUpdateData).length > 0) {
+      updatedStats = await db.characterStats.update({
+        where: { characterId },
+        data: statUpdateData,
+      });
+    }
 
     const aggregatedTalents = aggregateTalentModifiers(spendRes.nextState.unlockedNodeRanks);
 

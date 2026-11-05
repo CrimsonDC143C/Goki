@@ -251,3 +251,5 @@ export function getLootChestSpriteUri(tier?: string): string {
   if (t === 'RARE') return LOOT_SPRITES.chest_rare ?? LOOT_SPRITES.chest_common ?? '';
   return LOOT_SPRITES.chest_common ?? '';
 }
+
+export * from '../../src/assets/characterArtRegistry';

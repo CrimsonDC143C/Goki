@@ -21,6 +21,10 @@ import {
   resolveSetCompletionTransition,
   calculateDynamicRestPlan,
   DynamicRestMode,
+  CompletedWorkoutRecord,
+  CompletedExerciseEntry,
+  PostWorkoutEncouragementSummary,
+  evaluatePostWorkoutSummary,
 } from '@gymify/game-engine';
 import { useGame } from '../state/GameContext';
 import { CRIMSON_ONI } from '../theme';
@@ -31,6 +35,7 @@ import { ActivityPickerModal } from '../components/ActivityPickerModal';
 import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { cancelRestTimerNotification, requestNotificationPermissions } from '../utils/restNotifications';
+import { OfflineDraftExerciseBlock } from '../utils/offlineStorage';
 
 export interface OfflineWorkoutScreenProps {
   onFinishAndReturn: () => void;
@@ -71,6 +76,8 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     updateOfflineDraft,
     resetOfflineDraft,
     completeOfflineWorkout,
+    workoutHistory,
+    consistencyStreak,
     presets,
     savePreset,
     deletePreset,
@@ -95,6 +102,10 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showPresetDesigner, setShowPresetDesigner] = useState<boolean>(false);
   const [showTrainingHistory, setShowTrainingHistory] = useState<boolean>(false);
+  const [postWorkoutSummary, setPostWorkoutSummary] = useState<PostWorkoutEncouragementSummary | null>(null);
+  const [sessionPresetTemplate, setSessionPresetTemplate] = useState<WorkoutPresetDefinition | null>(null);
+  const [editingPresetDraft, setEditingPresetDraft] = useState<WorkoutPresetDefinition | null>(null);
+  const [presetSavedInSession, setPresetSavedInSession] = useState<boolean>(false);
 
   const filteredResistanceExercises = useMemo(() => {
     const q = exerciseSearchQuery.trim().toLowerCase();
@@ -107,10 +118,14 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   // Dynamic Rest Timer State
   const [restTargetEndTimeMs, setRestTargetEndTimeMs] = useState<number | null>(null);
   const [restTotalSeconds, setRestTotalSeconds] = useState<number>(90);
+  const [restStartedAtMs, setRestStartedAtMs] = useState<number | null>(null);
+  const [customRestDurationSec, setCustomRestDurationSec] = useState<number | null>(null);
+  const [restRecommendedSec, setRestRecommendedSec] = useState<number>(90);
   const [restMode, setRestMode] = useState<DynamicRestMode>('WORKING_REST');
   const [restHeadline, setRestHeadline] = useState<string>('');
   const [restSubtext, setRestSubtext] = useState<string>('');
   const [restCenterModalVisible, setRestCenterModalVisible] = useState<boolean>(false);
+  const [scrollOffsetY, setScrollOffsetY] = useState<number>(0);
 
   // Cardio / Recovery quick entry state
   const [selectedCardioId, setSelectedCardioId] = useState<string>(
@@ -245,6 +260,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     // If user unchecked a set, cancel any running rest timer
     if (!justCompleted) {
       setRestTargetEndTimeMs(null);
+      setRestStartedAtMs(null);
       setRestCenterModalVisible(false);
       cancelRestTimerNotification().catch(() => {});
       return;
@@ -263,6 +279,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       if (!hasRemainingSets) {
         // Entire workout completed! Clear timer and play fanfare
         setRestTargetEndTimeMs(null);
+        setRestStartedAtMs(null);
         setRestCenterModalVisible(false);
         cancelRestTimerNotification().catch(() => {});
         triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
@@ -291,8 +308,16 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
         nextSupersetMemberLabel: transition.nextSupersetMemberLabel,
       });
 
-      setRestTotalSeconds(plan.seconds);
-      setRestTargetEndTimeMs(Date.now() + plan.seconds * 1000);
+      const startedMs = Date.now();
+      const effectiveSec =
+        customRestDurationSec !== null && plan.mode === 'WORKING_REST'
+          ? customRestDurationSec
+          : plan.seconds;
+
+      setRestRecommendedSec(plan.seconds);
+      setRestStartedAtMs(startedMs);
+      setRestTotalSeconds(effectiveSec);
+      setRestTargetEndTimeMs(startedMs + effectiveSec * 1000);
       setRestMode(plan.mode);
       setRestHeadline(plan.headline);
       setRestSubtext(plan.subtext);
@@ -525,36 +550,196 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     }));
   };
 
-  const handleRestAdjustDelta = useCallback((delta: number) => {
-    setRestTargetEndTimeMs((prev) => (prev ? prev + delta * 1000 : null));
-  }, []);
+  const handleLoadSessionIntoWorkout = useCallback(
+    (workout: CompletedWorkoutRecord) => {
+      const nowMs = Date.now();
+      const blocks: OfflineDraftExerciseBlock[] = (workout.exercises || []).map((ex, bIdx) => ({
+        blockId: `blk_hist_${nowMs}_${bIdx + 1}`,
+        exerciseId: ex.exerciseId,
+        exerciseName: ex.exerciseName || ex.exerciseId,
+        supersetGroupId: null,
+        sets: (ex.sets || []).map((s, sIdx) => ({
+          id: `set_hist_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
+          weightKgStr: String(s.weightKg ?? 0),
+          repsStr: String(s.reps ?? 0),
+          isWarmup: s.setType === 'WARMUP' || !!s.isWarmup,
+          setType: s.setType || 'NORMAL',
+          rpe: s.rpe ?? 8.5,
+          supersetGroupId: null,
+          completed: false,
+        })),
+      }));
+
+      updateOfflineDraft((prev) => ({
+        ...prev,
+        category: 'GYM',
+        exerciseBlocks: blocks,
+        sourcePresetId: workout.presetName ? `preset_${workout.presetName}` : null,
+      }));
+      setShowTrainingHistory(false);
+      triggerSensoryCue('WORKOUT_PRESET_LOADED');
+    },
+    [updateOfflineDraft]
+  );
+
+  const handleRestSelectPreset = useCallback(
+    (targetSec: number) => {
+      setCustomRestDurationSec(targetSec);
+      const now = Date.now();
+      const anchorStartMs =
+        restStartedAtMs ??
+        (restTargetEndTimeMs !== null ? restTargetEndTimeMs - restTotalSeconds * 1000 : now);
+
+      const nextEndMs = anchorStartMs + targetSec * 1000;
+      if (nextEndMs <= now) {
+        setRestTargetEndTimeMs(null);
+        setRestStartedAtMs(null);
+        setRestTotalSeconds(targetSec);
+        setRestCenterModalVisible(false);
+        cancelRestTimerNotification().catch(() => {});
+        triggerSensoryCue('REST_TIMER_EXPIRED');
+      } else {
+        setRestStartedAtMs(anchorStartMs);
+        setRestTotalSeconds(targetSec);
+        setRestTargetEndTimeMs(nextEndMs);
+      }
+    },
+    [restStartedAtMs, restTargetEndTimeMs, restTotalSeconds]
+  );
+
+  const handleRestAdjustDelta = useCallback(
+    (delta: number) => {
+      if (restTargetEndTimeMs === null) return;
+      const now = Date.now();
+      const anchorStartMs = restStartedAtMs ?? (restTargetEndTimeMs - restTotalSeconds * 1000);
+      const rawNextEndMs = restTargetEndTimeMs + delta * 1000;
+
+      if (rawNextEndMs <= now) {
+        setRestTargetEndTimeMs(null);
+        setRestStartedAtMs(null);
+        setRestCenterModalVisible(false);
+        cancelRestTimerNotification().catch(() => {});
+        triggerSensoryCue('REST_TIMER_EXPIRED');
+      } else {
+        const remainingMs = rawNextEndMs - now;
+        const cappedRemainingMs = Math.min(600_000, remainingMs);
+        const nextEndMs = now + cappedRemainingMs;
+        const nextConfiguredSec = Math.max(
+          10,
+          Math.min(600, Math.round((nextEndMs - anchorStartMs) / 1000))
+        );
+        setRestStartedAtMs(anchorStartMs);
+        setRestTotalSeconds(nextConfiguredSec);
+        setRestTargetEndTimeMs(nextEndMs);
+      }
+    },
+    [restStartedAtMs, restTargetEndTimeMs, restTotalSeconds]
+  );
 
   const handleRestSkip = useCallback(() => {
     setRestTargetEndTimeMs(null);
+    setRestStartedAtMs(null);
     setRestCenterModalVisible(false);
     cancelRestTimerNotification().catch(() => {});
   }, []);
 
   const handleRestComplete = useCallback(() => {
-    setRestTargetEndTimeMs(null);
-    setRestCenterModalVisible(false);
+    // Rest duration elapsed: keep active in 0:00 completed state so user can acknowledge via button
   }, []);
 
   const handleFinishWorkout = () => {
     setRestTargetEndTimeMs(null);
+    setRestStartedAtMs(null);
     setRestCenterModalVisible(false);
     cancelRestTimerNotification().catch(() => {});
+
+    // Build current session's CompletedWorkoutRecord matching completed sets logic
+    const historyExercises: CompletedExerciseEntry[] = [];
+    for (const block of offlineDraft.exerciseBlocks) {
+      const completedRows = block.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
+      if (completedRows.length > 0) {
+        historyExercises.push({
+          exerciseId: block.exerciseId,
+          exerciseName: block.exerciseName || block.exerciseId,
+          sets: completedRows.map((s, idx) => ({
+            setNumber: idx + 1,
+            weightKg: Math.max(0, Number(s.weightKgStr) || 0),
+            reps: Math.floor(Number(s.repsStr) || 0),
+            rpe: s.rpe ?? null,
+            setType: s.setType,
+            isWarmup: s.isWarmup,
+          })),
+        });
+      }
+    }
+
+    const validCardio = offlineDraft.cardioEntries.filter((c) => c.durationSeconds > 0);
+
+    const nowMs = Date.now();
+    const currentWorkout: CompletedWorkoutRecord = {
+      id: `offline_hist_${nowMs}`,
+      source: 'OFFLINE',
+      performedAtIso: new Date(nowMs).toISOString(),
+      durationSeconds: sessionElapsedSec,
+      workoutCategory: offlineDraft.category ?? 'GYM',
+      workoutType: 'HYBRID',
+      exercises: historyExercises,
+    };
+
+    const summary = evaluatePostWorkoutSummary({
+      currentWorkout,
+      previousWorkouts: workoutHistory,
+      consistencyStreak: consistencyStreak + 1,
+      cardioSegmentCount: validCardio.length,
+    });
+
+    const draftTemplate: WorkoutPresetDefinition = {
+      id: '',
+      slug: '',
+      name: '',
+      category: offlineDraft.category ?? 'GYM',
+      notes: '',
+      isSystemSeed: false,
+      blocks: {
+        exerciseBlocks: offlineDraft.exerciseBlocks.map((b) => {
+          const completedSets = b.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
+          const chosenSets = completedSets.length > 0 ? completedSets : b.sets;
+          return {
+            blockId: b.blockId,
+            exerciseSlug: b.exerciseId,
+            exerciseName: b.exerciseName || b.exerciseId,
+            supersetGroupId: b.supersetGroupId ?? undefined,
+            sets: chosenSets.map((s) => ({
+              targetWeightKg: Math.max(0, Number(s.weightKgStr) || 0),
+              targetReps: Math.max(1, Math.floor(Number(s.repsStr) || 0)),
+              setType: s.setType || 'NORMAL',
+              targetRpe: s.rpe ?? 8.5,
+            })),
+          };
+        }),
+        cardioSegments: offlineDraft.cardioEntries.map((c, idx) => ({
+          segmentId: c.id || `seg_${idx + 1}`,
+          exerciseSlug: c.exerciseId,
+          exerciseName: c.exerciseName,
+          activityType: c.activityType,
+          targetDurationMinutes: Math.max(1, Math.round(c.durationSeconds / 60)),
+          targetHrZone: c.averageHrZone,
+          targetRpe: c.rpe ?? null,
+        })),
+        sessionRpeTarget: offlineDraft.sessionRpe ?? null,
+      },
+    };
+
     const res = completeOfflineWorkout();
     if (!res.ok) {
       setValidationError(res.error ?? 'Complete at least one set or cardio entry first.');
       return;
     }
-    setValidationError(null);
-    onFinishAndReturn();
-  };
 
-  const handleSaveAsPreset = () => {
-    setShowPresetDesigner(true);
+    setValidationError(null);
+    setPostWorkoutSummary(summary);
+    setSessionPresetTemplate(draftTemplate);
+    setPresetSavedInSession(false);
   };
 
   const showResistanceUI = !activeCategory || activeCategory === 'GYM' || secondaryCategories.includes('GYM');
@@ -584,14 +769,6 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           <Text style={styles.sessionClock}>{formatClock(sessionElapsedSec)}</Text>
           <Text style={styles.savedStatusText}>● Saved locally</Text>
         </View>
-
-        <Pressable
-          style={styles.finishTopBtn}
-          onPress={handleFinishWorkout}
-          testID="finish-offline-workout-btn"
-        >
-          <Text style={styles.finishTopBtnText}>Finish Workout</Text>
-        </Pressable>
       </View>
 
       {/* Pinned Rest Timer Fixed at Top of Viewable Screen (visible when rest active & minimized from center) */}
@@ -608,13 +785,21 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
             onComplete={handleRestComplete}
             variant="banner"
             onTapToFocus={() => setRestCenterModalVisible(true)}
+            onSelectPreset={handleRestSelectPreset}
+            recommendedSeconds={restRecommendedSec}
+            scrollOffsetY={scrollOffsetY}
           />
         </View>
       ) : null}
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          restTargetEndTimeMs && !restCenterModalVisible ? styles.scrollContentWithPinnedTimer : null,
+        ]}
         keyboardShouldPersistTaps="handled"
+        onScroll={(e) => setScrollOffsetY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
       >
         {validationError && (
           <View style={styles.validationBox}>
@@ -643,13 +828,6 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
             <View style={styles.sectionHeaderRow}>
               <View style={styles.sectionHeadingGroup}>
                 <Text style={styles.sectionHeading}>RESISTANCE SETS</Text>
-                <TouchableOpacity
-                  style={styles.sectionHistoryPill}
-                  onPress={() => setShowTrainingHistory(true)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.sectionHistoryPillText}>📊 History</Text>
-                </TouchableOpacity>
               </View>
               <Text style={styles.sectionCountMeta}>
                 {completedSetCount} set{completedSetCount === 1 ? '' : 's'} checked
@@ -997,33 +1175,169 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           </View>
         )}
 
-        {/* Save Session as Preset Action */}
+        {/* Finish Workout Action (Prominent Bottom Button) */}
         <View style={styles.presetSaveContainer}>
           <TouchableOpacity
-            style={styles.savePresetBtn}
-            onPress={handleSaveAsPreset}
+            style={styles.finishWorkoutBottomBtn}
+            onPress={handleFinishWorkout}
             activeOpacity={0.7}
+            testID="finish-offline-workout-btn"
           >
-            <Text style={styles.savePresetBtnText}>💾 Save Session as Routine Preset</Text>
+            <Text style={styles.finishWorkoutBottomBtnText}>🏁 Finish Workout</Text>
           </TouchableOpacity>
         </View>
 
         {/* Preset Designer Modal */}
         <PresetDesignerModal
           visible={showPresetDesigner}
+          editingPreset={editingPresetDraft}
           onSavePreset={(preset) => {
             savePreset(preset);
+            setPresetSavedInSession(true);
             triggerSensoryCue('WORKOUT_PRESET_LOADED');
             Alert.alert('Preset Saved', `Routine "${preset.name}" has been saved.`);
           }}
           onDeletePreset={deletePreset}
-          onClose={() => setShowPresetDesigner(false)}
+          onClose={() => {
+            setShowPresetDesigner(false);
+            setEditingPresetDraft(null);
+          }}
         />
+
+        {/* Post-Workout Summary & Encouragement Modal */}
+        <Modal
+          visible={postWorkoutSummary !== null && !showPresetDesigner}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setPostWorkoutSummary(null);
+            onFinishAndReturn();
+          }}
+        >
+          <View style={styles.postWorkoutOverlay}>
+            <View style={styles.postWorkoutCard}>
+              <View style={styles.postWorkoutHeader}>
+                <Text style={styles.postWorkoutHeadline}>
+                  {postWorkoutSummary?.headline}
+                </Text>
+                <Text style={styles.postWorkoutEncouragementText}>
+                  {postWorkoutSummary?.encouragingMessage}
+                </Text>
+              </View>
+
+              {postWorkoutSummary?.hasImprovements ? (
+                <ScrollView
+                  style={styles.improvementsScroll}
+                  contentContainerStyle={styles.improvementsScrollContent}
+                >
+                  <Text style={styles.improvementsSectionTitle}>
+                    LIFT PROGRESSION HIGHLIGHTS
+                  </Text>
+                  {postWorkoutSummary.improvements.map((imp) => (
+                    <View key={imp.exerciseId} style={styles.improvementCard}>
+                      <View style={styles.improvementCardLeft}>
+                        <Text style={styles.improvementExName}>{imp.exerciseName}</Text>
+                        <Text style={styles.improvementDetailText}>{imp.detailText}</Text>
+                      </View>
+                      <View style={styles.improvementCardRight}>
+                        <Text style={styles.improvementTopSet}>{imp.topSetLabel}</Text>
+                        <View
+                          style={[
+                            styles.improvementBadgePill,
+                            imp.isAllTimePr && styles.prBadgePill,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.improvementBadgeText,
+                              imp.isAllTimePr && styles.prBadgeText,
+                            ]}
+                          >
+                            {imp.improvementBadge}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              ) : (
+                <View style={styles.effortStatsContainer}>
+                  <View style={styles.effortStatPill}>
+                    <Text style={styles.effortStatIcon}>🔥</Text>
+                    <Text style={styles.effortStatValue}>
+                      {postWorkoutSummary?.streakCount ?? 1} Session{(postWorkoutSummary?.streakCount ?? 1) === 1 ? '' : 's'}
+                    </Text>
+                    <Text style={styles.effortStatLabel}>Streak Sustained</Text>
+                  </View>
+                  <View style={styles.effortStatPill}>
+                    <Text style={styles.effortStatIcon}>✓</Text>
+                    <Text style={styles.effortStatValue}>
+                      {postWorkoutSummary?.totalCompletedSets ?? 0} Sets
+                    </Text>
+                    <Text style={styles.effortStatLabel}>Completed</Text>
+                  </View>
+                  <View style={styles.effortStatPill}>
+                    <Text style={styles.effortStatIcon}>💪</Text>
+                    <Text style={styles.effortStatValue}>
+                      {(postWorkoutSummary?.totalTonnageKg ?? 0) > 0
+                        ? `${postWorkoutSummary?.totalTonnageKg}kg`
+                        : 'Habit Banked'}
+                    </Text>
+                    <Text style={styles.effortStatLabel}>
+                      {(postWorkoutSummary?.totalTonnageKg ?? 0) > 0 ? 'Total Tonnage' : 'Effort Logged'}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.postWorkoutActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.postWorkoutSavePresetBtn,
+                    presetSavedInSession && styles.postWorkoutSavePresetBtnSuccess,
+                  ]}
+                  onPress={() => {
+                    if (sessionPresetTemplate) {
+                      setEditingPresetDraft(sessionPresetTemplate);
+                      setShowPresetDesigner(true);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                  testID="post-workout-save-preset-btn"
+                >
+                  <Text
+                    style={[
+                      styles.postWorkoutSavePresetBtnText,
+                      presetSavedInSession && styles.postWorkoutSavePresetBtnTextSuccess,
+                    ]}
+                  >
+                    {presetSavedInSession
+                      ? '✓ Routine Preset Saved'
+                      : '💾 Save Session as Routine Preset'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.postWorkoutContinueBtn}
+                  onPress={() => {
+                    setPostWorkoutSummary(null);
+                    onFinishAndReturn();
+                  }}
+                  activeOpacity={0.7}
+                  testID="post-workout-continue-btn"
+                >
+                  <Text style={styles.postWorkoutContinueBtnText}>Continue →</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         {/* Training History Matrix Page Modal */}
         <TrainingHistoryScreen
           visible={showTrainingHistory}
           onBack={() => setShowTrainingHistory(false)}
+          onLoadSessionIntoWorkout={handleLoadSessionIntoWorkout}
         />
       </ScrollView>
 
@@ -1092,6 +1406,8 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
               onComplete={handleRestComplete}
               variant="hero"
               onMinimize={() => setRestCenterModalVisible(false)}
+              onSelectPreset={handleRestSelectPreset}
+              recommendedSeconds={restRecommendedSec}
             />
           </Pressable>
         </Pressable>
@@ -1229,15 +1545,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   pinnedRestContainer: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    backgroundColor: '#16151A',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2B2930',
+    position: 'absolute',
+    top: 56,
+    left: 12,
+    right: 12,
+    zIndex: 50,
+    elevation: 8,
+  },
+  scrollContentWithPinnedTimer: {
+    paddingTop: 68,
   },
   restModalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(7, 6, 10, 0.82)',
+    backgroundColor: 'rgba(10, 12, 18, 0.82)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -1794,8 +2114,30 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   presetSaveContainer: {
-    marginTop: 12,
+    marginTop: 14,
     alignItems: 'center',
+    marginBottom: 8,
+  },
+  finishWorkoutBottomBtn: {
+    backgroundColor: '#5E1924',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#C69A45',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  finishWorkoutBottomBtnText: {
+    color: '#FDE68A',
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   savePresetBtn: {
     backgroundColor: '#26242B',
@@ -1811,5 +2153,182 @@ const styles = StyleSheet.create({
     color: '#FDE68A',
     fontSize: 12,
     fontWeight: '800',
+  },
+  postWorkoutOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  postWorkoutCard: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: '#1C1B20',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    padding: 18,
+    shadowColor: '#C69A45',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  postWorkoutHeader: {
+    marginBottom: 14,
+    alignItems: 'center',
+  },
+  postWorkoutHeadline: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#FDE68A',
+    textAlign: 'center',
+    letterSpacing: 0.4,
+    marginBottom: 8,
+  },
+  postWorkoutEncouragementText: {
+    fontSize: 13,
+    color: '#D1D5DB',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  improvementsScroll: {
+    maxHeight: 220,
+    marginVertical: 10,
+  },
+  improvementsScrollContent: {
+    gap: 8,
+  },
+  improvementsSectionTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#C69A45',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  improvementCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#26242B',
+    borderColor: '#3D3A44',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  improvementCardLeft: {
+    flex: 1,
+    marginRight: 8,
+  },
+  improvementExName: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#F3F4F6',
+  },
+  improvementDetailText: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginTop: 2,
+  },
+  improvementCardRight: {
+    alignItems: 'flex-end',
+  },
+  improvementTopSet: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#E5E7EB',
+    marginBottom: 4,
+  },
+  improvementBadgePill: {
+    backgroundColor: '#382810',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  improvementBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FDE68A',
+  },
+  prBadgePill: {
+    backgroundColor: '#4A1D24',
+    borderColor: '#EF4444',
+  },
+  prBadgeText: {
+    color: '#FCA5A5',
+  },
+  effortStatsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginVertical: 14,
+  },
+  effortStatPill: {
+    flex: 1,
+    backgroundColor: '#26242B',
+    borderColor: '#3D3A44',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+  },
+  effortStatIcon: {
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  effortStatValue: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#FDE68A',
+    textAlign: 'center',
+  },
+  effortStatLabel: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  postWorkoutActions: {
+    marginTop: 14,
+    gap: 10,
+  },
+  postWorkoutSavePresetBtn: {
+    backgroundColor: '#26242B',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  postWorkoutSavePresetBtnSuccess: {
+    backgroundColor: '#1E3A2F',
+    borderColor: '#10B981',
+  },
+  postWorkoutSavePresetBtnText: {
+    color: '#FDE68A',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  postWorkoutSavePresetBtnTextSuccess: {
+    color: '#6EE7B7',
+  },
+  postWorkoutContinueBtn: {
+    backgroundColor: '#5E1924',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  postWorkoutContinueBtnText: {
+    color: '#FDE68A',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
 });

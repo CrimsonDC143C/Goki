@@ -35,6 +35,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   const {
     characterName,
     characterArtUri,
+    appearanceId,
     overallLevel,
     adventurerRank,
     location,
@@ -125,7 +126,8 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         <View style={styles.heroSection}>
           <CharacterPortraitFrame
             variant="hero"
-            height={286}
+            height={360}
+            appearanceId={appearanceId}
             imageSource={characterImageSource ?? characterArtUri}
           >
             <View style={styles.nameplateBanner}>
@@ -358,6 +360,7 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     marginBottom: 16,
+    alignItems: 'center',
   },
   heroManageRow: {
     marginTop: 8,
@@ -372,6 +375,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     marginTop: 8,
     alignItems: 'center',
+    alignSelf: 'stretch',
   },
   heroManageBtnText: {
     color: CRIMSON_ONI.agedGoldBright,

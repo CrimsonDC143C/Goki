@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Image,
+  Animated,
   ImageSourcePropType,
   Modal,
   Pressable,
@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SvgXml } from 'react-native-svg';
+import Svg, { Polygon, SvgXml } from 'react-native-svg';
 import {
   EQUIPMENT_SLOTS,
   EquipmentSlot,
@@ -20,12 +20,15 @@ import {
   isCharacterProgressionUnlocked,
   validateEquipmentRequirements,
   xpRequiredForStatLevel,
+  ITEM_TIER_CONFIG,
+  ItemTier,
 } from '@gymify/game-engine';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { AttributeRadarChart } from '../components/AttributeRadarChart';
 import { BugReportModal } from '../components/BugReportModal';
 import { CharacterManagerModal } from '../components/CharacterManagerModal';
 import { DeveloperTriageModal } from '../components/DeveloperTriageModal';
+import { Image as ExpoImage } from 'expo-image';
 import { autoUpdateManager, AutoUpdateState } from '../services/AutoUpdateManager';
 import { audioManager } from '../services/AudioManager';
 import {
@@ -34,11 +37,12 @@ import {
   useGame,
 } from '../state/GameContext';
 import {
-  HUD_SVGS,
+  CHARACTER_SILHOUETTE_SVG,
   LOOT_CHEST_SVGS,
   RANK_CREST_SVGS,
   STAT_GLYPH_SVGS,
 } from '../assets/v0Vault';
+import { getItemIconSource } from '../assets/itemArtRegistry';
 import { COLORS, CRIMSON_ONI, RARITY_COLORS } from '../theme';
 
 export interface CharacterProfileScreenProps {
@@ -112,7 +116,29 @@ export const HOLISTIC_STATS: readonly {
   },
 ];
 
-type BagFilter = 'ALL' | 'EQUIPMENT' | 'CONSUMABLES' | 'MATERIALS';
+const TOP_HEX_KEYS: HolisticStatType[] = ['AGILITY', 'DEXTERITY'];
+const MID_HEX_KEYS: HolisticStatType[] = ['STRENGTH', 'CONSTITUTION', 'ENDURANCE'];
+const BOT_HEX_KEYS: HolisticStatType[] = ['SPIRIT', 'WISDOM'];
+const STAT_BY_KEY = Object.fromEntries(HOLISTIC_STATS.map((m) => [m.key, m]));
+const HEX_PERIMETER = 298;
+
+type SatchelFilter =
+  | 'ALL'
+  | 'WEAPONS'
+  | 'ARMOR'
+  | 'ACCESSORIES'
+  | 'CONSUMABLES'
+  | 'MATERIALS';
+
+type InventorySort = 'RARITY' | 'TYPE' | 'QUANTITY';
+
+const RARITY_WEIGHT: Record<string, number> = {
+  LEGENDARY: 5,
+  EPIC: 4,
+  RARE: 3,
+  UNCOMMON: 2,
+  COMMON: 1,
+};
 
 const SLOT_ICONS: Record<EquipmentSlot, string> = {
   mainHand: '⚔️',
@@ -124,6 +150,60 @@ const SLOT_ICONS: Record<EquipmentSlot, string> = {
   accessory1: '💍',
   accessory2: '📿',
 };
+
+const LEFT_PAPERDOLL_SLOTS: { slot: EquipmentSlot; label: string; icon: string }[] = [
+  { slot: 'head', label: 'Helm', icon: '🪖' },
+  { slot: 'chest', label: 'Chest', icon: '🥋' },
+  { slot: 'legs', label: 'Greaves', icon: '👖' },
+  { slot: 'boots', label: 'Boots', icon: '🥾' },
+];
+
+const RIGHT_PAPERDOLL_SLOTS: { slot: EquipmentSlot; label: string; icon: string }[] = [
+  { slot: 'mainHand', label: 'Main', icon: '⚔️' },
+  { slot: 'offHand', label: 'Off', icon: '🛡️' },
+  { slot: 'accessory1', label: 'Ring', icon: '💍' },
+  { slot: 'accessory2', label: 'Amulet', icon: '📿' },
+];
+
+function getItemArtworkGlyph(
+  item?: InventoryEntry | null,
+  slotFallback?: EquipmentSlot
+): string {
+  if (!item) {
+    if (slotFallback) return SLOT_ICONS[slotFallback] ?? '🛡️';
+    return '📦';
+  }
+  const type = (item.itemType as string) ?? '';
+  if (type === 'WEAPON') {
+    if (item.weaponHandedness === 'TWO_HANDED') return '🗡️';
+    return '⚔️';
+  }
+  if (type === 'OFFHAND') return '🛡️';
+  if (type === 'HEAD') return '🪖';
+  if (type === 'CHEST') return '🥋';
+  if (type === 'LEGS') return '👖';
+  if (type === 'BOOTS') return '🥾';
+  if (type === 'ACCESSORY') {
+    const n = item.name.toLowerCase();
+    if (n.includes('ring') || n.includes('band')) return '💍';
+    if (n.includes('amulet') || n.includes('pendant') || n.includes('necklace')) return '📿';
+    return '✨';
+  }
+  if (type === 'CONSUMABLE') {
+    const n = item.name.toLowerCase();
+    if (n.includes('elixir') || n.includes('potion')) return '🧪';
+    if (n.includes('meat') || n.includes('food') || n.includes('ration')) return '🍖';
+    return '🍶';
+  }
+  if (type === 'CRAFTING_MATERIAL' || type === 'MATERIAL') {
+    const n = item.name.toLowerCase();
+    if (n.includes('ore') || n.includes('ingot') || n.includes('metal')) return '⛏️';
+    if (n.includes('herb') || n.includes('flower') || n.includes('leaf')) return '🌿';
+    if (n.includes('gem') || n.includes('crystal') || n.includes('shard')) return '💎';
+    return '🪵';
+  }
+  return '📦';
+}
 
 function formatEquipmentBonuses(bonuses?: EquipmentStatBonuses): string {
   if (!bonuses) return 'Utility / Crafting Item';
@@ -143,6 +223,30 @@ function formatEquipmentBonuses(bonuses?: EquipmentStatBonuses): string {
   return parts.length > 0 ? parts.join(' • ') : 'Standard Gear';
 }
 
+function getCompactItemBadge(item: InventoryEntry): string {
+  const parts: string[] = [];
+  const b = item.statBonuses;
+  if (b) {
+    if (b.meleePower) parts.push(`+${b.meleePower} ATK`);
+    if (b.armorRating) parts.push(`+${b.armorRating} DEF`);
+    if (b.maxHp) parts.push(`+${b.maxHp} HP`);
+    if (b.maxStamina) parts.push(`+${b.maxStamina} STA`);
+    if (b.critChance) parts.push(`+${Math.round(b.critChance * 100)}% CRT`);
+    if (b.dodgeRating) parts.push(`+${Math.round(b.dodgeRating * 100)}% DDG`);
+    if (b.attackSpeedPct) parts.push(`+${Math.round(b.attackSpeedPct * 100)}% SPD`);
+  }
+
+  if (item.requiredStrength) parts.push(`${item.requiredStrength} STR`);
+  if (item.requiredEndurance) parts.push(`${item.requiredEndurance} CON`);
+  if (item.requiredAgility) parts.push(`${item.requiredAgility} AGI`);
+
+  if (parts.length > 0) {
+    const main = parts.slice(0, 2).join(' | ');
+    return item.weaponHandedness === 'TWO_HANDED' ? `${main} | 2H` : main;
+  }
+  return item.weaponHandedness === 'TWO_HANDED' ? `${item.rarity} | 2H` : item.rarity;
+}
+
 export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   onJumpToTalents,
   characterImageSource,
@@ -150,11 +254,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   const {
     characterName,
     characterArtUri,
+    appearanceId,
     overallLevel,
     adventurerRank,
-    guildName,
-    gold,
-    location,
     stats,
     fatigueState,
     nextWorkoutMultiplier,
@@ -172,13 +274,20 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     unequipSlot,
     toggleEquipItem,
     gameMode,
+    activeCharacterId,
+    currentUser,
   } = useGame();
 
   const progressionUnlocked = isCharacterProgressionUnlocked(workoutMachine.phase);
 
   const [charManagerModalVisible, setCharManagerModalVisible] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>('mainHand');
-  const [bagFilter, setBagFilter] = useState<BagFilter>('ALL');
+  const [charManagerInitialCustomizeId, setCharManagerInitialCustomizeId] = useState<string | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<EquipmentSlot | null>(null);
+  const [isSatchelOpen, setIsSatchelOpen] = useState(true);
+  const [satchelFilter, setSatchelFilter] = useState<SatchelFilter>('ALL');
+  const [inventorySort, setInventorySort] = useState<InventorySort>('RARITY');
+  const [inspectedItem, setInspectedItem] = useState<InventoryEntry | null>(null);
+  const [showCompare, setShowCompare] = useState<boolean>(false);
   const [gearFeedback, setGearFeedback] = useState<{
     tone: 'error' | 'info';
     text: string;
@@ -191,6 +300,16 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     autoUpdateManager.getState()
   );
   const [isMuted, setIsMuted] = useState<boolean>(audioManager.isMuted());
+
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const itemTappedRef = useRef(false);
+
+  const tooltipParallaxY = scrollY.interpolate({
+    inputRange: [-50, 0, 50, 100],
+    outputRange: [4, 0, -2, -4],
+    extrapolate: 'clamp',
+  });
 
   useEffect(() => {
     return autoUpdateManager.subscribe(setUpdateState);
@@ -228,18 +347,49 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     [stats]
   );
 
-  const filteredBagItems = useMemo(() => {
-    switch (bagFilter) {
-      case 'EQUIPMENT':
-        return inventory.filter(isEquippableInventoryEntry);
-      case 'CONSUMABLES':
-        return inventory.filter((i) => i.itemType === 'CONSUMABLE');
-      case 'MATERIALS':
-        return inventory.filter((i) => i.itemType === 'MATERIAL');
-      case 'ALL':
-        return inventory;
-    }
-  }, [bagFilter, inventory]);
+  const unboundItems = useMemo(() => {
+    return inventory.filter((item) => !item.equipped);
+  }, [inventory]);
+
+  const filteredSatchelItems = useMemo(() => {
+    const items = unboundItems.filter((i) => {
+      const type = (i.itemType as string) ?? '';
+      switch (satchelFilter) {
+        case 'WEAPONS':
+          return type === 'WEAPON';
+        case 'ARMOR':
+          return ['HEAD', 'CHEST', 'LEGS', 'BOOTS', 'OFFHAND'].includes(type);
+        case 'ACCESSORIES':
+          return type === 'ACCESSORY';
+        case 'CONSUMABLES':
+          return type === 'CONSUMABLE';
+        case 'MATERIALS':
+          return type === 'CRAFTING_MATERIAL' || type === 'MATERIAL';
+        case 'ALL':
+        default:
+          return true;
+      }
+    });
+
+    return [...items].sort((a, b) => {
+      if (inventorySort === 'RARITY') {
+        const diff = (RARITY_WEIGHT[b.rarity] ?? 0) - (RARITY_WEIGHT[a.rarity] ?? 0);
+        if (diff !== 0) return diff;
+        return a.name.localeCompare(b.name);
+      }
+      if (inventorySort === 'TYPE') {
+        const typeComp = ((a.itemType as string) ?? '').localeCompare((b.itemType as string) ?? '');
+        if (typeComp !== 0) return typeComp;
+        return a.name.localeCompare(b.name);
+      }
+      if (inventorySort === 'QUANTITY') {
+        const qDiff = (b.quantity ?? 1) - (a.quantity ?? 1);
+        if (qDiff !== 0) return qDiff;
+        return a.name.localeCompare(b.name);
+      }
+      return 0;
+    });
+  }, [satchelFilter, inventorySort, unboundItems]);
 
   const selectedSlotItem = selectedSlot
     ? (() => {
@@ -257,10 +407,27 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     });
   }, [equipmentLoadout, inventory, selectedSlot]);
 
-  const statColor = (st: string) => {
-    const found = HOLISTIC_STATS.find((h) => h.key === st);
-    return found ? found.color : COLORS.textPrimary;
-  };
+  // Compute total equipped item power
+  const totalItemPower = useMemo(() => {
+    let power = 0;
+    for (const slotKey of Object.keys(equipmentLoadout) as EquipmentSlot[]) {
+      const slug = equipmentLoadout[slotKey];
+      if (slug) {
+        const item = inventoryBySlug.get(slug);
+        if (item?.statBonuses) {
+          power += (item.statBonuses.meleePower ?? 0) * 2;
+          power += (item.statBonuses.armorRating ?? 0) * 1.5;
+          power += (item.statBonuses.maxHp ?? 0) * 0.5;
+          power += (item.statBonuses.maxStamina ?? 0) * 0.5;
+          power += Math.round((item.statBonuses.critChance ?? 0) * 100);
+          power += Math.round((item.statBonuses.dodgeRating ?? 0) * 100);
+        } else {
+          power += 15;
+        }
+      }
+    }
+    return Math.round(power);
+  }, [equipmentLoadout, inventoryBySlug]);
 
   const handleEquipToSelectedSlot = (slug: string, slot: EquipmentSlot) => {
     if (!progressionUnlocked) {
@@ -375,8 +542,173 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     };
   })();
 
+  const renderHexStat = (key: HolisticStatType) => {
+    const meta = STAT_BY_KEY[key];
+    if (!meta) return null;
+    const s = stats[meta.key];
+    const nextReq = xpRequiredForStatLevel(s.level);
+    const pct = Math.min(100, Math.round((s.xp / nextReq) * 100));
+
+    return (
+      <Pressable
+        key={meta.key}
+        style={styles.hexPressable}
+        onPress={() => onJumpToTalents?.(meta.key)}
+        testID={`profile-stat-tile-${meta.key}`}
+      >
+        <Svg width={96} height={108} viewBox="0 0 96 108" style={styles.hexSvg}>
+          <Polygon
+            points="48,4 91,28 91,80 48,104 5,80 5,28"
+            fill="#141722"
+            stroke="#2A2F3D"
+            strokeWidth={2}
+          />
+          {pct > 0 && (
+            <>
+              <Polygon
+                points="48,4 91,28 91,80 48,104 5,80 5,28"
+                fill="none"
+                stroke="#C084FC"
+                strokeWidth={5}
+                strokeOpacity={0.35}
+                strokeDasharray={`${HEX_PERIMETER} ${HEX_PERIMETER}`}
+                strokeDashoffset={HEX_PERIMETER * (1 - pct / 100)}
+                strokeLinecap="round"
+              />
+              <Polygon
+                points="48,4 91,28 91,80 48,104 5,80 5,28"
+                fill="none"
+                stroke="#A855F7"
+                strokeWidth={2.5}
+                strokeDasharray={`${HEX_PERIMETER} ${HEX_PERIMETER}`}
+                strokeDashoffset={HEX_PERIMETER * (1 - pct / 100)}
+                strokeLinecap="round"
+              />
+            </>
+          )}
+        </Svg>
+        <View style={styles.hexContent}>
+          {STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS] ? (
+            <SvgXml
+              xml={STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS]}
+              width={18}
+              height={18}
+            />
+          ) : (
+            <Text style={{ fontSize: 14 }}>{meta.emoji}</Text>
+          )}
+          <Text style={[styles.hexStatCode, { color: meta.color }]}>{meta.abbrev}</Text>
+          <Text style={styles.hexLevelText}>Lv.{s.level}</Text>
+          {s.pointsAvailable > 0 ? (
+            <View style={styles.hexTalentBadge}>
+              <Text style={styles.hexTalentBadgeText}>+{s.pointsAvailable}</Text>
+            </View>
+          ) : (
+            <Text style={styles.hexXpPct}>{pct}%</Text>
+          )}
+        </View>
+      </Pressable>
+    );
+  };
+
+  const renderPaperdollSlot = (slot: EquipmentSlot, label: string, icon: string) => {
+    const equippedSlug = equipmentLoadout[slot];
+    const item = equippedSlug ? inventoryBySlug.get(equippedSlug) ?? null : null;
+    const isSelected = inspectedItem?.slug === item?.slug && item !== null;
+    const rarityBorder = item
+      ? RARITY_COLORS[item.rarity] ?? COLORS.borderHighlight
+      : '#2A2F3D';
+    const itemIconSrc = item ? getItemIconSource(item) : null;
+
+    return (
+      <Pressable
+        key={slot}
+        style={[
+          styles.paperdollSlotTile,
+          { borderColor: rarityBorder },
+          isSelected && styles.paperdollSlotTileSelected,
+        ]}
+        onPress={() => {
+          if (item) {
+            itemTappedRef.current = true;
+            setTimeout(() => {
+              itemTappedRef.current = false;
+            }, 60);
+            setInspectedItem((prev) => (prev?.slug === item.slug ? null : item));
+            setShowCompare(false);
+          } else {
+            setSelectedSlot(slot);
+            setIsSatchelOpen(true);
+            if (slot === 'mainHand') setSatchelFilter('WEAPONS');
+            else if (['head', 'chest', 'legs', 'boots', 'offHand'].includes(slot))
+              setSatchelFilter('ARMOR');
+            else if (['accessory1', 'accessory2'].includes(slot))
+              setSatchelFilter('ACCESSORIES');
+          }
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} slot: ${item ? item.name : 'Empty'}`}
+        testID={`paperdoll-slot-${slot}`}
+      >
+        {itemIconSrc ? (
+          <ExpoImage
+            source={itemIconSrc as any}
+            style={styles.paperdollItemImage}
+            contentFit="cover"
+          />
+        ) : (
+          <>
+            <Text style={styles.paperdollSlotIcon}>{getItemArtworkGlyph(item, slot)}</Text>
+            <Text style={styles.paperdollSlotLabel} numberOfLines={1}>
+              {label.toUpperCase()}
+            </Text>
+          </>
+        )}
+
+        {item ? (
+          <View
+            style={[
+              styles.paperdollTierBadge,
+              { backgroundColor: rarityBorder },
+            ]}
+          >
+            <Text style={styles.paperdollTierBadgeText}>
+              {item.tier ? `T${item.tier}` : item.weaponHandedness === 'TWO_HANDED' ? '2H' : '•'}
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
+    );
+  };
+
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent}>
+    <View style={{ flex: 1, position: 'relative' }}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: inspectedItem ? 420 : 40 },
+        ]}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: false }
+        )}
+        scrollEventThrottle={16}
+        onTouchStart={(e) => {
+          touchStartPos.current = {
+            x: e.nativeEvent.pageX,
+            y: e.nativeEvent.pageY,
+          };
+        }}
+        onTouchEnd={(e) => {
+          if (itemTappedRef.current) return;
+          if (!touchStartPos.current) return;
+          const dx = e.nativeEvent.pageX - touchStartPos.current.x;
+          const dy = e.nativeEvent.pageY - touchStartPos.current.y;
+          if (Math.hypot(dx, dy) < 6) {
+            setInspectedItem(null);
+          }
+        }}
+      >
       {/* 1. Conditional Unclaimed Training Spoils Chest Banner */}
       {pendingWorkoutReceipts.length > 0 && consolidatedSpoils && (
         <View style={styles.spoilsChestCard}>
@@ -407,102 +739,84 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
         </View>
       )}
 
-      {/* 2. Character Header & Status Summary */}
-      <View style={styles.characterHeaderCard}>
-        <View style={styles.headerTopRow}>
-          <CharacterPortraitFrame
-            variant="avatar"
-            height={78}
-            imageSource={characterImageSource ?? characterArtUri}
-          />
-
-          <View style={styles.identityCol}>
-            <View style={styles.nameLevelRow}>
-              <Text style={styles.heroName} numberOfLines={1}>
-                {characterName}
-              </Text>
-              <View style={styles.overallLevelPill}>
-                <Text style={styles.overallLevelText}>Lv.{overallLevel}</Text>
-              </View>
-              <Pressable
-                style={styles.heroRosterPill}
-                onPress={() => setCharManagerModalVisible(true)}
-                testID="profile-open-roster-btn"
-              >
-                <Text style={styles.heroRosterPillText}>
-                  {gameMode === 'IRONMAN_VERIFIED' ? '🛡️ Ironman' : '⚔️ Standard'}
-                </Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.guildSubtitleRow}>
-              {RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS] ? (
-                <SvgXml
-                  xml={RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS]}
-                  width={20}
-                  height={20}
-                />
-              ) : null}
-              <Text style={styles.guildSubtitle}>
-                {adventurerRank} Adventurer • {guildName}
-              </Text>
-            </View>
-
-            <View style={styles.badgeStrip}>
-              <View style={styles.goldBadge}>
-                <Text style={styles.goldBadgeText}>🪙 {gold}g</Text>
-              </View>
-              <View style={styles.locationBadge}>
-                <Text style={styles.locationBadgeText}>📍 {location}</Text>
-              </View>
-              <Pressable
-                style={[styles.audioMuteBtn, isMuted && styles.audioMuteBtnActive]}
-                onPress={() => void audioManager.toggleMute()}
-              >
-                <Text style={[styles.audioMuteBtnText, isMuted && styles.audioMuteBtnTextActive]}>
-                  {isMuted ? '🔇 Muted' : '🔊 SFX'}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={styles.bugReportBtn}
-                onPress={() => setBugReportModalVisible(true)}
-              >
-                <Text style={styles.bugReportBtnText}>🐛 Report Bug</Text>
-              </Pressable>
-              <Pressable
-                style={styles.devTriageBtn}
-                onPress={() => setDevTriageModalVisible(true)}
-              >
-                <Text style={styles.devTriageBtnText}>🛠️ Dev Triage</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.updateCheckBtn,
-                  (updateState.status === 'CHECKING' ||
-                    updateState.status === 'DOWNLOADING_OTA') &&
-                    styles.updateCheckBtnDisabled,
-                ]}
-                onPress={() => void autoUpdateManager.checkForUpdates(true)}
-                disabled={
-                  updateState.status === 'CHECKING' ||
-                  updateState.status === 'DOWNLOADING_OTA'
-                }
-              >
-                <Text style={styles.updateCheckBtnText}>
-                  {updateState.status === 'CHECKING'
-                    ? '⏳ Checking...'
-                    : updateState.status === 'DOWNLOADING_OTA'
-                    ? '📥 Fetching...'
-                    : '🔄 Updates'}
-                </Text>
-                <View style={styles.versionBadgeInline}>
-                  <Text style={styles.versionBadgeInlineText}>
-                    v{updateState.currentVersion}
-                  </Text>
-                </View>
-              </Pressable>
-            </View>
+      {/* 2. Deduplicated Sleek Utility Header Bar */}
+      <View style={styles.utilityHeaderCard}>
+        <View style={styles.utilityTopRow}>
+          <View style={styles.utilityIdentityCluster}>
+            {RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS] ? (
+              <SvgXml
+                xml={RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS]}
+                width={26}
+                height={26}
+              />
+            ) : null}
+            <Text style={styles.utilityHeroName} numberOfLines={1}>
+              {characterName}
+            </Text>
           </View>
+          <Pressable
+            style={styles.heroRosterPill}
+            onPress={() => setCharManagerModalVisible(true)}
+            testID="profile-open-roster-btn"
+          >
+            <Text style={styles.heroRosterPillText}>
+              {gameMode === 'IRONMAN_VERIFIED' ? '🛡️ Ironman' : '⚔️ Standard'}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.utilityBottomRow}>
+          <Pressable
+            style={[styles.utilityBtn, isMuted && styles.utilityBtnActive]}
+            onPress={() => void audioManager.toggleMute()}
+            testID="profile-audio-mute-btn"
+          >
+            <Text style={[styles.utilityBtnText, isMuted && styles.utilityBtnTextActive]}>
+              {isMuted ? '🔇 Muted' : '🔊 SFX'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.utilityBtn}
+            onPress={() => setBugReportModalVisible(true)}
+            testID="profile-open-bug-report-btn"
+          >
+            <Text style={styles.utilityBtnText}>🐛 Bug</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.utilityBtn, styles.utilityBtnGold]}
+            onPress={() => setDevTriageModalVisible(true)}
+            testID="profile-open-triage-btn"
+          >
+            <Text style={[styles.utilityBtnText, styles.utilityBtnTextGold]}>🛠️ Triage</Text>
+          </Pressable>
+
+          <Pressable
+            style={[
+              styles.utilityBtn,
+              (updateState.status === 'CHECKING' ||
+                updateState.status === 'DOWNLOADING_OTA') &&
+                styles.utilityBtnDisabled,
+            ]}
+            onPress={() => void autoUpdateManager.checkForUpdates(true)}
+            disabled={
+              updateState.status === 'CHECKING' ||
+              updateState.status === 'DOWNLOADING_OTA'
+            }
+            testID="profile-check-updates-btn"
+          >
+            <Text style={styles.utilityBtnText}>
+              {updateState.status === 'CHECKING'
+                ? '⏳'
+                : updateState.status === 'DOWNLOADING_OTA'
+                ? '📥'
+                : '🔄'}
+            </Text>
+            <View style={styles.versionBadgeInline}>
+              <Text style={styles.versionBadgeInlineText}>v{updateState.currentVersion}</Text>
+            </View>
+          </Pressable>
         </View>
 
         {/* Fatigue & Rest Status Pill + Summary */}
@@ -531,103 +845,31 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
         )}
       </View>
 
-      {/* 3. 7-Stat Holistic Progression System Breakdown */}
-      <View style={styles.statsSectionHeaderRow}>
-        <Text style={styles.sectionTitle}>7-Stat Holistic Progression System</Text>
-        <View style={styles.statsOverallBadge}>
-          <Text style={styles.statsOverallBadgeText}>Overall Lv.{overallLevel}</Text>
-        </View>
-      </View>
-
-      {/* 7-Stat Attribute Radar Overview (v0 Vault) */}
+      {/* 3. Attribute Radar Synergy (Clean, Tight Card) */}
       <View style={styles.radarCard}>
-        <View style={styles.radarHeaderRow}>
-          <View>
-            <Text style={styles.radarTitle}>Attribute Radar Synergy</Text>
-            <Text style={styles.radarSubtitle}>Multi-Discipline Fitness Distribution</Text>
-          </View>
-          <View style={styles.radarPill}>
-            <Text style={styles.radarPillText}>7 STAT MATRIX</Text>
-          </View>
-        </View>
         <View style={styles.radarImageContainer}>
-          <AttributeRadarChart stats={stats} height={220} />
+          <AttributeRadarChart stats={stats} height={210} />
         </View>
       </View>
 
-      <View style={styles.statsStack}>
-        {HOLISTIC_STATS.map((meta) => {
-          const s = stats[meta.key];
-          const nextReq = xpRequiredForStatLevel(s.level);
-          const pct = Math.min(100, Math.round((s.xp / nextReq) * 100));
-
-          return (
-            <View key={meta.key} style={styles.statCard}>
-              <View style={styles.statCardTop}>
-                <View style={styles.statTitleCluster}>
-                  {STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS] ? (
-                    <View style={[styles.statGlyphBox, { borderColor: meta.color }]}>
-                      <SvgXml
-                        xml={STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS]}
-                        width={28}
-                        height={28}
-                      />
-                    </View>
-                  ) : (
-                    <Text style={styles.statEmoji}>{meta.emoji}</Text>
-                  )}
-                  <View>
-                    <Text style={[styles.statLabel, { color: meta.color }]}>
-                      {meta.name.toUpperCase()} ({meta.abbrev})
-                    </Text>
-                    <Text style={styles.statHintText}>{meta.modalityHint}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.statRightCluster}>
-                  <Text style={styles.statLevel}>Lv.{s.level}</Text>
-                  {s.pointsAvailable > 0 ? (
-                    <Pressable
-                      style={styles.talentPtActionBadge}
-                      onPress={() => onJumpToTalents?.(meta.key)}
-                    >
-                      <Text style={styles.talentPtActionText}>
-                        ✨ {s.pointsAvailable} Pt{s.pointsAvailable === 1 ? '' : 's'} →
-                      </Text>
-                    </Pressable>
-                  ) : (
-                    <Text style={styles.zeroTalentText}>0 Pts</Text>
-                  )}
-                </View>
-              </View>
-
-              <View style={styles.xpBarTrack}>
-                <View
-                  style={[
-                    styles.xpBarFill,
-                    { width: `${pct}%`, backgroundColor: meta.color },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.xpCaptionRow}>
-                <Text style={styles.xpCaptionText}>
-                  {s.xp} / {nextReq} XP ({pct}%)
-                </Text>
-                <Text style={styles.xpCaptionMuted}>
-                  {nextReq - s.xp} XP to Lv.{s.level + 1}
-                </Text>
-              </View>
-            </View>
-          );
-        })}
+      {/* 2–3–2 Pointy-Top Hexagonal Stat Honeycomb Grid */}
+      <View style={styles.statHoneycombGrid} testID="stat-honeycomb-grid">
+        <View style={styles.hexRow}>
+          {TOP_HEX_KEYS.map((k) => renderHexStat(k))}
+        </View>
+        <View style={[styles.hexRow, styles.hexMidRow]}>
+          {MID_HEX_KEYS.map((k) => renderHexStat(k))}
+        </View>
+        <View style={[styles.hexRow, styles.hexBotRow]}>
+          {BOT_HEX_KEYS.map((k) => renderHexStat(k))}
+        </View>
       </View>
 
       {/* Combat Derived Attributes Summary */}
       <View style={styles.derivedCard}>
         <View style={styles.derivedHeaderRow}>
           <Text style={styles.derivedTitle}>Combat Derived Attributes</Text>
-          <Text style={styles.derivedSubtitle}>Base + 8-Slot Gear + 10 Talent Trees</Text>
+          <Text style={styles.derivedSubtitle}>Base + 8-Slot Gear + Talent Trees</Text>
         </View>
 
         <View style={styles.derivedGrid}>
@@ -709,329 +951,791 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
         </View>
       )}
 
-      {/* 4. 8-Slot Equipped Gear Loadout (2x4 Grid) */}
+      {/* 4. Visual RPG Paperdoll Equipment Layout */}
       <View style={styles.sectionHeaderInline}>
-        <Text style={styles.sectionTitle}>8-Slot Equipped Gear Loadout</Text>
-        <Text style={styles.sectionHint}>Tap a slot to inspect or swap</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.sectionTitle}>Equipped Armaments Paperdoll</Text>
+          <Text style={styles.sectionHint}>Tap any slot to inspect or equip from satchel</Text>
+        </View>
+        <View style={styles.sectionHeaderRightActions}>
+          <Pressable
+            style={styles.appearanceHeaderBtn}
+            onPress={() => {
+              setCharManagerInitialCustomizeId(activeCharacterId ?? null);
+              setCharManagerModalVisible(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Customize Character Appearance"
+            testID="profile-customize-appearance-btn"
+          >
+            <Text style={styles.appearanceHeaderBtnText}>🎨 Appearance</Text>
+          </Pressable>
+          <View style={styles.itemPowerHeaderBadge}>
+            <Text style={styles.itemPowerHeaderBadgeText}>⚡ Power {totalItemPower}</Text>
+          </View>
+        </View>
       </View>
 
-      <View style={styles.loadoutGrid}>
-        {EQUIPMENT_SLOTS.map((descriptor) => {
-          const equippedSlug = equipmentLoadout[descriptor.slot];
-          const item = equippedSlug ? inventoryBySlug.get(equippedSlug) ?? null : null;
-          const isSelected = selectedSlot === descriptor.slot;
-          const rarityBorder = item
-            ? RARITY_COLORS[item.rarity] ?? COLORS.borderHighlight
-            : CRIMSON_ONI.border;
+      <View style={styles.paperdollLayoutContainer}>
+        {/* Left Column (4 Slots: Helm, Chest, Greaves, Boots) */}
+        <View style={styles.paperdollSideColumn}>
+          {LEFT_PAPERDOLL_SLOTS.map((s) => renderPaperdollSlot(s.slot, s.label, s.icon))}
+        </View>
 
-          return (
-            <Pressable
-              key={descriptor.slot}
-              style={[
-                styles.slotTile,
-                { borderColor: rarityBorder },
-                isSelected && styles.slotTileSelected,
-              ]}
-              onPress={() =>
-                setSelectedSlot((prev) =>
-                  prev === descriptor.slot ? null : descriptor.slot
-                )
-              }
-            >
-              <View style={styles.slotTopRow}>
-                <Text style={styles.slotIcon}>{SLOT_ICONS[descriptor.slot]}</Text>
-                <Text style={styles.slotLabel} numberOfLines={1}>
-                  {descriptor.shortLabel}
-                </Text>
-              </View>
-
-              {item ? (
-                <>
-                  <Text
-                    style={[
-                      styles.slotItemName,
-                      { color: RARITY_COLORS[item.rarity] ?? CRIMSON_ONI.ghostWhite },
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {item.name}
-                  </Text>
-                  <Text style={styles.slotItemRarity}>
-                    {item.rarity}
-                    {item.weaponHandedness === 'TWO_HANDED' ? ' • 2H' : ''}
-                  </Text>
-                </>
-              ) : (
-                <Text style={styles.slotEmptyText}>Empty Slot</Text>
-              )}
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {/* Selected Slot Inspector & Swap Drawer */}
-      {selectedSlot && (
-        <View style={styles.slotInspectorCard}>
-          <View style={styles.inspectorHeaderRow}>
-            <Text style={styles.inspectorTitle}>
-              {SLOT_ICONS[selectedSlot]}{' '}
-              {EQUIPMENT_SLOTS.find((s) => s.slot === selectedSlot)?.label} Slot
+        {/* Center Paperdoll Frame */}
+        <Pressable
+          style={styles.paperdollCenterFrame}
+          onPress={() => {
+            setCharManagerInitialCustomizeId(activeCharacterId ?? null);
+            setCharManagerModalVisible(true);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Customize Character Appearance"
+        >
+          <CharacterPortraitFrame
+            variant="hero"
+            height={330}
+            bottomClearance={30}
+            appearanceId={appearanceId}
+            imageSource={characterImageSource ?? characterArtUri}
+          />
+          <View style={styles.paperdollCenterBaseBadge}>
+            {RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS] ? (
+              <SvgXml
+                xml={RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS]}
+                width={18}
+                height={18}
+              />
+            ) : null}
+            <Text style={styles.paperdollCenterBaseText} numberOfLines={1}>
+              {adventurerRank} • Power {totalItemPower}
             </Text>
-            {selectedSlotItem && (
-              <Pressable
-                style={[
-                  styles.unequipBtn,
-                  !progressionUnlocked && styles.btnDisabled,
-                ]}
-                onPress={() => {
-                  if (!progressionUnlocked) {
-                    setGearFeedback({
-                      tone: 'error',
-                      text: 'Finish your active workout session before unequipping gear.',
-                    });
-                    return;
-                  }
-                  unequipSlot(selectedSlot);
-                  setGearFeedback(null);
-                }}
-              >
-                <Text style={styles.unequipBtnText}>Unequip</Text>
-              </Pressable>
-            )}
+          </View>
+        </Pressable>
+
+        {/* Right Column (4 Slots: Main Hand, Off-Hand, Ring 1, Amulet 2) */}
+        <View style={styles.paperdollSideColumn}>
+          {RIGHT_PAPERDOLL_SLOTS.map((s) => renderPaperdollSlot(s.slot, s.label, s.icon))}
+        </View>
+      </View>
+
+      {/* 5. Collapsible Satchel Drawer */}
+      <Pressable
+        style={styles.satchelToggleHeader}
+        onPress={() => setIsSatchelOpen((prev) => !prev)}
+        testID="profile-satchel-toggle-btn"
+      >
+        <View style={styles.satchelToggleTitleCluster}>
+          <Text style={styles.satchelIcon}>🎒</Text>
+          <View>
+            <Text style={styles.satchelHeading}>
+              {isSatchelOpen ? 'Close Satchel Drawer' : 'Open Satchel Drawer'}
+            </Text>
+            <Text style={styles.satchelSubtitle}>
+              {unboundItems.length} Unbound Item{unboundItems.length === 1 ? '' : 's'}, Consumables &amp; Materials
+            </Text>
+          </View>
+        </View>
+        <View style={styles.satchelChevronPill}>
+          <Text style={styles.satchelChevronText}>{isSatchelOpen ? '▲ Hide' : '▼ Open'}</Text>
+        </View>
+      </Pressable>
+
+      {isSatchelOpen && (
+        <View style={styles.satchelDrawerBody}>
+          {/* Satchel Category Filter Tabs */}
+          <View style={styles.filterTabsRow}>
+            {(
+              [
+                { key: 'ALL', label: `All (${unboundItems.length})` },
+                {
+                  key: 'WEAPONS',
+                  label: `Weapons (${unboundItems.filter((i) => i.itemType === 'WEAPON').length})`,
+                },
+                {
+                  key: 'ARMOR',
+                  label: `Armor (${unboundItems.filter((i) => ['HEAD', 'CHEST', 'LEGS', 'BOOTS', 'OFFHAND'].includes(i.itemType)).length})`,
+                },
+                {
+                  key: 'ACCESSORIES',
+                  label: `Accessories (${unboundItems.filter((i) => i.itemType === 'ACCESSORY').length})`,
+                },
+                {
+                  key: 'CONSUMABLES',
+                  label: `Consumables (${unboundItems.filter((i) => i.itemType === 'CONSUMABLE').length})`,
+                },
+                {
+                  key: 'MATERIALS',
+                  label: `Materials (${unboundItems.filter((i) => ['MATERIAL', 'CRAFTING_MATERIAL'].includes(i.itemType)).length})`,
+                },
+              ] as const
+            ).map((tab) => {
+              const active = satchelFilter === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  style={[styles.filterPill, active && styles.filterPillActive]}
+                  onPress={() => setSatchelFilter(tab.key)}
+                >
+                  <Text
+                    style={[styles.filterPillText, active && styles.filterPillTextActive]}
+                  >
+                    {tab.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
 
-          {selectedSlotItem ? (
-            <View style={styles.equippedDetailBox}>
-              <Text
-                style={[
-                  styles.equippedDetailName,
-                  {
-                    color:
-                      RARITY_COLORS[selectedSlotItem.rarity] ?? CRIMSON_ONI.ghostWhite,
-                  },
-                ]}
+          {/* Sort By Controls Bar */}
+          <View style={styles.sortBarRow}>
+            <Text style={styles.sortBarLabel}>Sort By:</Text>
+            {(['RARITY', 'TYPE', 'QUANTITY'] as const).map((mode) => (
+              <Pressable
+                key={mode}
+                style={[styles.sortChip, inventorySort === mode && styles.sortChipActive]}
+                onPress={() => setInventorySort(mode)}
               >
-                {selectedSlotItem.name} [{selectedSlotItem.rarity}]
-              </Text>
-              <Text style={styles.equippedDetailStats}>
-                {formatEquipmentBonuses(selectedSlotItem.statBonuses)}
-              </Text>
-              <Text style={styles.equippedDetailReq}>
-                Req: STR {selectedSlotItem.requiredStrength ?? 0} • END{' '}
-                {selectedSlotItem.requiredEndurance ?? 0} • AGI{' '}
-                {selectedSlotItem.requiredAgility ?? 0}
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.emptyInspectorNote}>
-              No gear currently equipped in this slot.
-              {selectedSlot === 'offHand' &&
-              equipmentLoadout.mainHand &&
-              inventoryBySlug.get(equipmentLoadout.mainHand)?.weaponHandedness ===
-                'TWO_HANDED'
-                ? ' (Main Hand currently holds a Two-Handed weapon; equipping Off-Hand will unequip it.)'
-                : ''}
-            </Text>
-          )}
+                <Text
+                  style={[
+                    styles.sortChipText,
+                    inventorySort === mode && styles.sortChipTextActive,
+                  ]}
+                >
+                  {mode === 'RARITY' ? '💎 Rarity' : mode === 'TYPE' ? '🏷️ Type' : '📦 Quantity'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
 
-          {compatibleSwapItems.length > 0 && (
-            <View style={styles.swapSection}>
-              <Text style={styles.swapHeading}>Swap / Equip From Bag:</Text>
-              {compatibleSwapItems.map((candidate) => {
-                const check = validateEquipmentRequirements(
-                  candidate,
-                  coreStatsBlock,
-                  selectedSlot
-                );
+          <View style={styles.bagCard}>
+            {filteredSatchelItems.length === 0 ? (
+              <Text style={styles.emptyBagText}>No unbound items in this category.</Text>
+            ) : (
+              filteredSatchelItems.map((item) => {
+                const equippable = isEquippableInventoryEntry(item);
+                const rarityCol = RARITY_COLORS[item.rarity] ?? CRIMSON_ONI.ghostWhite;
+                const reqCheck = equippable
+                  ? validateEquipmentRequirements(item, coreStatsBlock)
+                  : { valid: true, unmetStats: [] as StatType[] };
+                const isInspecting = inspectedItem?.slug === item.slug;
+
                 return (
-                  <View key={candidate.slug} style={styles.swapRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.swapItemName,
-                          {
-                            color:
-                              RARITY_COLORS[candidate.rarity] ?? CRIMSON_ONI.ghostWhite,
-                          },
-                        ]}
-                      >
-                        {candidate.name}
+                  <Pressable
+                    key={item.slug}
+                    style={[styles.bagItemRow, isInspecting && styles.bagItemRowInspecting]}
+                    onPress={() => {
+                      itemTappedRef.current = true;
+                      setTimeout(() => {
+                        itemTappedRef.current = false;
+                      }, 60);
+                      setInspectedItem((prev) => (prev?.slug === item.slug ? null : item));
+                      setShowCompare(false);
+                    }}
+                    testID={`inventory-item-${item.slug}`}
+                  >
+                    <View style={[styles.itemIconBox44, { borderColor: rarityCol }]}>
+                      {getItemIconSource(item) ? (
+                        <ExpoImage
+                          source={getItemIconSource(item) as any}
+                          style={styles.itemIconImage44}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <Text style={styles.itemIconGlyph}>{getItemArtworkGlyph(item)}</Text>
+                      )}
+                      {item.tier ? (
+                        <View style={[styles.itemTierBadgeCorner, { backgroundColor: rarityCol }]}>
+                          <Text style={styles.itemTierBadgeText}>T{item.tier}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    <View style={styles.bagItemCenterInfo}>
+                      <Text style={[styles.bagItemName, { color: rarityCol }]} numberOfLines={1}>
+                        {item.name}
                       </Text>
-                      <Text style={styles.swapItemStats}>
-                        {formatEquipmentBonuses(candidate.statBonuses)}
+                      <Text style={styles.bagItemMeta} numberOfLines={1}>
+                        [{item.rarity}]{item.tier ? ` • Tier ${item.tier}` : ''} • {item.itemType}
+                        {item.weaponHandedness === 'TWO_HANDED' ? ' • 2H' : ''}
+                        {item.uniquePassive ? ' • ★ Unique' : ''}
                       </Text>
-                      {!check.valid && check.error && (
-                        <Text style={styles.unmetReqText}>🔒 {check.error}</Text>
+                    </View>
+
+                    {item.quantity > 1 ? (
+                      <View style={styles.satchelQtyBadge}>
+                        <Text style={styles.satchelQtyText}>x{item.quantity}</Text>
+                      </View>
+                    ) : isInspecting ? (
+                      <View style={styles.satchelInspectingPill}>
+                        <Text style={styles.satchelInspectingText}>Inspecting</Text>
+                      </View>
+                    ) : !reqCheck.valid ? (
+                      <View style={styles.satchelGatePill}>
+                        <Text style={styles.satchelGateText}>🔒 Stat Gate</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.satchelChevron}>›</Text>
+                    )}
+                  </Pressable>
+                );
+              })
+            )}
+          </View>
+        </View>
+      )}
+    </ScrollView>
+
+    {/* Pinned Bottom Item Tooltip (Non-blocking, scroll-through sibling) */}
+    {inspectedItem && (
+      <Animated.View
+        style={[
+          styles.pinnedTooltipOverlay,
+          { transform: [{ translateY: tooltipParallaxY }] },
+        ]}
+        pointerEvents="box-none"
+      >
+        <View style={styles.bottomTooltipCard} pointerEvents="auto">
+          {(() => {
+              const item = inspectedItem;
+              const equippable = isEquippableInventoryEntry(item);
+              const rarityCol = RARITY_COLORS[item.rarity] ?? CRIMSON_ONI.ghostWhite;
+              const reqCheck = equippable
+                ? validateEquipmentRequirements(item, coreStatsBlock)
+                : { valid: true, unmetStats: [] as StatType[] };
+
+              const matchingSlots = equippable
+                ? getCompatibleSlotsForItemType(item.itemType, item.weaponHandedness)
+                : [];
+              const primarySlot = matchingSlots[0];
+              const equippedSlug = primarySlot ? equipmentLoadout[primarySlot] : null;
+              const equippedItem = equippedSlug ? inventoryBySlug.get(equippedSlug) ?? null : null;
+              const isCurrentlyEquipped = item.equipped;
+
+              return (
+                <View style={styles.tooltipInner}>
+                  {/* Tooltip Header */}
+                  <View style={styles.tooltipHeaderRow}>
+                    <View style={[styles.itemIconBox56, { borderColor: rarityCol }]}>
+                      {getItemIconSource(item) ? (
+                        <ExpoImage
+                          source={getItemIconSource(item) as any}
+                          style={styles.itemIconImage56}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <Text style={styles.itemIconGlyphLg}>{getItemArtworkGlyph(item)}</Text>
+                      )}
+                      {item.tier ? (
+                        <View style={[styles.itemTierBadgeCorner, { backgroundColor: rarityCol }]}>
+                          <Text style={styles.itemTierBadgeText}>T{item.tier}</Text>
+                        </View>
+                      ) : null}
+                      {item.quantity > 1 && (
+                        <View style={styles.iconBoxQtyBadge}>
+                          <Text style={styles.iconBoxQtyText}>x{item.quantity}</Text>
+                        </View>
                       )}
                     </View>
 
-                    <Pressable
-                      style={[
-                        styles.swapActionBtn,
-                        (!check.valid || !progressionUnlocked) &&
-                          styles.swapActionBtnLocked,
-                      ]}
-                      onPress={() => handleEquipToSelectedSlot(candidate.slug, selectedSlot)}
-                    >
-                      <Text style={styles.swapActionBtnText}>
-                        {selectedSlotItem ? 'Swap' : 'Equip'}
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={[styles.tooltipItemName, { color: rarityCol }]} numberOfLines={1}>
+                        {item.name}
                       </Text>
+                      <View style={styles.tooltipMetaRow}>
+                        <View style={[styles.tooltipBadgePill, { borderColor: rarityCol }]}>
+                          <Text style={[styles.tooltipBadgePillText, { color: rarityCol }]}>
+                            {item.rarity}
+                          </Text>
+                        </View>
+                        {item.tier ? (
+                          <View style={[styles.tooltipTierPill, { borderColor: rarityCol }]}>
+                            <Text style={[styles.tooltipTierPillText, { color: rarityCol }]}>
+                              Tier {ITEM_TIER_CONFIG[item.tier]?.romanNumeral ?? item.tier}
+                            </Text>
+                          </View>
+                        ) : null}
+                        <View style={styles.tooltipTypePill}>
+                          <Text style={styles.tooltipTypePillText}>{item.itemType}</Text>
+                        </View>
+                        {item.weaponHandedness === 'TWO_HANDED' && (
+                          <View style={styles.tooltip2HPill}>
+                            <Text style={styles.tooltip2HPillText}>2-HANDED</Text>
+                          </View>
+                        )}
+                        {isCurrentlyEquipped && (
+                          <View style={styles.tooltipEquippedPill}>
+                            <Text style={styles.tooltipEquippedPillText}>EQUIPPED</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+
+                    <Pressable
+                      style={styles.tooltipCloseBtn}
+                      onPress={() => setInspectedItem(null)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Close item inspection"
+                    >
+                      <Text style={styles.tooltipCloseBtnText}>✕</Text>
                     </Pressable>
                   </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-      )}
 
-      {/* 5. Inventory Contents & Bag Management */}
-      <Text style={[styles.sectionTitle, { marginTop: 18 }]}>
-        Inventory &amp; Bag ({inventory.length} Stack{inventory.length === 1 ? '' : 's'})
-      </Text>
-
-      <View style={styles.filterTabsRow}>
-        {(
-          [
-            { key: 'ALL', label: 'All' },
-            { key: 'EQUIPMENT', label: 'Equipment' },
-            { key: 'CONSUMABLES', label: 'Consumables' },
-            { key: 'MATERIALS', label: 'Materials' },
-          ] as const
-        ).map((tab) => {
-          const active = bagFilter === tab.key;
-          return (
-            <Pressable
-              key={tab.key}
-              style={[styles.filterPill, active && styles.filterPillActive]}
-              onPress={() => setBagFilter(tab.key)}
-            >
-              <Text
-                style={[styles.filterPillText, active && styles.filterPillTextActive]}
-              >
-                {tab.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <View style={styles.bagCard}>
-        {filteredBagItems.length === 0 ? (
-          <Text style={styles.emptyBagText}>No items in this category yet.</Text>
-        ) : (
-          filteredBagItems.map((item) => {
-            const equippable = isEquippableInventoryEntry(item);
-            const rarityCol = RARITY_COLORS[item.rarity] ?? CRIMSON_ONI.ghostWhite;
-            const reqCheck = equippable
-              ? validateEquipmentRequirements(item, coreStatsBlock)
-              : { valid: true, unmetStats: [] as StatType[] };
-
-            const reqStr = item.requiredStrength ?? 0;
-            const reqEnd = item.requiredEndurance ?? 0;
-            const reqAgi = item.requiredAgility ?? 0;
-
-            return (
-              <View
-                key={item.slug}
-                style={[
-                  styles.bagItemRow,
-                  item.equipped && styles.bagItemRowEquipped,
-                ]}
-              >
-                <View
-                  style={[styles.rarityStripe, { backgroundColor: rarityCol }]}
-                />
-
-                <View style={{ flex: 1 }}>
-                  <View style={styles.bagItemTitleRow}>
-                    <Text style={[styles.bagItemName, { color: rarityCol }]}>
-                      {item.name}
-                    </Text>
-                    <View style={styles.qtyBadge}>
-                      <Text style={styles.qtyBadgeText}>x{item.quantity}</Text>
+                  {/* Stat Requirements Bar */}
+                  {equippable && (item.requiredStrength || item.requiredEndurance || item.requiredAgility) ? (
+                    <View style={styles.tooltipReqRow}>
+                      <Text style={styles.tooltipReqLabel}>Requirements:</Text>
+                      {item.requiredStrength ? (
+                        <Text
+                          style={
+                            reqCheck.unmetStats.includes('STRENGTH')
+                              ? styles.tooltipReqUnmet
+                              : styles.tooltipReqMet
+                          }
+                        >
+                          STR {item.requiredStrength}{' '}
+                          {reqCheck.unmetStats.includes('STRENGTH') ? '✗' : '✓'}
+                        </Text>
+                      ) : null}
+                      {item.requiredEndurance ? (
+                        <Text
+                          style={
+                            reqCheck.unmetStats.includes('ENDURANCE')
+                              ? styles.tooltipReqUnmet
+                              : styles.tooltipReqMet
+                          }
+                        >
+                          END {item.requiredEndurance}{' '}
+                          {reqCheck.unmetStats.includes('ENDURANCE') ? '✗' : '✓'}
+                        </Text>
+                      ) : null}
+                      {item.requiredAgility ? (
+                        <Text
+                          style={
+                            reqCheck.unmetStats.includes('AGILITY')
+                              ? styles.tooltipReqUnmet
+                              : styles.tooltipReqMet
+                          }
+                        >
+                          AGI {item.requiredAgility}{' '}
+                          {reqCheck.unmetStats.includes('AGILITY') ? '✗' : '✓'}
+                        </Text>
+                      ) : null}
                     </View>
+                  ) : null}
+
+                  {/* Base Armament Stats Box */}
+                  {item.baseStatsSummary ? (
+                    <View style={styles.tooltipBaseArmamentBox}>
+                      <Text style={styles.tooltipBaseArmamentTitle}>
+                        ⚔️ Base Armament:
+                      </Text>
+                      <Text style={styles.tooltipBaseArmamentText}>
+                        {item.baseStatsSummary}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {/* Prefix & Suffix Affixes */}
+                  {(item.prefixSummary || item.suffixSummary) ? (
+                    <View style={styles.tooltipAffixBox}>
+                      {item.prefixSummary ? (
+                        <View style={styles.tooltipAffixLine}>
+                          <Text style={styles.tooltipPrefixLabel}>
+                            🔹 Prefix ({item.prefixLabel ?? 'Prefix'}):
+                          </Text>
+                          <Text style={styles.tooltipPrefixSummary}>
+                            {item.prefixSummary}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {item.suffixSummary ? (
+                        <View style={styles.tooltipAffixLine}>
+                          <Text style={styles.tooltipSuffixLabel}>
+                            🔸 Suffix ({item.suffixLabel ?? 'Suffix'}):
+                          </Text>
+                          <Text style={styles.tooltipSuffixSummary}>
+                            {item.suffixSummary}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {/* Tier 5 Mythic Unique Passive Box */}
+                  {item.tier === 5 && item.uniquePassive ? (
+                    <View style={styles.tooltipUniquePassiveBox}>
+                      <Text style={styles.tooltipUniquePassiveHeader}>
+                        👑 Unique Passive — {item.uniquePassive.passiveName}
+                      </Text>
+                      <Text style={styles.tooltipUniquePassiveDesc}>
+                        {item.uniquePassive.passiveDescription}
+                      </Text>
+                      {item.uniquePassive.uniqueLore ? (
+                        <Text style={styles.tooltipUniqueLore}>
+                          "{item.uniquePassive.uniqueLore}"
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {/* Stat Bonuses Pills (Fallback or Consolidated) */}
+                  {item.statBonuses && !item.baseStatsSummary && (
+                    <View style={styles.tooltipBonusesWrap}>
+                      {item.statBonuses.meleePower ? (
+                        <View style={styles.statBonusPill}>
+                          <Text style={styles.statBonusPillText}>
+                            ⚔️ +{item.statBonuses.meleePower} Melee Power
+                          </Text>
+                        </View>
+                      ) : null}
+                      {item.statBonuses.armorRating ? (
+                        <View style={styles.statBonusPill}>
+                          <Text style={styles.statBonusPillText}>
+                            🛡️ +{item.statBonuses.armorRating} Armor
+                          </Text>
+                        </View>
+                      ) : null}
+                      {item.statBonuses.maxHp ? (
+                        <View style={styles.statBonusPill}>
+                          <Text style={styles.statBonusPillText}>
+                            ❤️ +{item.statBonuses.maxHp} Max HP
+                          </Text>
+                        </View>
+                      ) : null}
+                      {item.statBonuses.maxStamina ? (
+                        <View style={styles.statBonusPill}>
+                          <Text style={styles.statBonusPillText}>
+                            ⚡ +{item.statBonuses.maxStamina} Max Stamina
+                          </Text>
+                        </View>
+                      ) : null}
+                      {item.statBonuses.critChance ? (
+                        <View style={styles.statBonusPill}>
+                          <Text style={styles.statBonusPillText}>
+                            🎯 +{Math.round(item.statBonuses.critChance * 100)}% Crit Chance
+                          </Text>
+                        </View>
+                      ) : null}
+                      {item.statBonuses.dodgeRating ? (
+                        <View style={styles.statBonusPill}>
+                          <Text style={styles.statBonusPillText}>
+                            💨 +{Math.round(item.statBonuses.dodgeRating * 100)}% Dodge
+                          </Text>
+                        </View>
+                      ) : null}
+                      {item.statBonuses.attackSpeedPct ? (
+                        <View style={styles.statBonusPill}>
+                          <Text style={styles.statBonusPillText}>
+                            ⚡ +{Math.round(item.statBonuses.attackSpeedPct * 100)}% Atk Speed
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  )}
+
+                  {/* Lore / Description */}
+                  {item.description && !item.uniquePassive?.uniqueLore ? (
+                    <Text style={styles.tooltipDescription}>{item.description}</Text>
+                  ) : null}
+
+                  {/* Compare Delta Section if active */}
+                  {showCompare && equippedItem && (
+                    <View style={styles.tooltipCompareBox}>
+                      <Text style={styles.tooltipCompareHeader}>
+                        Comparison vs Equipped ({equippedItem.name}):
+                      </Text>
+                      <View style={styles.compareDeltaRow}>
+                        <Text style={styles.compareDeltaText}>
+                          ATK: {((item.statBonuses?.meleePower ?? 0) - (equippedItem.statBonuses?.meleePower ?? 0)) >= 0 ? '+' : ''}
+                          {(item.statBonuses?.meleePower ?? 0) - (equippedItem.statBonuses?.meleePower ?? 0)} •{' '}
+                          ARM: {((item.statBonuses?.armorRating ?? 0) - (equippedItem.statBonuses?.armorRating ?? 0)) >= 0 ? '+' : ''}
+                          {(item.statBonuses?.armorRating ?? 0) - (equippedItem.statBonuses?.armorRating ?? 0)} •{' '}
+                          HP: {((item.statBonuses?.maxHp ?? 0) - (equippedItem.statBonuses?.maxHp ?? 0)) >= 0 ? '+' : ''}
+                          {(item.statBonuses?.maxHp ?? 0) - (equippedItem.statBonuses?.maxHp ?? 0)}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Action Buttons */}
+                  <View style={styles.tooltipActionsRow}>
+                    {isCurrentlyEquipped ? (
+                      <Pressable
+                        style={[
+                          styles.tooltipActionBtn,
+                          styles.tooltipUnequipBtn,
+                          !progressionUnlocked && styles.btnDisabled,
+                        ]}
+                        onPress={() => {
+                          if (!progressionUnlocked) {
+                            setGearFeedback({
+                              tone: 'error',
+                              text: 'Finish your workout session before unequipping gear.',
+                            });
+                            return;
+                          }
+                          const slot = Object.keys(equipmentLoadout).find(
+                            (k) => equipmentLoadout[k as EquipmentSlot] === item.slug
+                          ) as EquipmentSlot | undefined;
+                          if (slot) {
+                            unequipSlot(slot);
+                            setGearFeedback({
+                              tone: 'info',
+                              text: `Unequipped ${item.name}.`,
+                            });
+                            setInspectedItem(null);
+                          }
+                        }}
+                      >
+                        <Text style={styles.tooltipUnequipBtnText}>Unequip Item</Text>
+                      </Pressable>
+                    ) : equippable ? (
+                      <>
+                        {equippedItem && (
+                          <Pressable
+                            style={[styles.tooltipActionBtn, styles.tooltipCompareBtn]}
+                            onPress={() => setShowCompare((p) => !p)}
+                          >
+                            <Text style={styles.tooltipCompareBtnText}>
+                              {showCompare ? 'Hide Compare' : '⚖️ Compare'}
+                            </Text>
+                          </Pressable>
+                        )}
+                        <Pressable
+                          style={[
+                            styles.tooltipActionBtn,
+                            styles.tooltipEquipBtn,
+                            (!reqCheck.valid || !progressionUnlocked) &&
+                              styles.bagEquipBtnStatLocked,
+                          ]}
+                          onPress={() => {
+                            handleBagEquipToggle(item);
+                            setInspectedItem(null);
+                          }}
+                        >
+                          <Text style={styles.tooltipEquipBtnText}>
+                            {!progressionUnlocked
+                              ? '🔒 Workout Active'
+                              : !reqCheck.valid
+                              ? '🔒 Stat Gate'
+                              : '⚔️ Equip Item'}
+                          </Text>
+                        </Pressable>
+                      </>
+                    ) : item.itemType === 'CONSUMABLE' ? (
+                      <Pressable
+                        style={[styles.tooltipActionBtn, styles.tooltipConsumableBtn]}
+                        onPress={() => {
+                          setGearFeedback({
+                            tone: 'info',
+                            text: `Consumed ${item.name}! Vitality replenished.`,
+                          });
+                          setInspectedItem(null);
+                        }}
+                      >
+                        <Text style={styles.tooltipConsumableBtnText}>🧪 Use Consumable</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            })()}
+        </View>
+      </Animated.View>
+    )}
+
+      {/* Interactive Slot Inspector Modal */}
+      <Modal
+        visible={selectedSlot !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedSlot(null)}
+      >
+        <Pressable
+          style={styles.inspectorModalBackdrop}
+          onPress={() => setSelectedSlot(null)}
+        >
+          <Pressable
+            style={styles.inspectorModalCard}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.inspectorModalHeader}>
+              <View style={styles.inspectorTitleRow}>
+                <Text style={styles.inspectorSlotIcon}>
+                  {selectedSlot ? SLOT_ICONS[selectedSlot] : '🛡️'}
+                </Text>
+                <Text style={styles.inspectorTitle}>
+                  {selectedSlot
+                    ? EQUIPMENT_SLOTS.find((s) => s.slot === selectedSlot)?.label ??
+                      selectedSlot
+                    : ''}{' '}
+                  Slot Inspector
+                </Text>
+              </View>
+              <Pressable
+                style={styles.inspectorCloseBtn}
+                onPress={() => setSelectedSlot(null)}
+              >
+                <Text style={styles.inspectorCloseBtnText}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView
+              style={styles.inspectorModalScroll}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* Currently Equipped Item */}
+              <Text style={styles.inspectorSubheading}>Currently Equipped:</Text>
+              {selectedSlotItem && selectedSlot ? (
+                <View
+                  style={[
+                    styles.inspectorEquippedBox,
+                    {
+                      borderColor:
+                        RARITY_COLORS[selectedSlotItem.rarity] ?? CRIMSON_ONI.borderGold,
+                    },
+                  ]}
+                >
+                  <View style={styles.inspectorEquippedTop}>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.inspectorItemName,
+                          {
+                            color:
+                              RARITY_COLORS[selectedSlotItem.rarity] ??
+                              CRIMSON_ONI.ghostWhite,
+                          },
+                        ]}
+                      >
+                        {selectedSlotItem.name}
+                      </Text>
+                      <Text style={styles.inspectorItemRarity}>
+                        [{selectedSlotItem.rarity}]
+                        {selectedSlotItem.weaponHandedness === 'TWO_HANDED'
+                          ? ' • 2H Weapon'
+                          : ''}
+                      </Text>
+                    </View>
+                    <Pressable
+                      style={[
+                        styles.inspectorUnequipBtn,
+                        !progressionUnlocked && styles.btnDisabled,
+                      ]}
+                      onPress={() => {
+                        if (!progressionUnlocked) {
+                          setGearFeedback({
+                            tone: 'error',
+                            text: 'Finish your active workout session before unequipping gear.',
+                          });
+                          return;
+                        }
+                        unequipSlot(selectedSlot);
+                        setGearFeedback({
+                          tone: 'info',
+                          text: `Unequipped ${selectedSlotItem.name}.`,
+                        });
+                      }}
+                    >
+                      <Text style={styles.inspectorUnequipBtnText}>Unequip</Text>
+                    </Pressable>
                   </View>
 
-                  <Text style={styles.bagItemMeta}>
-                    [{item.rarity}] • {item.itemType}
-                    {item.equipped && item.equippedSlot
-                      ? ` • Equipped (${item.equippedSlot})`
+                  <Text style={styles.inspectorItemStats}>
+                    {formatEquipmentBonuses(selectedSlotItem.statBonuses)}
+                  </Text>
+                  <Text style={styles.inspectorItemReq}>
+                    Req: STR {selectedSlotItem.requiredStrength ?? 0} • END{' '}
+                    {selectedSlotItem.requiredEndurance ?? 0} • AGI{' '}
+                    {selectedSlotItem.requiredAgility ?? 0}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.inspectorEmptyBox}>
+                  <Text style={styles.inspectorEmptyNote}>
+                    No gear currently equipped in this slot.
+                    {selectedSlot === 'offHand' &&
+                    equipmentLoadout.mainHand &&
+                    inventoryBySlug.get(equipmentLoadout.mainHand)?.weaponHandedness ===
+                      'TWO_HANDED'
+                      ? ' (Main Hand holds a 2-Handed weapon; equipping an Off-Hand item will unequip it.)'
                       : ''}
                   </Text>
-
-                  <Text style={styles.bagItemBonuses}>
-                    {item.description && !equippable
-                      ? item.description
-                      : formatEquipmentBonuses(item.statBonuses)}
-                  </Text>
-
-                  {equippable && (
-                    <Text style={styles.bagReqRow}>
-                      Req:{' '}
-                      <Text
-                        style={
-                          reqCheck.unmetStats.includes('STRENGTH')
-                            ? styles.reqUnmetInline
-                            : styles.reqMetInline
-                        }
-                      >
-                        STR {reqStr}
-                      </Text>{' '}
-                      •{' '}
-                      <Text
-                        style={
-                          reqCheck.unmetStats.includes('ENDURANCE')
-                            ? styles.reqUnmetInline
-                            : styles.reqMetInline
-                        }
-                      >
-                        END {reqEnd}
-                      </Text>{' '}
-                      •{' '}
-                      <Text
-                        style={
-                          reqCheck.unmetStats.includes('AGILITY')
-                            ? styles.reqUnmetInline
-                            : styles.reqMetInline
-                        }
-                      >
-                        AGI {reqAgi}
-                      </Text>
-                    </Text>
-                  )}
                 </View>
+              )}
 
-                {equippable && (
-                  <Pressable
-                    style={[
-                      styles.bagEquipBtn,
-                      item.equipped && styles.bagUnequipBtn,
-                      !reqCheck.valid && !item.equipped && styles.bagEquipBtnStatLocked,
-                    ]}
-                    onPress={() => handleBagEquipToggle(item)}
-                  >
-                    <Text
+              {/* Compatible Swap Items from Bag */}
+              <Text style={styles.inspectorSubheading}>
+                Compatible Gear in Satchel ({compatibleSwapItems.length}):
+              </Text>
+              {compatibleSwapItems.length === 0 ? (
+                <Text style={styles.inspectorEmptyCandidatesNote}>
+                  No compatible unbound items in your satchel for this slot. Complete workouts or explore dungeons to obtain loot!
+                </Text>
+              ) : (
+                compatibleSwapItems.map((candidate) => {
+                  if (!selectedSlot) return null;
+                  const check = validateEquipmentRequirements(
+                    candidate,
+                    coreStatsBlock,
+                    selectedSlot
+                  );
+                  return (
+                    <View
+                      key={candidate.slug}
                       style={[
-                        styles.bagEquipBtnText,
-                        item.equipped && styles.bagUnequipBtnText,
+                        styles.inspectorSwapRow,
+                        {
+                          borderLeftColor:
+                            RARITY_COLORS[candidate.rarity] ?? CRIMSON_ONI.ghostWhite,
+                        },
                       ]}
                     >
-                      {!progressionUnlocked
-                        ? '🔒'
-                        : item.equipped
-                          ? 'Unequip'
-                          : !reqCheck.valid
-                            ? 'Stat Gate'
-                            : 'Equip'}
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-            );
-          })
-        )}
-      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.inspectorSwapName,
+                            {
+                              color:
+                                RARITY_COLORS[candidate.rarity] ??
+                                CRIMSON_ONI.ghostWhite,
+                            },
+                          ]}
+                        >
+                          {candidate.name}
+                        </Text>
+                        <Text style={styles.inspectorSwapMeta}>
+                          [{candidate.rarity}] •{' '}
+                          {formatEquipmentBonuses(candidate.statBonuses)}
+                        </Text>
+                        {!check.valid && check.error && (
+                          <Text style={styles.unmetReqText}>🔒 {check.error}</Text>
+                        )}
+                      </View>
+
+                      <Pressable
+                        style={[
+                          styles.inspectorSwapActionBtn,
+                          (!check.valid || !progressionUnlocked) &&
+                            styles.swapActionBtnLocked,
+                        ]}
+                        onPress={() =>
+                          handleEquipToSelectedSlot(candidate.slug, selectedSlot)
+                        }
+                      >
+                        <Text style={styles.inspectorSwapActionText}>
+                          {selectedSlotItem ? 'Swap' : 'Equip'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Celebratory Unclaimed Training Spoils Receipt Modal */}
       <Modal
@@ -1076,20 +1780,32 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                     </Text>
                     {HOLISTIC_STATS.map((meta) => {
                       const xp =
-                        (consolidatedSpoils.totalXpGained as Record<string, number>)[meta.key] ?? 0;
-                      const lu = (consolidatedSpoils.statLevelUps as Record<string, any>)[meta.key];
+                        (consolidatedSpoils.totalXpGained as Record<string, number>)[
+                          meta.key
+                        ] ?? 0;
+                      const lu = (
+                        consolidatedSpoils.statLevelUps as Record<string, any>
+                      )[meta.key];
                       if (xp === 0 && (!lu || lu.levelsGained === 0)) return null;
                       return (
                         <View key={meta.key} style={styles.receiptStatLine}>
                           <View style={styles.receiptStatLeft}>
-                            {STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS] ? (
+                            {STAT_GLYPH_SVGS[
+                              meta.abbrev as keyof typeof STAT_GLYPH_SVGS
+                            ] ? (
                               <SvgXml
-                                xml={STAT_GLYPH_SVGS[meta.abbrev as keyof typeof STAT_GLYPH_SVGS]}
+                                xml={
+                                  STAT_GLYPH_SVGS[
+                                    meta.abbrev as keyof typeof STAT_GLYPH_SVGS
+                                  ]
+                                }
                                 width={22}
                                 height={22}
                               />
                             ) : null}
-                            <Text style={[styles.receiptStatName, { color: meta.color }]}>
+                            <Text
+                              style={[styles.receiptStatName, { color: meta.color }]}
+                            >
                               {meta.name} ({meta.abbrev})
                             </Text>
                           </View>
@@ -1125,21 +1841,34 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                             • {rec.exerciseName}: {rec.prTypes.join(', ')}
                           </Text>
                         ))}
-                        {consolidatedSpoils.prCritDrops.map((drop) => (
-                          <Text
-                            key={`crit_${drop.itemSlug}`}
-                            style={[
-                              styles.receiptDropLine,
-                              {
-                                color:
-                                  RARITY_COLORS[drop.rarity] ?? CRIMSON_ONI.agedGoldBright,
-                              },
-                            ]}
-                          >
-                            ★ Guaranteed PR Crit Loot: {drop.quantity}x {drop.itemName} [
-                            {drop.rarity}]
-                          </Text>
-                        ))}
+                        {consolidatedSpoils.prCritDrops.map((drop) => {
+                          const iconSrc = getItemIconSource(drop.itemSlug);
+                          return (
+                            <View key={`crit_${drop.itemSlug}`} style={styles.receiptDropItemRow}>
+                              {iconSrc && (
+                                <ExpoImage
+                                  source={iconSrc as any}
+                                  style={styles.receiptDropIcon36}
+                                  contentFit="cover"
+                                />
+                              )}
+                              <Text
+                                style={[
+                                  styles.receiptDropLine,
+                                  {
+                                    color:
+                                      RARITY_COLORS[drop.rarity] ??
+                                      CRIMSON_ONI.agedGoldBright,
+                                    flex: 1,
+                                  },
+                                ]}
+                              >
+                                ★ Guaranteed PR Crit Loot: {drop.quantity}x {drop.itemName}{' '}
+                                [{drop.rarity}]
+                              </Text>
+                            </View>
+                          );
+                        })}
                       </>
                     ) : (
                       <Text style={styles.receiptMutedNote}>
@@ -1155,20 +1884,32 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                       🎁 Reliquary &amp; Effort Chest Loot
                     </Text>
                     {consolidatedSpoils.chestDrops.length > 0 ? (
-                      consolidatedSpoils.chestDrops.map((drop) => (
-                        <Text
-                          key={`chest_${drop.itemSlug}`}
-                          style={[
-                            styles.receiptDropLine,
-                            {
-                              color:
-                                RARITY_COLORS[drop.rarity] ?? CRIMSON_ONI.ghostWhite,
-                            },
-                          ]}
-                        >
-                          • {drop.quantity}x {drop.itemName} [{drop.rarity}]
-                        </Text>
-                      ))
+                      consolidatedSpoils.chestDrops.map((drop) => {
+                        const iconSrc = getItemIconSource(drop.itemSlug);
+                        return (
+                          <View key={`chest_${drop.itemSlug}`} style={styles.receiptDropItemRow}>
+                            {iconSrc && (
+                              <ExpoImage
+                                source={iconSrc as any}
+                                style={styles.receiptDropIcon36}
+                                contentFit="cover"
+                              />
+                            )}
+                            <Text
+                              style={[
+                                styles.receiptDropLine,
+                                {
+                                  color:
+                                    RARITY_COLORS[drop.rarity] ?? CRIMSON_ONI.ghostWhite,
+                                  flex: 1,
+                                },
+                              ]}
+                            >
+                              • {drop.quantity}x {drop.itemName} [{drop.rarity}]
+                            </Text>
+                          </View>
+                        );
+                      })
                     ) : (
                       <Text style={styles.receiptMutedNote}>
                         All drops consolidated above.
@@ -1189,7 +1930,8 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                       ))
                     ) : (
                       <Text style={styles.receiptMutedNote}>
-                        • No active 24h Dungeon expedition window was open during training.
+                        • No active 24h Dungeon expedition window was open during
+                        training.
                       </Text>
                     )}
 
@@ -1233,6 +1975,8 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
       <BugReportModal
         visible={bugReportModalVisible}
         onClose={() => setBugReportModalVisible(false)}
+        characterId={activeCharacterId}
+        userId={currentUser?.id ?? null}
       />
 
       <DeveloperTriageModal
@@ -1242,15 +1986,19 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
 
       <CharacterManagerModal
         visible={charManagerModalVisible}
-        onClose={() => setCharManagerModalVisible(false)}
+        onClose={() => {
+          setCharManagerModalVisible(false);
+          setCharManagerInitialCustomizeId(null);
+        }}
+        initialCustomizeCharacterId={charManagerInitialCustomizeId}
       />
-    </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   scrollContent: {
-    padding: 16,
+    padding: 14,
     paddingBottom: 40,
   },
   spoilsChestCard: {
@@ -1259,7 +2007,7 @@ const styles = StyleSheet.create({
     borderColor: CRIMSON_ONI.agedGoldBright,
     borderRadius: 14,
     padding: 14,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   spoilsHeaderRow: {
     flexDirection: 'row',
@@ -1298,53 +2046,56 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
   },
-  characterHeaderCard: {
+  utilityHeaderCard: {
     backgroundColor: CRIMSON_ONI.charcoalCard,
     borderWidth: 1,
     borderColor: CRIMSON_ONI.borderGold,
     borderRadius: 14,
-    padding: 14,
-    marginBottom: 16,
+    padding: 12,
+    marginBottom: 14,
   },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  identityCol: {
-    flex: 1,
-  },
-  nameLevelRow: {
+  utilityHeaderBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
   },
-  heroName: {
+  utilityTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 8,
+  },
+  utilityIdentityCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
     flex: 1,
-    color: CRIMSON_ONI.ghostWhite,
-    fontSize: 17,
-    fontWeight: '900',
+    minWidth: 0,
   },
-  overallLevelPill: {
-    backgroundColor: CRIMSON_ONI.crimson,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.agedGold,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  overallLevelText: {
+  utilityHeroName: {
     color: CRIMSON_ONI.ghostWhite,
-    fontSize: 11,
+    fontSize: 15,
     fontWeight: '900',
+    flex: 1,
+  },
+  utilityBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(51, 65, 85, 0.45)',
   },
   heroRosterPill: {
     backgroundColor: 'rgba(245, 184, 65, 0.15)',
     borderWidth: 1,
     borderColor: CRIMSON_ONI.agedGold,
     borderRadius: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 2,
   },
   heroRosterPillText: {
@@ -1353,66 +2104,67 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.3,
   },
-  guildSubtitle: {
-    color: CRIMSON_ONI.agedGoldBright,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 3,
-  },
-  guildSubtitleRow: {
+  utilityActionCluster: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 3,
+    gap: 5,
   },
-  headerRankCrest: {
-    width: 18,
-    height: 18,
-  },
-  badgeStrip: {
+  utilityBtn: {
+    backgroundColor: '#26242E',
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
+    alignItems: 'center',
+    gap: 4,
   },
-  goldBadge: {
-    backgroundColor: CRIMSON_ONI.agedGoldDim,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.borderGold,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+  utilityBtnActive: {
+    backgroundColor: '#37181F',
+    borderColor: '#F43F5E',
   },
-  goldBadgeText: {
-    color: COLORS.gold,
-    fontSize: 11,
+  utilityBtnGold: {
+    backgroundColor: '#352A15',
+    borderColor: '#C69A45',
+  },
+  utilityBtnDisabled: {
+    opacity: 0.6,
+  },
+  utilityBtnText: {
+    fontSize: 10,
     fontWeight: '800',
+    color: '#E5E7EB',
   },
-  locationBadge: {
-    backgroundColor: CRIMSON_ONI.charcoalElevated,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.border,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+  utilityBtnTextActive: {
+    color: '#FB7185',
   },
-  locationBadgeText: {
-    color: CRIMSON_ONI.ghostWhite,
-    fontSize: 11,
+  utilityBtnTextGold: {
+    color: '#DFB660',
+  },
+  versionBadgeInline: {
+    backgroundColor: '#0F172A',
+    borderRadius: 4,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+  },
+  versionBadgeInlineText: {
+    fontSize: 8,
     fontWeight: '700',
+    color: '#94A3B8',
   },
   fatiguePillRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 12,
+    marginTop: 10,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingVertical: 6,
   },
   fatiguePillText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
   fatigueToggleHint: {
@@ -1436,33 +2188,46 @@ const styles = StyleSheet.create({
     color: CRIMSON_ONI.ghostWhite,
     fontSize: 15,
     fontWeight: '900',
-    marginBottom: 8,
-  },
-  sectionHeaderInline: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginTop: 6,
   },
   sectionHint: {
     color: CRIMSON_ONI.ashGray,
     fontSize: 11,
+    marginTop: 2,
   },
-  statsSectionHeaderRow: {
+  sectionHeaderInline: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginBottom: 10,
   },
-  statsOverallBadge: {
-    backgroundColor: CRIMSON_ONI.charcoalElevated,
+  sectionHeaderRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  appearanceHeaderBtn: {
+    backgroundColor: 'rgba(28, 27, 34, 0.92)',
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  appearanceHeaderBtnText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  itemPowerHeaderBadge: {
+    backgroundColor: CRIMSON_ONI.agedGoldDim,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.borderGold,
   },
-  statsOverallBadgeText: {
+  itemPowerHeaderBadgeText: {
     color: CRIMSON_ONI.agedGoldBright,
     fontSize: 12,
     fontWeight: '900',
@@ -1472,149 +2237,82 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CRIMSON_ONI.borderGold,
     borderRadius: 14,
-    padding: 14,
-    marginBottom: 14,
-  },
-  radarHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  radarTitle: {
-    color: CRIMSON_ONI.agedGoldBright,
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0.3,
-  },
-  radarSubtitle: {
-    color: CRIMSON_ONI.ashGray,
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 1,
-  },
-  radarPill: {
-    backgroundColor: CRIMSON_ONI.agedGoldDim,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.borderGold,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  radarPillText: {
-    color: CRIMSON_ONI.agedGoldBright,
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.5,
+    padding: 10,
+    marginBottom: 12,
   },
   radarImageContainer: {
     width: '100%',
-    height: 220,
+    height: 210,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radarImage: {
-    width: '100%',
-    height: '100%',
-  },
-  statsStack: {
-    gap: 8,
-    marginBottom: 12,
-  },
-  statGlyphBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
-    backgroundColor: CRIMSON_ONI.charcoalElevated,
-    borderWidth: 1,
+  statHoneycombGrid: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    marginBottom: 14,
   },
-  statGlyphImage: {
-    width: 28,
-    height: 28,
-  },
-  statEmoji: {
-    fontSize: 22,
-    marginRight: 2,
-  },
-  statHintText: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-    marginTop: 1,
-  },
-  statRightCluster: {
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  statCard: {
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 11,
-    padding: 12,
-  },
-  statCardTop: {
+  hexRow: {
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 7,
+    gap: 6,
   },
-  statTitleCluster: {
-    flexDirection: 'row',
+  hexMidRow: {
+    marginTop: -16,
+  },
+  hexBotRow: {
+    marginTop: -16,
+  },
+  hexPressable: {
+    width: 96,
+    height: 108,
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
+    position: 'relative',
   },
-  statLabel: {
+  hexSvg: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  hexContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  hexStatCode: {
     fontSize: 12,
     fontWeight: '900',
+    letterSpacing: 0.5,
+    marginTop: 1,
   },
-  statLevel: {
-    color: CRIMSON_ONI.ghostWhite,
-    fontSize: 14,
+  hexLevelText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+    marginTop: 1,
+  },
+  hexTalentBadge: {
+    backgroundColor: '#D97706',
+    borderRadius: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginTop: 2,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  hexTalentBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
     fontWeight: '900',
   },
-  talentPtActionBadge: {
-    backgroundColor: CRIMSON_ONI.agedGoldDim,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.agedGold,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  talentPtActionText: {
-    color: CRIMSON_ONI.agedGoldBright,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  zeroTalentText: {
-    color: COLORS.textMuted,
-    fontSize: 11,
+  hexXpPct: {
+    color: '#9CA3AF',
+    fontSize: 9.5,
     fontWeight: '600',
-  },
-  xpBarTrack: {
-    height: 7,
-    backgroundColor: COLORS.bgDeep,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 6,
-  },
-  xpBarFill: {
-    height: '100%',
-  },
-  xpCaptionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  xpCaptionText: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  xpCaptionMuted: {
-    color: COLORS.textMuted,
-    fontSize: 11,
+    marginTop: 1,
   },
   derivedCard: {
     backgroundColor: COLORS.bgCard,
@@ -1651,8 +2349,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingVertical: 8,
-    paddingHorizontal: 9,
+    paddingVertical: 7,
+    paddingHorizontal: 8,
   },
   derivedCellLabel: {
     color: COLORS.textMuted,
@@ -1661,13 +2359,13 @@ const styles = StyleSheet.create({
   },
   derivedCellValue: {
     color: CRIMSON_ONI.ghostWhite,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '900',
     marginTop: 2,
   },
   derivedCellSub: {
     color: COLORS.textSecondary,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
   },
   feedbackBanner: {
@@ -1677,7 +2375,7 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     borderWidth: 1,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingVertical: 8,
     marginBottom: 12,
   },
   feedbackBannerError: {
@@ -1690,7 +2388,7 @@ const styles = StyleSheet.create({
   },
   feedbackBannerText: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   feedbackTextError: {
@@ -1705,183 +2403,208 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     paddingLeft: 8,
   },
-  loadoutGrid: {
+  /* Paperdoll Layout */
+  paperdollLayoutContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    height: 336,
+    gap: 10,
   },
-  slotTile: {
-    width: '23%',
-    minWidth: 76,
-    flexGrow: 1,
-    minHeight: 84,
+  paperdollSideColumn: {
+    width: 58,
+    height: 336,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  paperdollSlotTile: {
+    width: 58,
+    height: 58,
     backgroundColor: CRIMSON_ONI.charcoalCard,
     borderWidth: 1.5,
     borderRadius: 10,
-    padding: 9,
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    overflow: 'hidden',
   },
-  slotTileSelected: {
+  paperdollItemImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  paperdollSlotTileSelected: {
     backgroundColor: CRIMSON_ONI.charcoalElevated,
     borderWidth: 2,
+    borderColor: CRIMSON_ONI.agedGoldBright,
+    shadowColor: CRIMSON_ONI.agedGoldBright,
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
   },
-  slotTopRow: {
+  paperdollSlotIcon: {
+    fontSize: 22,
+    textAlign: 'center',
+  },
+  paperdollSlotLabel: {
+    position: 'absolute',
+    bottom: 2,
+    alignSelf: 'center',
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  paperdoll2HBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: CRIMSON_ONI.agedGold,
+    borderRadius: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    zIndex: 2,
+  },
+  paperdoll2HBadgeText: {
+    color: CRIMSON_ONI.charcoalDeep,
+    fontSize: 7,
+    fontWeight: '900',
+  },
+  paperdollTierBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    borderRadius: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    zIndex: 2,
+  },
+  paperdollTierBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 7.5,
+    fontWeight: '900',
+  },
+  paperdollRarityDot: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    zIndex: 2,
+  },
+  paperdollCenterFrame: {
+    height: 330,
+    aspectRatio: 2 / 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  paperdollSilhouetteOverlay: {
+    position: 'absolute',
+    top: 55,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paperdollCustomizePill: {
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(28, 27, 34, 0.92)',
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    zIndex: 6,
+  },
+  paperdollCustomizePillText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: CRIMSON_ONI.agedGoldBright,
+    letterSpacing: 0.5,
+  },
+  paperdollCenterBaseBadge: {
+    position: 'absolute',
+    bottom: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-  },
-  slotIcon: {
-    fontSize: 13,
-  },
-  slotLabel: {
-    flex: 1,
-    color: CRIMSON_ONI.ashGray,
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  slotItemName: {
-    fontSize: 11,
-    fontWeight: '800',
-    marginTop: 5,
-  },
-  slotItemRarity: {
-    color: CRIMSON_ONI.ashGray,
-    fontSize: 9,
-    fontWeight: '700',
-    marginTop: 3,
-  },
-  slotEmptyText: {
-    color: CRIMSON_ONI.ashMuted,
-    fontSize: 11,
-    fontStyle: 'italic',
-    marginTop: 10,
-  },
-  slotInspectorCard: {
-    backgroundColor: COLORS.bgCard,
+    backgroundColor: 'rgba(10, 10, 15, 0.88)',
     borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    zIndex: 6,
   },
-  inspectorHeaderRow: {
+  paperdollCenterBaseText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  /* Collapsible Satchel Drawer */
+  satchelToggleHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderWidth: 1.5,
+    borderColor: CRIMSON_ONI.borderGold,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
   },
-  inspectorTitle: {
-    color: CRIMSON_ONI.ghostWhite,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  unequipBtn: {
-    backgroundColor: CRIMSON_ONI.crimson,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.agedGold,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  unequipBtnText: {
-    color: CRIMSON_ONI.ghostWhite,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  btnDisabled: {
-    opacity: 0.5,
-  },
-  equippedDetailBox: {
-    backgroundColor: COLORS.bgDeep,
-    borderRadius: 8,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  equippedDetailName: {
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  equippedDetailStats: {
-    color: CRIMSON_ONI.ghostWhite,
-    fontSize: 11,
-    marginTop: 3,
-  },
-  equippedDetailReq: {
-    color: COLORS.textMuted,
-    fontSize: 10,
-    marginTop: 4,
-  },
-  emptyInspectorNote: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-  },
-  swapSection: {
-    marginTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingTop: 8,
-    gap: 7,
-  },
-  swapHeading: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  swapRow: {
+  satchelToggleTitleCluster: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: COLORS.bgDeep,
-    borderRadius: 8,
-    padding: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
   },
-  swapItemName: {
-    fontSize: 12,
+  satchelIcon: {
+    fontSize: 22,
+  },
+  satchelHeading: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  satchelSubtitle: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 10,
+    marginTop: 1,
+  },
+  satchelChevronPill: {
+    backgroundColor: CRIMSON_ONI.agedGoldDim,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+  },
+  satchelChevronText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 10,
     fontWeight: '800',
   },
-  swapItemStats: {
-    color: COLORS.textSecondary,
-    fontSize: 10,
-    marginTop: 2,
-  },
-  unmetReqText: {
-    color: COLORS.danger,
-    fontSize: 10,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  swapActionBtn: {
-    backgroundColor: CRIMSON_ONI.agedGold,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  swapActionBtnLocked: {
-    backgroundColor: COLORS.bgElevated,
-    opacity: 0.65,
-  },
-  swapActionBtnText: {
-    color: CRIMSON_ONI.charcoalDeep,
-    fontSize: 11,
-    fontWeight: '900',
+  satchelDrawerBody: {
+    marginBottom: 14,
   },
   filterTabsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
     marginBottom: 10,
   },
   filterPill: {
     backgroundColor: COLORS.bgCard,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    borderRadius: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   filterPillActive: {
     backgroundColor: CRIMSON_ONI.agedGoldDim,
@@ -1889,7 +2612,7 @@ const styles = StyleSheet.create({
   },
   filterPillText: {
     color: COLORS.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   filterPillTextActive: {
@@ -1901,70 +2624,119 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: 12,
-    padding: 10,
-    gap: 8,
+    padding: 8,
+    gap: 7,
   },
   emptyBagText: {
     color: COLORS.textMuted,
-    fontSize: 12,
+    fontSize: 11,
     textAlign: 'center',
     paddingVertical: 14,
   },
   bagItemRow: {
+    minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.bgDeep,
-    borderRadius: 9,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingVertical: 9,
-    paddingRight: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
     overflow: 'hidden',
-    gap: 10,
+    gap: 8,
   },
-  bagItemRowEquipped: {
+  bagItemRowInspecting: {
+    borderColor: CRIMSON_ONI.agedGoldBright,
+    backgroundColor: '#1E1B24',
+  },
+  bagItemCenterInfo: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  satchelQtyBadge: {
+    backgroundColor: COLORS.bgElevated,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  satchelQtyText: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  satchelInspectingPill: {
+    backgroundColor: 'rgba(217, 180, 74, 0.22)',
+    borderWidth: 1,
     borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  satchelInspectingText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  satchelGatePill: {
+    backgroundColor: 'rgba(239, 83, 80, 0.18)',
+    borderWidth: 1,
+    borderColor: '#EF5350',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  satchelGateText: {
+    color: '#EF5350',
+    fontSize: 9.5,
+    fontWeight: '800',
+  },
+  satchelChevron: {
+    color: COLORS.textMuted,
+    fontSize: 18,
+    fontWeight: '700',
+    paddingHorizontal: 4,
   },
   rarityStripe: {
-    width: 4,
+    width: 3.5,
     alignSelf: 'stretch',
   },
   bagItemTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   bagItemName: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     flexShrink: 1,
   },
   qtyBadge: {
     backgroundColor: COLORS.bgElevated,
-    borderRadius: 5,
-    paddingHorizontal: 6,
+    borderRadius: 4,
+    paddingHorizontal: 5,
     paddingVertical: 1,
   },
   qtyBadgeText: {
     color: CRIMSON_ONI.ghostWhite,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '800',
   },
   bagItemMeta: {
     color: COLORS.textMuted,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     marginTop: 2,
   },
   bagItemBonuses: {
     color: COLORS.textSecondary,
-    fontSize: 11,
-    marginTop: 3,
+    fontSize: 10,
+    marginTop: 2,
   },
   bagReqRow: {
     color: COLORS.textMuted,
-    fontSize: 10,
-    marginTop: 3,
+    fontSize: 9,
+    marginTop: 2,
   },
   reqMetInline: {
     color: COLORS.textSecondary,
@@ -1976,14 +2748,9 @@ const styles = StyleSheet.create({
   },
   bagEquipBtn: {
     backgroundColor: CRIMSON_ONI.agedGold,
-    borderRadius: 7,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  bagUnequipBtn: {
-    backgroundColor: COLORS.bgElevated,
-    borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   bagEquipBtnStatLocked: {
     backgroundColor: COLORS.strengthDim,
@@ -1992,12 +2759,656 @@ const styles = StyleSheet.create({
   },
   bagEquipBtnText: {
     color: CRIMSON_ONI.charcoalDeep,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '900',
   },
-  bagUnequipBtnText: {
-    color: CRIMSON_ONI.ghostWhite,
+  btnDisabled: {
+    opacity: 0.5,
   },
+  /* Satchel Sort Bar */
+  sortBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  sortBarLabel: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sortChip: {
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  sortChipActive: {
+    backgroundColor: CRIMSON_ONI.agedGoldDim,
+    borderColor: CRIMSON_ONI.agedGold,
+  },
+  sortChipText: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  sortChipTextActive: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontWeight: '900',
+  },
+  /* 44x44, 48x48, & 56x56 Framed Icon Boxes */
+  itemIconBox44: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    backgroundColor: '#121722',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    marginLeft: 4,
+    overflow: 'hidden',
+  },
+  itemIconImage44: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 6,
+  },
+  itemIconGlyph: {
+    fontSize: 20,
+    textAlign: 'center',
+  },
+  itemIconBox48: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    borderWidth: 2,
+    backgroundColor: '#121722',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  itemIconBox56: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+    borderWidth: 2,
+    backgroundColor: '#121722',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  itemIconImage56: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  itemIconGlyphLg: {
+    fontSize: 24,
+    textAlign: 'center',
+  },
+  iconBoxQtyBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 4,
+    paddingHorizontal: 3,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.borderGold,
+  },
+  iconBoxQtyText: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 8,
+    fontWeight: '900',
+  },
+  itemTierBadgeCorner: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    borderRadius: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 0.5,
+    zIndex: 2,
+  },
+  itemTierBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 7.5,
+    fontWeight: '900',
+  },
+  satchelAffixPillsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+    marginBottom: 2,
+    flexWrap: 'wrap',
+  },
+  satchelAffixPillUnique: {
+    backgroundColor: 'rgba(239, 68, 68, 0.25)',
+    borderColor: '#EF4444',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  satchelAffixPillUniqueText: {
+    color: '#F87171',
+    fontSize: 8.5,
+    fontWeight: '900',
+  },
+  satchelAffixPillPrefix: {
+    backgroundColor: 'rgba(56, 189, 248, 0.15)',
+    borderColor: 'rgba(56, 189, 248, 0.4)',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  satchelAffixPillPrefixText: {
+    color: '#38BDF8',
+    fontSize: 8.5,
+    fontWeight: '700',
+  },
+  satchelAffixPillSuffix: {
+    backgroundColor: 'rgba(251, 191, 36, 0.15)',
+    borderColor: 'rgba(251, 191, 36, 0.4)',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  satchelAffixPillSuffixText: {
+    color: '#FBBF24',
+    fontSize: 8.5,
+    fontWeight: '700',
+  },
+  /* Pinned Bottom Item Tooltip */
+  pinnedTooltipOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+    elevation: 50,
+  },
+  bottomTooltipCard: {
+    backgroundColor: '#12151D',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderWidth: 1.5,
+    borderColor: CRIMSON_ONI.borderGold,
+    padding: 16,
+    paddingBottom: 32,
+    shadowColor: '#000000',
+    shadowOpacity: 0.6,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+  },
+  tooltipInner: {
+    gap: 12,
+  },
+  tooltipHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  tooltipItemName: {
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  tooltipMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    flexWrap: 'wrap',
+  },
+  tooltipBadgePill: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  tooltipBadgePillText: {
+    fontSize: 9.5,
+    fontWeight: '900',
+  },
+  tooltipTierPill: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  tooltipTierPillText: {
+    fontSize: 9.5,
+    fontWeight: '900',
+  },
+  tooltipTypePill: {
+    backgroundColor: CRIMSON_ONI.charcoalElevated,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  tooltipTypePillText: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 9.5,
+    fontWeight: '700',
+  },
+  tooltip2HPill: {
+    backgroundColor: CRIMSON_ONI.agedGoldDim,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  tooltip2HPillText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 9.5,
+    fontWeight: '900',
+  },
+  tooltipEquippedPill: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderColor: '#10B981',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  tooltipEquippedPillText: {
+    color: '#10B981',
+    fontSize: 9.5,
+    fontWeight: '900',
+  },
+  tooltipCloseBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: CRIMSON_ONI.charcoalElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tooltipCloseBtnText: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  tooltipReqRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderRadius: 8,
+    padding: 8,
+  },
+  tooltipReqLabel: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  tooltipReqMet: {
+    color: '#10B981',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  tooltipReqUnmet: {
+    color: COLORS.danger,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  tooltipBaseArmamentBox: {
+    backgroundColor: 'rgba(30, 36, 49, 0.7)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 10,
+    gap: 4,
+  },
+  tooltipBaseArmamentTitle: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  tooltipBaseArmamentText: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  tooltipAffixBox: {
+    backgroundColor: 'rgba(18, 22, 32, 0.85)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.25)',
+    padding: 10,
+    gap: 6,
+  },
+  tooltipAffixLine: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  tooltipPrefixLabel: {
+    color: '#38BDF8',
+    fontSize: 10.5,
+    fontWeight: '800',
+  },
+  tooltipPrefixSummary: {
+    color: '#BAE6FD',
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  tooltipSuffixLabel: {
+    color: '#FBBF24',
+    fontSize: 10.5,
+    fontWeight: '800',
+  },
+  tooltipSuffixSummary: {
+    color: '#FDE68A',
+    fontSize: 10.5,
+    fontWeight: '600',
+  },
+  tooltipUniquePassiveBox: {
+    backgroundColor: 'rgba(45, 12, 18, 0.85)',
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#DC2626',
+    padding: 10,
+    gap: 4,
+  },
+  tooltipUniquePassiveHeader: {
+    color: '#F87171',
+    fontSize: 11.5,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+  },
+  tooltipUniquePassiveDesc: {
+    color: '#FECACA',
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 16,
+  },
+  tooltipUniqueLore: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 10,
+    fontStyle: 'italic',
+    marginTop: 4,
+    lineHeight: 14,
+  },
+  tooltipBonusesWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  statBonusPill: {
+    backgroundColor: '#1A1E29',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#2D3548',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  statBonusPillText: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  tooltipDescription: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 11,
+    lineHeight: 16,
+    fontStyle: 'italic',
+  },
+  tooltipCompareBox: {
+    backgroundColor: '#171B26',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2A3348',
+    padding: 10,
+  },
+  tooltipCompareHeader: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 10,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  compareDeltaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  compareDeltaText: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  tooltipActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  tooltipActionBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tooltipUnequipBtn: {
+    backgroundColor: '#26242E',
+    borderWidth: 1,
+    borderColor: '#4B5563',
+  },
+  tooltipUnequipBtnText: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  tooltipEquipBtn: {
+    backgroundColor: CRIMSON_ONI.agedGold,
+  },
+  tooltipEquipBtnText: {
+    color: CRIMSON_ONI.charcoalDeep,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  tooltipCompareBtn: {
+    backgroundColor: CRIMSON_ONI.charcoalElevated,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.borderGold,
+  },
+  tooltipCompareBtnText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  tooltipConsumableBtn: {
+    backgroundColor: '#059669',
+  },
+  tooltipConsumableBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  /* Inspector Modal */
+  inspectorModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(5, 5, 10, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  inspectorModalCard: {
+    width: '100%',
+    maxWidth: 440,
+    maxHeight: '84%',
+    backgroundColor: CRIMSON_ONI.charcoalBase,
+    borderWidth: 1.5,
+    borderColor: CRIMSON_ONI.agedGoldBright,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  inspectorModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: CRIMSON_ONI.borderGold,
+    backgroundColor: CRIMSON_ONI.charcoalElevated,
+  },
+  inspectorTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  inspectorSlotIcon: {
+    fontSize: 16,
+  },
+  inspectorTitle: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  inspectorCloseBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
+  },
+  inspectorCloseBtnText: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  inspectorModalScroll: {
+    padding: 14,
+  },
+  inspectorSubheading: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+    marginBottom: 8,
+    marginTop: 6,
+  },
+  inspectorEquippedBox: {
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    padding: 12,
+    marginBottom: 12,
+  },
+  inspectorEquippedTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  inspectorItemName: {
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  inspectorItemRarity: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  inspectorItemStats: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  inspectorItemReq: {
+    color: COLORS.textMuted,
+    fontSize: 10,
+    marginTop: 4,
+  },
+  inspectorUnequipBtn: {
+    backgroundColor: CRIMSON_ONI.crimson,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  inspectorUnequipBtnText: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  inspectorEmptyBox: {
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
+    padding: 12,
+    marginBottom: 12,
+  },
+  inspectorEmptyNote: {
+    color: COLORS.textSecondary,
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  inspectorEmptyCandidatesNote: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    fontStyle: 'italic',
+    paddingVertical: 8,
+  },
+  inspectorSwapRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.bgDeep,
+    borderRadius: 8,
+    padding: 9,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderLeftWidth: 3.5,
+    marginBottom: 6,
+  },
+  inspectorSwapName: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  inspectorSwapMeta: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    marginTop: 2,
+  },
+  unmetReqText: {
+    color: COLORS.danger,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  inspectorSwapActionBtn: {
+    backgroundColor: CRIMSON_ONI.agedGold,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  swapActionBtnLocked: {
+    backgroundColor: COLORS.bgElevated,
+    opacity: 0.6,
+  },
+  inspectorSwapActionText: {
+    color: CRIMSON_ONI.charcoalDeep,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  /* Spoils Receipt Modal */
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(10, 10, 14, 0.88)',
@@ -2035,10 +3446,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginVertical: 10,
   },
-  receiptChestImage: {
-    width: 96,
-    height: 80,
-  },
   receiptSubSummary: {
     color: CRIMSON_ONI.ashGray,
     fontSize: 12,
@@ -2069,10 +3476,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  receiptStatGlyph: {
-    width: 22,
-    height: 22,
   },
   receiptStatName: {
     fontSize: 13,
@@ -2106,6 +3509,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 3,
   },
+  receiptDropItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  receiptDropIcon36: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: '#2A2F3D',
+  },
   receiptDropLine: {
     fontSize: 12,
     fontWeight: '800',
@@ -2127,86 +3543,5 @@ const styles = StyleSheet.create({
     color: CRIMSON_ONI.charcoalDeep,
     fontSize: 14,
     fontWeight: '900',
-  },
-  audioMuteBtn: {
-    backgroundColor: '#26242E',
-    borderWidth: 1,
-    borderColor: '#4B5563',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    justifyContent: 'center',
-  },
-  audioMuteBtnActive: {
-    backgroundColor: '#37181F',
-    borderColor: '#F43F5E',
-  },
-  audioMuteBtnText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#E5E7EB',
-  },
-  audioMuteBtnTextActive: {
-    color: '#FB7185',
-  },
-  bugReportBtn: {
-    backgroundColor: '#26242E',
-    borderWidth: 1,
-    borderColor: '#4B5563',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  bugReportBtnText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#E5E7EB',
-  },
-  devTriageBtn: {
-    backgroundColor: '#352A15',
-    borderWidth: 1,
-    borderColor: '#C69A45',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  devTriageBtnText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#DFB660',
-  },
-  updateCheckBtn: {
-    backgroundColor: '#1E293B',
-    borderWidth: 1,
-    borderColor: '#38BDF8',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  updateCheckBtnDisabled: {
-    opacity: 0.6,
-  },
-  updateCheckBtnText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#38BDF8',
-  },
-  versionBadgeInline: {
-    backgroundColor: '#0F172A',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-  },
-  versionBadgeInlineText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#94A3B8',
   },
 });

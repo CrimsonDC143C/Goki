@@ -4,6 +4,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -100,12 +101,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         componentStack: errorInfo?.componentStack ?? undefined,
       });
 
-      await diagnosticLogger.clearPendingCrashReport();
-
       if (res.queuedLocally) {
+        await diagnosticLogger.clearPendingCrashReport();
         this.setState({ transmissionStatus: 'queued_offline' });
-      } else {
+      } else if (res.ok) {
+        await diagnosticLogger.clearPendingCrashReport();
         this.setState({ transmissionStatus: 'sent' });
+      } else {
+        this.setState({ transmissionStatus: 'error' });
       }
     } catch {
       this.setState({ transmissionStatus: 'error' });
@@ -136,7 +139,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     this.setState({ isSendingPending: true });
     try {
-      await diagnosticLogger.submitDiagnosticReport({
+      const res = await diagnosticLogger.submitDiagnosticReport({
         severity: 'FATAL',
         category: 'CRASH_EXCEPTION',
         title: `Prior Session Fatal Crash: ${pendingCrash.errorMessage}`,
@@ -148,10 +151,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         stateSnapshot: pendingCrash.stateSnapshot,
         deviceMetadata: pendingCrash.deviceMetadata,
       });
-      await diagnosticLogger.clearPendingCrashReport();
-      this.setState({ pendingCrash: null, isSendingPending: false });
+      if (res.queuedLocally || res.ok) {
+        await diagnosticLogger.clearPendingCrashReport();
+        this.setState({ pendingCrash: null, isSendingPending: false });
+      } else {
+        this.setState({ isSendingPending: false });
+      }
     } catch {
-      this.setState({ pendingCrash: null, isSendingPending: false });
+      this.setState({ isSendingPending: false });
     }
   };
 
@@ -343,6 +350,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 16,
+    paddingTop:
+      Platform.OS === 'web'
+        ? 24
+        : Platform.OS === 'ios'
+        ? 58
+        : (StatusBar.currentHeight ?? 28) + 16,
+    paddingBottom: 28,
   },
   errorContent: {
     maxWidth: 620,
@@ -515,6 +529,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    paddingTop:
+      Platform.OS === 'web'
+        ? 20
+        : Platform.OS === 'ios'
+        ? 58
+        : (StatusBar.currentHeight ?? 28) + 16,
+    paddingBottom: 28,
   },
   modalCard: {
     backgroundColor: '#1E1C22',

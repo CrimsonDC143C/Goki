@@ -15,6 +15,12 @@ import {
   isWarmupSetType,
   resolveEffectiveSetRpe,
 } from './workout-presets-rest';
+import {
+  BASE_EQUIPPABLE_ITEM_BY_SLUG,
+  ItemTier,
+  rollProceduralItemInstance,
+  proceduralItemToLootDrop,
+} from './item-affix-engine';
 
 // ============================================================================
 // CONSTANTS & BALANCING THRESHOLDS
@@ -94,6 +100,20 @@ const PR_CRIT_LOOT_TABLE: readonly WeightedLootTemplate[] = [
     rarity: 'RARE',
     quantity: 1,
     weight: 11,
+  },
+  {
+    itemSlug: 'ironbound_greatsword',
+    itemName: 'Ironbound Greatsword',
+    rarity: 'RARE',
+    quantity: 1,
+    weight: 6,
+  },
+  {
+    itemSlug: 'copper_guild_ring',
+    itemName: 'Copper Guild Signet',
+    rarity: 'RARE',
+    quantity: 1,
+    weight: 6,
   },
   {
     itemSlug: 'titanite_ember',
@@ -647,6 +667,21 @@ export function calculateOverallLevel(stats: {
 export function rollPrCritLootDrop(seed: string): LootDrop {
   const rng = createSeededRng(seed);
   const picked = rng.pickWeighted(PR_CRIT_LOOT_TABLE);
+
+  if (BASE_EQUIPPABLE_ITEM_BY_SLUG[picked.itemSlug]) {
+    const roll = rng.nextFloat();
+    const itemTier: ItemTier = roll < 0.4 ? 3 : roll < 0.85 ? 4 : 5;
+    const rolled = rollProceduralItemInstance({
+      baseSlug: picked.itemSlug,
+      tier: itemTier,
+      seed: `pr-crit-gear:${seed}:${picked.itemSlug}`,
+    });
+    return {
+      ...proceduralItemToLootDrop(rolled),
+      quantity: picked.quantity,
+    };
+  }
+
   return {
     itemSlug: picked.itemSlug,
     itemName: picked.itemName,

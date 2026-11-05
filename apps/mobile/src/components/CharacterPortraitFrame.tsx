@@ -1,6 +1,8 @@
 import React from 'react';
-import { Image, ImageSourcePropType, StyleSheet, View } from 'react-native';
+import { ImageSourcePropType, StyleSheet, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, Polygon, RadialGradient, Rect, Stop, SvgXml } from 'react-native-svg';
+import { getCharacterBustSource, getCharacterStandingSource } from '../assets/characterArtRegistry';
 import { HUD_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
 
@@ -9,11 +11,19 @@ export const DEFAULT_HERO_PORTRAIT = require('../../assets/images/adventurer-por
 export interface CharacterPortraitFrameProps {
   /**
    * Drop-in Layer.ai 2D character illustration / sprite source (URI string or bundled asset).
-   * Defaults to the official v0 Crimson Oni hero portrait artwork when omitted.
    */
   imageSource?: ImageSourcePropType | string | null;
+  /**
+   * Preset appearance ID (e.g. 'oni_warlord', 'blade_dancer', etc.)
+   */
+  appearanceId?: string | null;
+  /**
+   * Explicit pose override. Defaults to 'standing' for 'hero' variant and 'bust' for 'circle'/'avatar'.
+   */
+  pose?: 'bust' | 'standing';
   variant?: 'hero' | 'avatar' | 'circle';
   height?: number;
+  bottomClearance?: number;
   isCircle?: boolean;
   isActive?: boolean;
   children?: React.ReactNode;
@@ -21,20 +31,48 @@ export interface CharacterPortraitFrameProps {
 
 export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
   imageSource,
+  appearanceId,
+  pose,
   variant = 'hero',
   height,
+  bottomClearance,
   isCircle,
   isActive,
   children,
 }) => {
-  const resolvedSource: ImageSourcePropType | null =
-    typeof imageSource === 'string' && imageSource.trim().length > 0 && imageSource !== 'silhouette'
-      ? { uri: imageSource }
-      : imageSource && typeof imageSource !== 'string'
-        ? imageSource
-        : imageSource === 'silhouette'
-          ? null
-          : DEFAULT_HERO_PORTRAIT;
+  const effectivePose: 'bust' | 'standing' =
+    pose ?? (variant === 'hero' ? 'standing' : 'bust');
+
+  let resolvedSource: ImageSourcePropType | null = null;
+
+  if (imageSource === 'silhouette') {
+    resolvedSource = null;
+  } else if (appearanceId) {
+    resolvedSource =
+      effectivePose === 'bust'
+        ? getCharacterBustSource(appearanceId)
+        : getCharacterStandingSource(appearanceId);
+  } else if (imageSource && typeof imageSource !== 'string') {
+    resolvedSource = imageSource;
+  } else if (typeof imageSource === 'string' && imageSource.trim().length > 0) {
+    const isUri =
+      imageSource.startsWith('http://') ||
+      imageSource.startsWith('https://') ||
+      imageSource.startsWith('file://');
+    if (isUri) {
+      resolvedSource = { uri: imageSource };
+    } else {
+      resolvedSource =
+        effectivePose === 'bust'
+          ? getCharacterBustSource(imageSource)
+          : getCharacterStandingSource(imageSource);
+    }
+  } else {
+    resolvedSource =
+      effectivePose === 'bust'
+        ? getCharacterBustSource(null)
+        : getCharacterStandingSource(null);
+  }
 
   if (variant === 'circle' || (variant === 'avatar' && isCircle)) {
     const size = height ?? 58;
@@ -47,7 +85,12 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
         ]}
       >
         {resolvedSource ? (
-          <Image source={resolvedSource} style={styles.circleImage} resizeMode="cover" />
+          <ExpoImage
+            source={resolvedSource as any}
+            style={styles.circleImage}
+            contentFit="cover"
+            contentPosition="top center"
+          />
         ) : (
           <Svg width={size - 4} height={size - 4} viewBox="0 0 100 100">
             <Defs>
@@ -101,7 +144,12 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
     return (
       <View style={[styles.avatarOuter, { width: size, height: size }]}>
         {resolvedSource ? (
-          <Image source={resolvedSource} style={styles.avatarImage} resizeMode="cover" />
+          <ExpoImage
+            source={resolvedSource as any}
+            style={styles.avatarImage}
+            contentFit="cover"
+            contentPosition="top center"
+          />
         ) : (
           <Svg width={size - 4} height={size - 4} viewBox="0 0 100 100">
             <Defs>
@@ -169,17 +217,40 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
 
       {resolvedSource ? (
         <>
-          <Image source={resolvedSource} style={styles.heroImage} resizeMode="cover" />
+          {/* Layer 1: Atmospheric Blurred Backdrop (Fills Wide Frame, Soft Dark-Fantasy Lighting) */}
+          <ExpoImage
+            source={resolvedSource as any}
+            style={styles.heroBackdropBlur}
+            contentFit="cover"
+            contentPosition="top center"
+            blurRadius={22}
+          />
           <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
             <Defs>
               <LinearGradient id="heroVignette" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor="#090C12" stopOpacity="0" />
-                <Stop offset="0.6" stopColor="#090C12" stopOpacity="0.2" />
-                <Stop offset="1" stopColor="#090C12" stopOpacity="0.85" />
+                <Stop offset="0" stopColor="#090C12" stopOpacity="0.15" />
+                <Stop offset="0.55" stopColor="#090C12" stopOpacity="0.35" />
+                <Stop offset="1" stopColor="#090C12" stopOpacity="0.88" />
               </LinearGradient>
+              <RadialGradient id="heroRadial" cx="50%" cy="50%" r="50%">
+                <Stop offset="60%" stopColor="#090C12" stopOpacity="0" />
+                <Stop offset="100%" stopColor="#090C12" stopOpacity="0.75" />
+              </RadialGradient>
             </Defs>
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroRadial)" />
             <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroVignette)" />
           </Svg>
+
+          {/* Main Standing Hero Artwork (Edge-to-Edge 2:3 Cover) */}
+          <ExpoImage
+            source={resolvedSource as any}
+            style={[
+              styles.heroImageCover,
+              bottomClearance !== undefined ? { bottom: bottomClearance } : null,
+            ]}
+            contentFit="cover"
+            contentPosition="top center"
+          />
         </>
       ) : (
         <View style={styles.svgBackdropWrap}>
@@ -214,8 +285,9 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
 
 const styles = StyleSheet.create({
   heroFrame: {
-    width: '100%',
-    backgroundColor: CRIMSON_ONI.charcoalDeep,
+    aspectRatio: 2 / 3,
+    alignSelf: 'center',
+    backgroundColor: '#0D0F14',
     borderRadius: 16,
     borderWidth: 1.5,
     borderColor: CRIMSON_ONI.agedGold,
@@ -230,7 +302,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
   },
-  heroImage: {
+  heroBackdropBlur: {
     position: 'absolute',
     top: 0,
     right: 0,
@@ -238,6 +310,14 @@ const styles = StyleSheet.create({
     left: 0,
     width: '100%',
     height: '100%',
+    opacity: 0.32,
+  },
+  heroImageCover: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   cornerFiligree: {
     position: 'absolute',

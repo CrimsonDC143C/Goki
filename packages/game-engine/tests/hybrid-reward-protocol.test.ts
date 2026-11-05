@@ -213,6 +213,116 @@ describe('hybrid-reward-protocol (3-Phase Behavioral Neuroscience Loop)', () => 
       expect(machine.phase).toBe('Idle');
       expect(machine.activeSession).toBeNull();
     });
+
+    it('dynamically preserves elapsed rest time anchored to startedAtMs when switching presets or stepping delta', () => {
+      const t0 = 1_760_000_000_000;
+      let machine = createInitialHybridMachineState();
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'START_SESSION',
+        sessionId: 'sess_rest_test',
+        workoutType: 'RESISTANCE',
+        nowMs: t0,
+      });
+
+      // Log a set to trigger rest timer
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'LOG_SET',
+        setId: 'set_1',
+        exerciseId: 'bench_press',
+        exerciseName: 'Barbell Bench Press',
+        weightKg: 80,
+        reps: 10,
+        nowMs: t0,
+      });
+
+      // Initialize configured rest to 90s for test baseline
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'ADJUST_REST_TIMER',
+        newDurationSeconds: 90,
+        nowMs: t0,
+      });
+
+      expect(machine.phase).toBe('Resting');
+      expect(machine.activeSession?.restTimer.configuredSeconds).toBe(90);
+      expect(machine.activeSession?.restTimer.remainingSeconds).toBe(90);
+      expect(machine.activeSession?.restTimer.startedAtMs).toBe(t0);
+      expect(machine.activeSession?.restTimer.endsAtMs).toBe(t0 + 90_000);
+
+      // 1. Advance 40s (t0 + 40_000), then select 120s (2m)
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'ADJUST_REST_TIMER',
+        newDurationSeconds: 120,
+        nowMs: t0 + 40_000,
+      });
+      expect(machine.phase).toBe('Resting');
+      expect(machine.activeSession?.restTimer.configuredSeconds).toBe(120);
+      expect(machine.activeSession?.restTimer.remainingSeconds).toBe(80);
+      expect(machine.activeSession?.restTimer.startedAtMs).toBe(t0);
+      expect(machine.activeSession?.restTimer.endsAtMs).toBe(t0 + 120_000);
+
+      // 2. Advance 2s more to t0 + 42_000 (42s elapsed), select 60s (1m) -> remaining is 18s
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'ADJUST_REST_TIMER',
+        newDurationSeconds: 60,
+        nowMs: t0 + 42_000,
+      });
+      expect(machine.phase).toBe('Resting');
+      expect(machine.activeSession?.restTimer.configuredSeconds).toBe(60);
+      expect(machine.activeSession?.restTimer.remainingSeconds).toBe(18);
+      expect(machine.activeSession?.restTimer.startedAtMs).toBe(t0);
+
+      // Switch back to 90s at t0 + 42_000 -> remaining is 48s (lossless, reversible)
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'ADJUST_REST_TIMER',
+        newDurationSeconds: 90,
+        nowMs: t0 + 42_000,
+      });
+      expect(machine.phase).toBe('Resting');
+      expect(machine.activeSession?.restTimer.configuredSeconds).toBe(90);
+      expect(machine.activeSession?.restTimer.remainingSeconds).toBe(48);
+      expect(machine.activeSession?.restTimer.startedAtMs).toBe(t0);
+
+      // 3. Advance to t0 + 65_000 (65s elapsed), select 60s -> elapsed exceeds 60s -> completes rest
+      const completedMachine = transitionHybridWorkoutState(machine, {
+        type: 'ADJUST_REST_TIMER',
+        newDurationSeconds: 60,
+        nowMs: t0 + 65_000,
+      });
+      expect(completedMachine.phase).toBe('DungeonActive');
+      expect(completedMachine.activeSession?.restTimer.isActive).toBe(false);
+      expect(completedMachine.activeSession?.restTimer.remainingSeconds).toBe(0);
+      expect(completedMachine.activeSession?.restTimer.configuredSeconds).toBe(60);
+      expect(completedMachine.activeSession?.restTimer.startedAtMs).toBeNull();
+      expect(completedMachine.activeSession?.restTimer.endsAtMs).toBeNull();
+
+      // 4. Stepping delta: start at t0 with 90s, at t0 + 40_000 remaining is 50s; step +15s -> 65s remaining
+      let deltaMachine = transitionHybridWorkoutState(machine, {
+        type: 'ADJUST_REST_TIMER',
+        newDurationSeconds: 90,
+        nowMs: t0,
+      });
+      deltaMachine = transitionHybridWorkoutState(deltaMachine, {
+        type: 'ADJUST_REST_TIMER',
+        deltaSeconds: 15,
+        nowMs: t0 + 40_000,
+      });
+      expect(deltaMachine.phase).toBe('Resting');
+      expect(deltaMachine.activeSession?.restTimer.remainingSeconds).toBe(65);
+      expect(deltaMachine.activeSession?.restTimer.configuredSeconds).toBe(105);
+      expect(deltaMachine.activeSession?.restTimer.startedAtMs).toBe(t0);
+
+      // Stepping -15s when only 10s remain -> immediately completes rest to DungeonActive
+      deltaMachine = transitionHybridWorkoutState(deltaMachine, {
+        type: 'ADJUST_REST_TIMER',
+        deltaSeconds: -15,
+        nowMs: t0 + 95_000,
+      });
+      expect(deltaMachine.phase).toBe('DungeonActive');
+      expect(deltaMachine.activeSession?.restTimer.isActive).toBe(false);
+      expect(deltaMachine.activeSession?.restTimer.remainingSeconds).toBe(0);
+      expect(deltaMachine.activeSession?.restTimer.startedAtMs).toBeNull();
+      expect(deltaMachine.activeSession?.restTimer.endsAtMs).toBeNull();
+    });
   });
 
   describe('Phase 3: Anti-Streak Collapse & Effort-Over-Volume Chest Rarity', () => {

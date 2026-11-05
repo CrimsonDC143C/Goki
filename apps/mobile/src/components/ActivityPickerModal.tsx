@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -10,6 +12,7 @@ import {
   View,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   WorkoutCategory,
   StatType,
@@ -48,6 +51,14 @@ export const ActivityPickerModal: React.FC<ActivityPickerModalProps> = ({
     addCustomExercise,
     deleteCustomExercise,
   } = useGame();
+
+  const insets = useSafeAreaInsets();
+  const safeTop =
+    Platform.OS === 'web'
+      ? 0
+      : Math.max(insets.top, Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 28) + 4);
+  const safeBottom =
+    Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 12);
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeSubcat, setActiveSubcat] = useState<string>('ALL');
@@ -246,8 +257,8 @@ export const ActivityPickerModal: React.FC<ActivityPickerModalProps> = ({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.pickerCard}>
+      <View style={[styles.modalOverlay, { paddingTop: safeTop + 12 }]}>
+        <View style={[styles.pickerCard, { maxHeight: '88%', paddingBottom: safeBottom }]}>
           {/* Header */}
           <View style={styles.headerRow}>
             <View style={{ flex: 1 }}>
@@ -321,7 +332,7 @@ export const ActivityPickerModal: React.FC<ActivityPickerModalProps> = ({
 
           {/* List Content */}
           <ScrollView
-            style={styles.listContainer}
+            style={[styles.listContainer, styles.listScroll]}
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={true}
@@ -468,8 +479,14 @@ export const ActivityPickerModal: React.FC<ActivityPickerModalProps> = ({
             animationType="fade"
             onRequestClose={() => setShowCustomModal(false)}
           >
-            <Pressable style={styles.customModalOverlay} onPress={() => setShowCustomModal(false)}>
-              <Pressable style={styles.customDialogCard} onPress={(e) => e.stopPropagation()}>
+            <Pressable
+              style={[styles.customModalOverlay, { paddingTop: safeTop + 12, paddingBottom: safeBottom + 12 }]}
+              onPress={() => setShowCustomModal(false)}
+            >
+              <Pressable
+                style={[styles.customDialogCard, { maxHeight: '88%' }]}
+                onPress={(e) => e.stopPropagation()}
+              >
                 <View style={styles.customDialogHeader}>
                   <Text style={styles.customDialogTitle}>Create Custom Activity</Text>
                   <TouchableOpacity
@@ -731,6 +748,11 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     flex: 1,
+    maxHeight: 520,
+  },
+  listScroll: {
+    flex: 1,
+    maxHeight: 520,
   },
   listContent: {
     paddingHorizontal: 14,
@@ -833,9 +855,11 @@ const styles = StyleSheet.create({
     borderColor: '#2F2D38',
     borderWidth: 1,
     borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginBottom: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginBottom: 4,
+    minHeight: 52,
+    maxHeight: 56,
   },
   exerciseRowSelected: {
     backgroundColor: '#2D1B22',
@@ -845,7 +869,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   exerciseNameText: {
     fontSize: 13,

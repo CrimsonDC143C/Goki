@@ -214,7 +214,7 @@ export async function fetchCurrentSession(): Promise<{
  */
 export async function fetchUserCharacters(): Promise<{
   ok: boolean;
-  data?: { characters: any[] };
+  data?: { characters: any[]; activeCharacters?: any[]; deletedCharacters?: any[] };
   error?: string;
 }> {
   try {
@@ -238,6 +238,7 @@ export async function fetchUserCharacters(): Promise<{
 export async function createCharacterAccount(payload: {
   name: string;
   gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
+  appearanceId?: string;
   avatarSpriteId?: string;
 }): Promise<{
   ok: boolean;
@@ -260,6 +261,85 @@ export async function createCharacterAccount(payload: {
     return { ok: true, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network error creating character';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Updates a character's cosmetic appearance or name (`PATCH /api/characters/:characterId`).
+ */
+export async function updateCharacterAccount(
+  characterId: string,
+  payload: { name?: string; appearanceId?: string }
+): Promise<{ ok: boolean; statusCode?: number; data?: { character: any }; error?: string }> {
+  try {
+    const res = await apiFetch(
+      `/api/characters/${characterId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      },
+      5000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to update character' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error updating character';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Soft-deletes a character for 30-day retention or permanently erases if permanent=true.
+ */
+export async function deleteCharacterAccount(
+  characterId: string,
+  permanent?: boolean
+): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const url = permanent ? `/api/characters/${characterId}?permanent=true` : `/api/characters/${characterId}`;
+    const res = await apiFetch(
+      url,
+      {
+        method: 'DELETE',
+      },
+      5000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to delete character' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error deleting character';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Restores a soft-deleted character within its 30-day window (`POST /api/characters/:characterId/restore`).
+ */
+export async function restoreCharacterAccount(
+  characterId: string
+): Promise<{ ok: boolean; statusCode?: number; data?: { character: any }; error?: string }> {
+  try {
+    const res = await apiFetch(
+      `/api/characters/${characterId}/restore`,
+      {
+        method: 'POST',
+      },
+      5000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to restore character' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error restoring character';
     return { ok: false, error: message };
   }
 }

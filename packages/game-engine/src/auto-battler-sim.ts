@@ -14,6 +14,12 @@ import {
   LootDrop,
   WorkoutSessionType,
 } from './types';
+import {
+  BASE_EQUIPPABLE_ITEM_BY_SLUG,
+  ItemTier,
+  proceduralItemToLootDrop,
+  rollProceduralItemInstance,
+} from './item-affix-engine';
 
 // ============================================================================
 // INTERFACES — INPUTS
@@ -86,9 +92,23 @@ export interface DungeonRoomDefinition {
   lootRolls?: number;
 }
 
+export type DungeonRequiredRank =
+  | 'COPPER'
+  | 'IRON'
+  | 'BRONZE'
+  | 'SILVER'
+  | 'GOLD'
+  | 'PLATINUM'
+  | 'MYTHIC';
+
 export interface DungeonDefinition {
   dungeonSlug: string;
   dungeonName: string;
+  description?: string;
+  requiredRank?: DungeonRequiredRank;
+  recommendedPower?: number;
+  rewardMultiplierLabel?: string;
+  themeLabel?: string;
   maxSimulationSeconds?: number;
   rooms: DungeonRoomDefinition[];
 }
@@ -1163,12 +1183,53 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
         const picked = rng.pickWeighted(room.lootTable);
         const bonusQty =
           partyLootBonusPct > 0 && rng.chance(partyLootBonusPct) ? 1 : 0;
-        const drop: LootDrop = {
+        let drop: LootDrop = {
           itemSlug: picked.itemSlug,
           itemName: picked.itemName,
           rarity: picked.rarity,
           quantity: picked.quantity + bonusQty,
         };
+
+        if (BASE_EQUIPPABLE_ITEM_BY_SLUG[picked.itemSlug]) {
+          const dungeonRank = input.dungeon.requiredRank ?? 'COPPER';
+          const isBossRoom =
+            room.roomType === 'BOSS' ||
+            (room.roomType === 'LOOT_CHEST' && room.roomNumber === input.dungeon.rooms.length);
+          const roll = rng.nextFloat();
+          let tier: ItemTier = 1;
+
+          if (dungeonRank === 'COPPER') {
+            tier = isBossRoom && roll < 0.4 ? 2 : 1;
+          } else if (dungeonRank === 'IRON') {
+            tier = isBossRoom ? (roll < 0.6 ? 3 : 2) : roll < 0.5 ? 2 : 1;
+          } else if (dungeonRank === 'BRONZE') {
+            tier = isBossRoom ? (roll < 0.5 ? 4 : 3) : roll < 0.6 ? 3 : 2;
+          } else if (dungeonRank === 'SILVER') {
+            if (isBossRoom && roll < 0.15) {
+              tier = 5;
+            } else {
+              tier = isBossRoom ? 4 : roll < 0.6 ? 3 : 4;
+            }
+          } else {
+            // GOLD
+            if (isBossRoom && roll < 0.35) {
+              tier = 5;
+            } else {
+              tier = isBossRoom ? 4 : roll < 0.5 ? 3 : 4;
+            }
+          }
+
+          const rolledGear = rollProceduralItemInstance({
+            baseSlug: picked.itemSlug,
+            tier,
+            seed: `${input.seed}:${room.roomNumber}:${r}:${picked.itemSlug}`,
+          });
+
+          drop = {
+            ...proceduralItemToLootDrop(rolledGear),
+            quantity: 1 + bonusQty,
+          };
+        }
         mergeLootDrop(drop);
         pushEvent(room.roomNumber, {
           type: 'LOOT_DROP',
@@ -1214,3 +1275,1054 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
     events,
   };
 }
+
+// ============================================================================
+// ADVENTURER RANK PROGRESSION & DEFAULT EXPEDITION CATALOG
+// ============================================================================
+
+export const ADVENTURER_RANK_ORDER: readonly DungeonRequiredRank[] = [
+  'COPPER',
+  'IRON',
+  'BRONZE',
+  'SILVER',
+  'GOLD',
+  'PLATINUM',
+  'MYTHIC',
+] as const;
+
+export function isAdventurerRankSufficient(
+  playerRank: string,
+  requiredRank: string
+): boolean {
+  const pIdx = ADVENTURER_RANK_ORDER.indexOf(playerRank.toUpperCase() as DungeonRequiredRank);
+  const rIdx = ADVENTURER_RANK_ORDER.indexOf(requiredRank.toUpperCase() as DungeonRequiredRank);
+  if (pIdx === -1 || rIdx === -1) return true;
+  return pIdx >= rIdx;
+}
+
+export const DEFAULT_DUNGEON_CATALOG: readonly DungeonDefinition[] = [
+  // --------------------------------------------------------------------------
+  // 1. COPPER RANK — Obsidian Catacombs (4 Rooms)
+  // --------------------------------------------------------------------------
+  {
+    dungeonSlug: 'obsidian_catacombs',
+    dungeonName: 'Obsidian Catacombs',
+    description:
+      '24-hour undead crypt for 1-5 adventurers. Rewards balanced mitigation and trap resistance.',
+    requiredRank: 'COPPER',
+    recommendedPower: 100,
+    rewardMultiplierLabel: '1.0x Spoils',
+    themeLabel: 'Undead Crypt',
+    maxSimulationSeconds: 300,
+    rooms: [
+      {
+        roomNumber: 1,
+        roomName: 'Crypt Gatehouse',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 50,
+        enemies: [
+          {
+            enemyId: 'skeleton_vanguard',
+            name: 'Skeletal Vanguard',
+            maxHp: 210,
+            attackPower: 22,
+            armor: 12,
+            attackIntervalSeconds: 1.8,
+          },
+          {
+            enemyId: 'crypt_archer',
+            name: 'Crypt Bone-Archer',
+            maxHp: 150,
+            attackPower: 26,
+            armor: 6,
+            attackIntervalSeconds: 1.5,
+          },
+        ],
+      },
+      {
+        roomNumber: 2,
+        roomName: 'Hall of Pendulum Blades',
+        roomType: 'HAZARD_EVENT',
+        guaranteedGold: 35,
+        hazardConfig: {
+          hazardName: 'Swinging Obsidian Blades',
+          baseDamage: 55,
+          staminaDrain: 18,
+        },
+      },
+      {
+        roomNumber: 3,
+        roomName: 'Sanctum of Bone Lord Malakor',
+        roomType: 'BOSS',
+        guaranteedGold: 180,
+        lootRolls: 2,
+        enemies: [
+          {
+            enemyId: 'bone_lord_malakor',
+            name: 'Bone Lord Malakor',
+            isBoss: true,
+            maxHp: 680,
+            attackPower: 42,
+            armor: 24,
+            attackIntervalSeconds: 1.6,
+            cleaveTargets: 2,
+          },
+        ],
+        lootTable: [
+          {
+            itemSlug: 'malakor_signet',
+            itemName: "Malakor's Signet Ring",
+            rarity: 'EPIC',
+            quantity: 1,
+            weight: 35,
+          },
+          {
+            itemSlug: 'obsidian_ingot',
+            itemName: 'Obsidian Steel Ingot',
+            rarity: 'UNCOMMON',
+            quantity: 3,
+            weight: 65,
+          },
+        ],
+      },
+      {
+        roomNumber: 4,
+        roomName: 'Sunken Reliquary Chest',
+        roomType: 'LOOT_CHEST',
+        guaranteedGold: 85,
+        lootRolls: 1,
+        lootTable: [
+          {
+            itemSlug: 'obsidian_ingot',
+            itemName: 'Obsidian Steel Ingot',
+            rarity: 'UNCOMMON',
+            quantity: 2,
+            weight: 70,
+          },
+          {
+            itemSlug: 'vitality_elixir',
+            itemName: 'Elixir of Peak Output',
+            rarity: 'RARE',
+            quantity: 1,
+            weight: 30,
+          },
+        ],
+      },
+    ],
+  },
+
+  // --------------------------------------------------------------------------
+  // 2. IRON RANK — Bloodfang Warcamp (6 Rooms)
+  // --------------------------------------------------------------------------
+  {
+    dungeonSlug: 'bloodfang_warcamp',
+    dungeonName: 'Bloodfang Warcamp',
+    description:
+      'Orcish stronghold fortified with brutal barricades and heavy cleaving berserkers.',
+    requiredRank: 'IRON',
+    recommendedPower: 185,
+    rewardMultiplierLabel: '1.5x Spoils',
+    themeLabel: 'Orcish Stronghold',
+    maxSimulationSeconds: 450,
+    rooms: [
+      {
+        roomNumber: 1,
+        roomName: 'Bloodfang Outer Perimeter',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 65,
+        enemies: [
+          {
+            enemyId: 'bloodfang_raider_1',
+            name: 'Bloodfang Orc Raider',
+            maxHp: 260,
+            attackPower: 28,
+            armor: 16,
+            attackIntervalSeconds: 1.7,
+          },
+          {
+            enemyId: 'orc_skirmisher_1',
+            name: 'Orc Javelin Skirmisher',
+            maxHp: 180,
+            attackPower: 32,
+            armor: 10,
+            attackIntervalSeconds: 1.5,
+          },
+        ],
+      },
+      {
+        roomNumber: 2,
+        roomName: 'Barricaded Training Pit',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 75,
+        enemies: [
+          {
+            enemyId: 'ironjaw_brute_1',
+            name: 'Ironjaw Orc Brute',
+            maxHp: 340,
+            attackPower: 32,
+            armor: 20,
+            attackIntervalSeconds: 2.0,
+          },
+          {
+            enemyId: 'bloodfang_raider_2',
+            name: 'Bloodfang Orc Raider',
+            maxHp: 260,
+            attackPower: 28,
+            armor: 16,
+            attackIntervalSeconds: 1.7,
+          },
+        ],
+      },
+      {
+        roomNumber: 3,
+        roomName: 'Spiked Barricade Gauntlet',
+        roomType: 'HAZARD_EVENT',
+        guaranteedGold: 50,
+        hazardConfig: {
+          hazardName: 'Spiked Barricade Punji Traps',
+          baseDamage: 75,
+          staminaDrain: 25,
+        },
+      },
+      {
+        roomNumber: 4,
+        roomName: 'Warcamp Inner Yard',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 90,
+        enemies: [
+          {
+            enemyId: 'elite_berserker_1',
+            name: 'Elite Orc Berserker',
+            maxHp: 400,
+            attackPower: 38,
+            armor: 18,
+            attackIntervalSeconds: 1.6,
+          },
+          {
+            enemyId: 'orc_skirmisher_2',
+            name: 'Orc Javelin Skirmisher',
+            maxHp: 190,
+            attackPower: 34,
+            armor: 10,
+            attackIntervalSeconds: 1.5,
+          },
+        ],
+      },
+      {
+        roomNumber: 5,
+        roomName: "Warchief Goretooth's Pavilion",
+        roomType: 'BOSS',
+        guaranteedGold: 240,
+        lootRolls: 2,
+        enemies: [
+          {
+            enemyId: 'warchief_goretooth',
+            name: 'Warchief Goretooth',
+            isBoss: true,
+            maxHp: 1100,
+            attackPower: 58,
+            armor: 32,
+            attackIntervalSeconds: 1.8,
+            cleaveTargets: 2,
+          },
+        ],
+        lootTable: [
+          {
+            itemSlug: 'ironbound_greatsword',
+            itemName: 'Ironbound Greatsword',
+            rarity: 'UNCOMMON',
+            quantity: 1,
+            weight: 50,
+          },
+          {
+            itemSlug: 'obsidian_ingot',
+            itemName: 'Obsidian Steel Ingot',
+            rarity: 'UNCOMMON',
+            quantity: 3,
+            weight: 50,
+          },
+        ],
+      },
+      {
+        roomNumber: 6,
+        roomName: 'War-Spoils Cache',
+        roomType: 'LOOT_CHEST',
+        guaranteedGold: 120,
+        lootRolls: 2,
+        lootTable: [
+          {
+            itemSlug: 'obsidian_ingot',
+            itemName: 'Obsidian Steel Ingot',
+            rarity: 'UNCOMMON',
+            quantity: 2,
+            weight: 60,
+          },
+          {
+            itemSlug: 'ironbound_greatsword',
+            itemName: 'Ironbound Greatsword',
+            rarity: 'UNCOMMON',
+            quantity: 1,
+            weight: 40,
+          },
+        ],
+      },
+    ],
+  },
+
+  // --------------------------------------------------------------------------
+  // 3. BRONZE RANK — Traitors' Garrison (8 Rooms)
+  // --------------------------------------------------------------------------
+  {
+    dungeonSlug: 'traitors_garrison',
+    dungeonName: "Traitors' Garrison",
+    description:
+      'Renegade legion garrisoned in an old watchtower, fielding disciplined archers and duelists.',
+    requiredRank: 'BRONZE',
+    recommendedPower: 290,
+    rewardMultiplierLabel: '2.2x Spoils',
+    themeLabel: 'Renegade Legion',
+    maxSimulationSeconds: 600,
+    rooms: [
+      {
+        roomNumber: 1,
+        roomName: 'Garrison Lower Bailey',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 80,
+        enemies: [
+          {
+            enemyId: 'rogue_swordsman_1',
+            name: 'Rogue Swordsman Duelist',
+            maxHp: 310,
+            attackPower: 36,
+            armor: 22,
+            attackIntervalSeconds: 1.4,
+          },
+          {
+            enemyId: 'renegade_archer_1',
+            name: 'Renegade Sharpshooter Archer',
+            maxHp: 220,
+            attackPower: 42,
+            armor: 12,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 2,
+        roomName: 'Outer Watch Ramparts',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 95,
+        enemies: [
+          {
+            enemyId: 'renegade_archer_2',
+            name: 'Renegade Sharpshooter Archer',
+            maxHp: 220,
+            attackPower: 42,
+            armor: 12,
+            attackIntervalSeconds: 1.3,
+          },
+          {
+            enemyId: 'rogue_knight_1',
+            name: 'Rogue Knight Deserter',
+            maxHp: 420,
+            attackPower: 38,
+            armor: 28,
+            attackIntervalSeconds: 1.9,
+          },
+        ],
+      },
+      {
+        roomNumber: 3,
+        roomName: 'Boiling Oil Murder-Holes',
+        roomType: 'HAZARD_EVENT',
+        guaranteedGold: 70,
+        hazardConfig: {
+          hazardName: 'Cascading Boiling Pitch',
+          baseDamage: 95,
+          staminaDrain: 30,
+        },
+      },
+      {
+        roomNumber: 4,
+        roomName: 'Mess Hall Ambush',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 110,
+        enemies: [
+          {
+            enemyId: 'rogue_swordsman_2',
+            name: 'Rogue Swordsman Duelist',
+            maxHp: 320,
+            attackPower: 38,
+            armor: 22,
+            attackIntervalSeconds: 1.4,
+          },
+          {
+            enemyId: 'rogue_swordsman_3',
+            name: 'Rogue Swordsman Duelist',
+            maxHp: 320,
+            attackPower: 38,
+            armor: 22,
+            attackIntervalSeconds: 1.4,
+          },
+        ],
+      },
+      {
+        roomNumber: 5,
+        roomName: 'Knight Barracks',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 125,
+        enemies: [
+          {
+            enemyId: 'rogue_knight_2',
+            name: 'Rogue Knight Deserter',
+            maxHp: 440,
+            attackPower: 42,
+            armor: 30,
+            attackIntervalSeconds: 1.9,
+          },
+          {
+            enemyId: 'renegade_archer_3',
+            name: 'Renegade Sharpshooter Archer',
+            maxHp: 240,
+            attackPower: 44,
+            armor: 14,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 6,
+        roomName: 'High Keep Guardroom',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 140,
+        enemies: [
+          {
+            enemyId: 'rogue_knight_3',
+            name: 'Rogue Knight Deserter',
+            maxHp: 460,
+            attackPower: 44,
+            armor: 32,
+            attackIntervalSeconds: 1.8,
+          },
+          {
+            enemyId: 'rogue_swordsman_4',
+            name: 'Rogue Swordsman Duelist',
+            maxHp: 340,
+            attackPower: 40,
+            armor: 24,
+            attackIntervalSeconds: 1.4,
+          },
+        ],
+      },
+      {
+        roomNumber: 7,
+        roomName: 'Keep Tower: Fallen Commander Vane',
+        roomType: 'BOSS',
+        guaranteedGold: 320,
+        lootRolls: 3,
+        enemies: [
+          {
+            enemyId: 'commander_vane',
+            name: 'Fallen Commander Vane',
+            isBoss: true,
+            maxHp: 1600,
+            attackPower: 72,
+            armor: 42,
+            attackIntervalSeconds: 1.7,
+            cleaveTargets: 2,
+          },
+        ],
+        lootTable: [
+          {
+            itemSlug: 'warden_chainmail',
+            itemName: "Warden's Tempered Hauberk",
+            rarity: 'RARE',
+            quantity: 1,
+            weight: 50,
+          },
+          {
+            itemSlug: 'windrunner_daggers',
+            itemName: 'Twin Windrunner Blades',
+            rarity: 'RARE',
+            quantity: 1,
+            weight: 50,
+          },
+        ],
+      },
+      {
+        roomNumber: 8,
+        roomName: 'Garrison Armory Chest',
+        roomType: 'LOOT_CHEST',
+        guaranteedGold: 160,
+        lootRolls: 2,
+        lootTable: [
+          {
+            itemSlug: 'warden_chainmail',
+            itemName: "Warden's Tempered Hauberk",
+            rarity: 'RARE',
+            quantity: 1,
+            weight: 45,
+          },
+          {
+            itemSlug: 'windrunner_daggers',
+            itemName: 'Twin Windrunner Blades',
+            rarity: 'RARE',
+            quantity: 1,
+            weight: 55,
+          },
+        ],
+      },
+    ],
+  },
+
+  // --------------------------------------------------------------------------
+  // 4. SILVER RANK — Blighted Ossuary (10 Rooms)
+  // --------------------------------------------------------------------------
+  {
+    dungeonSlug: 'blighted_ossuary',
+    dungeonName: 'Blighted Ossuary',
+    description:
+      'Ancient subterranean necropolis teeming with cursed phalanxes and necrotic magic.',
+    requiredRank: 'SILVER',
+    recommendedPower: 420,
+    rewardMultiplierLabel: '3.2x Spoils',
+    themeLabel: 'Necromantic Citadel',
+    maxSimulationSeconds: 750,
+    rooms: [
+      {
+        roomNumber: 1,
+        roomName: 'Ossuary Crypt Steps',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 110,
+        enemies: [
+          {
+            enemyId: 'skeleton_phalanx_1',
+            name: 'Ossuary Skeleton Phalanx',
+            maxHp: 380,
+            attackPower: 44,
+            armor: 26,
+            attackIntervalSeconds: 1.6,
+          },
+          {
+            enemyId: 'bone_sniper_1',
+            name: 'Bone-Sniper Archer',
+            maxHp: 280,
+            attackPower: 52,
+            armor: 16,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 2,
+        roomName: 'Chamber of Souls',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 125,
+        enemies: [
+          {
+            enemyId: 'skeleton_executioner_1',
+            name: 'Greatsword Skeleton Executioner',
+            maxHp: 520,
+            attackPower: 56,
+            armor: 30,
+            attackIntervalSeconds: 1.8,
+          },
+          {
+            enemyId: 'bone_sniper_2',
+            name: 'Bone-Sniper Archer',
+            maxHp: 280,
+            attackPower: 52,
+            armor: 16,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 3,
+        roomName: 'Mausoleum Avenue',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 135,
+        enemies: [
+          {
+            enemyId: 'skeleton_phalanx_2',
+            name: 'Ossuary Skeleton Phalanx',
+            maxHp: 390,
+            attackPower: 46,
+            armor: 28,
+            attackIntervalSeconds: 1.6,
+          },
+          {
+            enemyId: 'skeleton_phalanx_3',
+            name: 'Ossuary Skeleton Phalanx',
+            maxHp: 390,
+            attackPower: 46,
+            armor: 28,
+            attackIntervalSeconds: 1.6,
+          },
+        ],
+      },
+      {
+        roomNumber: 4,
+        roomName: 'Necrotic Miasma Vault',
+        roomType: 'HAZARD_EVENT',
+        guaranteedGold: 90,
+        hazardConfig: {
+          hazardName: 'Blighted Necrotic Fumes',
+          baseDamage: 125,
+          staminaDrain: 38,
+        },
+      },
+      {
+        roomNumber: 5,
+        roomName: 'Tomb of the Forsaken',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 150,
+        enemies: [
+          {
+            enemyId: 'skeleton_executioner_2',
+            name: 'Greatsword Skeleton Executioner',
+            maxHp: 540,
+            attackPower: 58,
+            armor: 32,
+            attackIntervalSeconds: 1.8,
+          },
+          {
+            enemyId: 'bone_sniper_3',
+            name: 'Bone-Sniper Archer',
+            maxHp: 290,
+            attackPower: 54,
+            armor: 16,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 6,
+        roomName: 'Embalming Catacombs',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 165,
+        enemies: [
+          {
+            enemyId: 'skeleton_phalanx_4',
+            name: 'Ossuary Skeleton Phalanx',
+            maxHp: 410,
+            attackPower: 48,
+            armor: 30,
+            attackIntervalSeconds: 1.6,
+          },
+          {
+            enemyId: 'skeleton_executioner_3',
+            name: 'Greatsword Skeleton Executioner',
+            maxHp: 550,
+            attackPower: 60,
+            armor: 32,
+            attackIntervalSeconds: 1.8,
+          },
+        ],
+      },
+      {
+        roomNumber: 7,
+        roomName: 'Sepulcher of the Black Guard',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 180,
+        enemies: [
+          {
+            enemyId: 'skeleton_executioner_4',
+            name: 'Greatsword Skeleton Executioner',
+            maxHp: 580,
+            attackPower: 62,
+            armor: 34,
+            attackIntervalSeconds: 1.7,
+          },
+          {
+            enemyId: 'bone_sniper_4',
+            name: 'Bone-Sniper Archer',
+            maxHp: 310,
+            attackPower: 56,
+            armor: 18,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 8,
+        roomName: 'Antechamber of the Arch-Lich',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 200,
+        enemies: [
+          {
+            enemyId: 'skeleton_executioner_5',
+            name: 'Greatsword Skeleton Executioner',
+            maxHp: 600,
+            attackPower: 65,
+            armor: 35,
+            attackIntervalSeconds: 1.7,
+          },
+          {
+            enemyId: 'skeleton_phalanx_5',
+            name: 'Ossuary Skeleton Phalanx',
+            maxHp: 430,
+            attackPower: 50,
+            armor: 32,
+            attackIntervalSeconds: 1.6,
+          },
+        ],
+      },
+      {
+        roomNumber: 9,
+        roomName: 'Sanctum Sanctorum: Arch-Lich Valerius',
+        roomType: 'BOSS',
+        guaranteedGold: 450,
+        lootRolls: 3,
+        enemies: [
+          {
+            enemyId: 'arch_lich_valerius',
+            name: 'Arch-Lich Valerius & Dread Executioner',
+            isBoss: true,
+            maxHp: 2400,
+            attackPower: 92,
+            armor: 54,
+            attackIntervalSeconds: 1.6,
+            cleaveTargets: 3,
+          },
+        ],
+        lootTable: [
+          {
+            itemSlug: 'malakor_signet',
+            itemName: "Malakor's Signet Ring",
+            rarity: 'EPIC',
+            quantity: 1,
+            weight: 60,
+          },
+          {
+            itemSlug: 'raid_essence_crystal',
+            itemName: 'Raid Boss Essence Crystal',
+            rarity: 'RARE',
+            quantity: 2,
+            weight: 40,
+          },
+        ],
+      },
+      {
+        roomNumber: 10,
+        roomName: 'Ancient Ossuary Reliquary',
+        roomType: 'LOOT_CHEST',
+        guaranteedGold: 220,
+        lootRolls: 2,
+        lootTable: [
+          {
+            itemSlug: 'malakor_signet',
+            itemName: "Malakor's Signet Ring",
+            rarity: 'EPIC',
+            quantity: 1,
+            weight: 45,
+          },
+          {
+            itemSlug: 'vitality_elixir',
+            itemName: 'Elixir of Peak Output',
+            rarity: 'RARE',
+            quantity: 2,
+            weight: 55,
+          },
+        ],
+      },
+    ],
+  },
+
+  // --------------------------------------------------------------------------
+  // 5. GOLD RANK — Hellforge Sanctum (12 Rooms)
+  // --------------------------------------------------------------------------
+  {
+    dungeonSlug: 'hellforge_sanctum',
+    dungeonName: 'Hellforge Sanctum',
+    description:
+      'Infernal crucible where demonic lieutenants forge cataclysmic weapons in molten rivers.',
+    requiredRank: 'GOLD',
+    recommendedPower: 600,
+    rewardMultiplierLabel: '4.5x Spoils',
+    themeLabel: 'Abyssal Fortress',
+    maxSimulationSeconds: 900,
+    rooms: [
+      {
+        roomNumber: 1,
+        roomName: 'Sanctum Magma Gates',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 140,
+        enemies: [
+          {
+            enemyId: 'hellforge_orc_1',
+            name: 'Hellforge Orc Hell-Guard',
+            maxHp: 480,
+            attackPower: 55,
+            armor: 34,
+            attackIntervalSeconds: 1.6,
+          },
+          {
+            enemyId: 'hellforge_crossbow_1',
+            name: 'Hell-Guard Crossbowman',
+            maxHp: 340,
+            attackPower: 62,
+            armor: 20,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 2,
+        roomName: 'Cinder Foundry Causeway',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 160,
+        enemies: [
+          {
+            enemyId: 'dread_knight_skel_1',
+            name: 'Hellforge Dread-Knight Skeleton',
+            maxHp: 650,
+            attackPower: 68,
+            armor: 40,
+            attackIntervalSeconds: 1.7,
+          },
+          {
+            enemyId: 'hellforge_crossbow_2',
+            name: 'Hell-Guard Crossbowman',
+            maxHp: 340,
+            attackPower: 62,
+            armor: 20,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 3,
+        roomName: 'Smelting Trenches',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 180,
+        enemies: [
+          {
+            enemyId: 'hellforge_orc_2',
+            name: 'Hellforge Orc Hell-Guard',
+            maxHp: 500,
+            attackPower: 58,
+            armor: 36,
+            attackIntervalSeconds: 1.6,
+          },
+          {
+            enemyId: 'dread_knight_skel_2',
+            name: 'Hellforge Dread-Knight Skeleton',
+            maxHp: 670,
+            attackPower: 70,
+            armor: 42,
+            attackIntervalSeconds: 1.7,
+          },
+        ],
+      },
+      {
+        roomNumber: 4,
+        roomName: 'Magma Eruption Bridge',
+        roomType: 'HAZARD_EVENT',
+        guaranteedGold: 130,
+        hazardConfig: {
+          hazardName: 'Volcanic Lava Geyser',
+          baseDamage: 160,
+          staminaDrain: 45,
+        },
+      },
+      {
+        roomNumber: 5,
+        roomName: 'Demon Lieutenant Guardpost',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 210,
+        enemies: [
+          {
+            enemyId: 'demon_lieutenant_1',
+            name: 'Demon Boss Vanguard Lieutenant',
+            maxHp: 850,
+            attackPower: 80,
+            armor: 45,
+            attackIntervalSeconds: 1.6,
+            cleaveTargets: 2,
+          },
+        ],
+      },
+      {
+        roomNumber: 6,
+        roomName: 'Brimstone Anvils',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 230,
+        enemies: [
+          {
+            enemyId: 'hellforge_orc_3',
+            name: 'Hellforge Orc Hell-Guard',
+            maxHp: 520,
+            attackPower: 60,
+            armor: 38,
+            attackIntervalSeconds: 1.6,
+          },
+          {
+            enemyId: 'dread_knight_skel_3',
+            name: 'Hellforge Dread-Knight Skeleton',
+            maxHp: 700,
+            attackPower: 72,
+            armor: 44,
+            attackIntervalSeconds: 1.7,
+          },
+        ],
+      },
+      {
+        roomNumber: 7,
+        roomName: 'Crucible Core Approach',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 250,
+        enemies: [
+          {
+            enemyId: 'dread_knight_skel_4',
+            name: 'Hellforge Dread-Knight Skeleton',
+            maxHp: 720,
+            attackPower: 74,
+            armor: 46,
+            attackIntervalSeconds: 1.7,
+          },
+          {
+            enemyId: 'hellforge_crossbow_3',
+            name: 'Hell-Guard Crossbowman',
+            maxHp: 360,
+            attackPower: 68,
+            armor: 22,
+            attackIntervalSeconds: 1.3,
+          },
+        ],
+      },
+      {
+        roomNumber: 8,
+        roomName: 'Obsidian Ramparts',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 280,
+        enemies: [
+          {
+            enemyId: 'hellforge_orc_4',
+            name: 'Hellforge Orc Hell-Guard',
+            maxHp: 550,
+            attackPower: 64,
+            armor: 40,
+            attackIntervalSeconds: 1.6,
+          },
+          {
+            enemyId: 'hellforge_orc_5',
+            name: 'Hellforge Orc Hell-Guard',
+            maxHp: 550,
+            attackPower: 64,
+            armor: 40,
+            attackIntervalSeconds: 1.6,
+          },
+        ],
+      },
+      {
+        roomNumber: 9,
+        roomName: 'Demon Gatekeepers',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 310,
+        enemies: [
+          {
+            enemyId: 'demon_lieutenant_2',
+            name: 'Demon Boss Vanguard Lieutenant',
+            maxHp: 900,
+            attackPower: 84,
+            armor: 48,
+            attackIntervalSeconds: 1.6,
+            cleaveTargets: 2,
+          },
+        ],
+      },
+      {
+        roomNumber: 10,
+        roomName: 'Inner Heart of the Crucible',
+        roomType: 'MOB_ENCOUNTER',
+        guaranteedGold: 350,
+        enemies: [
+          {
+            enemyId: 'dread_knight_skel_5',
+            name: 'Hellforge Dread-Knight Skeleton',
+            maxHp: 760,
+            attackPower: 78,
+            armor: 48,
+            attackIntervalSeconds: 1.7,
+          },
+          {
+            enemyId: 'demon_lieutenant_3',
+            name: 'Demon Boss Vanguard Lieutenant',
+            maxHp: 920,
+            attackPower: 85,
+            armor: 48,
+            attackIntervalSeconds: 1.6,
+            cleaveTargets: 2,
+          },
+        ],
+      },
+      {
+        roomNumber: 11,
+        roomName: "Throne of Molten Agony: Ignisrax's Avatar",
+        roomType: 'BOSS',
+        guaranteedGold: 650,
+        lootRolls: 3,
+        enemies: [
+          {
+            enemyId: 'ignisrax_avatar',
+            name: "Ignisrax's Avatar, Abyssal Overlord",
+            isBoss: true,
+            maxHp: 3600,
+            attackPower: 115,
+            armor: 65,
+            attackIntervalSeconds: 1.5,
+            cleaveTargets: 3,
+          },
+        ],
+        lootTable: [
+          {
+            itemSlug: 'crown_of_the_wyrm',
+            itemName: 'Crown of the World Wyrm',
+            rarity: 'MYTHIC',
+            quantity: 1,
+            weight: 30,
+          },
+          {
+            itemSlug: 'raid_essence_crystal',
+            itemName: 'Raid Boss Essence Crystal',
+            rarity: 'RARE',
+            quantity: 3,
+            weight: 70,
+          },
+        ],
+      },
+      {
+        roomNumber: 12,
+        roomName: 'Mythic Hellforge Vault',
+        roomType: 'LOOT_CHEST',
+        guaranteedGold: 320,
+        lootRolls: 3,
+        lootTable: [
+          {
+            itemSlug: 'crown_of_the_wyrm',
+            itemName: 'Crown of the World Wyrm',
+            rarity: 'MYTHIC',
+            quantity: 1,
+            weight: 25,
+          },
+          {
+            itemSlug: 'obsidian_ingot',
+            itemName: 'Obsidian Steel Ingot',
+            rarity: 'UNCOMMON',
+            quantity: 5,
+            weight: 45,
+          },
+          {
+            itemSlug: 'raid_essence_crystal',
+            itemName: 'Raid Boss Essence Crystal',
+            rarity: 'RARE',
+            quantity: 2,
+            weight: 30,
+          },
+        ],
+      },
+    ],
+  },
+];
+

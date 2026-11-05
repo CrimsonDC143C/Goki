@@ -2,6 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useGame } from '../state/GameContext';
+import {
+  DEMON_BOSS_SPRITE_CONFIG,
+  GREATSWORD_SKELETON_SPRITE_CONFIG,
+} from '../components/battle/sprites/spriteManifest';
+import { SpriteAnimator } from '../components/battle/sprites/SpriteAnimator';
 import { COLORS, RARITY_COLORS } from '../theme';
 
 const RANK_LADDER = [
@@ -90,7 +95,7 @@ export const GuildHallScreen: React.FC = () => {
               else setNotice(`Completed '${b.title}'!`);
             }}
           >
-            <Text style={styles.claimBtnText}>
+            <Text style={[styles.claimBtnText, b.completed && styles.claimBtnTextDone]}>
               {b.completed ? 'Claimed' : 'Complete'}
             </Text>
           </Pressable>
@@ -126,29 +131,49 @@ export const GuildHallScreen: React.FC = () => {
       {raids.map((raid) => {
         const hpPct = Math.max(0, Math.min(100, (raid.currentHp / raid.maxHp) * 100));
         const isSlain = raid.currentHp <= 0;
+        const isVaelgor =
+          raid.id.toLowerCase().includes('vaelgor') ||
+          raid.bossName.toLowerCase().includes('vaelgor');
+        const bossSpriteConfig = isVaelgor
+          ? GREATSWORD_SKELETON_SPRITE_CONFIG
+          : DEMON_BOSS_SPRITE_CONFIG;
 
         return (
           <View key={raid.id} style={styles.raidCard}>
-            <View style={styles.raidTopRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.raidName}>
-                  {raid.accessType === 'GUILD_ONLY' ? '🛡️ GUILD RAID: ' : '🌍 PUBLIC RAID: '}
-                  {raid.bossName}
-                </Text>
-                <Text style={styles.subText}>
-                  7-Day Window • Kill Bonus: 1.5x Spoils & Mythic Loot Table
+            <View style={styles.bossHeaderRow}>
+              {/* 56x56 Boss Sprite Avatar Frame */}
+              <View style={styles.bossAvatarFrame}>
+                <SpriteAnimator
+                  rig={isVaelgor ? 'greatsword_skeleton' : 'demon_boss'}
+                  config={bossSpriteConfig}
+                  state="idle"
+                  size={56}
+                />
+              </View>
+
+              <View style={styles.bossHeaderInfo}>
+                <View style={styles.raidTopRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.raidName}>
+                      {raid.accessType === 'GUILD_ONLY' ? '🛡️ GUILD RAID: ' : '🌍 PUBLIC RAID: '}
+                      {raid.bossName}
+                    </Text>
+                    <Text style={styles.subText}>
+                      7-Day Window • Kill Bonus: 1.5x Spoils &amp; Mythic Loot Table
+                    </Text>
+                  </View>
+                  <Text style={styles.hpPctLabel}>{hpPct.toFixed(1)}% HP</Text>
+                </View>
+
+                <View style={styles.bossHpTrack}>
+                  <View style={[styles.bossHpFill, { width: `${hpPct}%` }]} />
+                </View>
+                <Text style={styles.hpCaption}>
+                  {raid.currentHp.toLocaleString()} / {raid.maxHp.toLocaleString()} HP{' '}
+                  {isSlain ? '— 💀 BOSS DEFEATED!' : ''}
                 </Text>
               </View>
-              <Text style={styles.hpPctLabel}>{hpPct.toFixed(1)}% HP</Text>
             </View>
-
-            <View style={styles.bossHpTrack}>
-              <View style={[styles.bossHpFill, { width: `${hpPct}%` }]} />
-            </View>
-            <Text style={styles.hpCaption}>
-              {raid.currentHp.toLocaleString()} / {raid.maxHp.toLocaleString()} HP{' '}
-              {isSlain ? '— 💀 BOSS DEFEATED!' : ''}
-            </Text>
 
             {/* Participant Contribution Leaderboard */}
             <View style={styles.contribBox}>
@@ -171,8 +196,9 @@ export const GuildHallScreen: React.FC = () => {
               <Pressable
                 style={[
                   styles.strikeBtn,
-                  raid.dailyAttackUsedToday && styles.claimBtnDone,
+                  raid.dailyAttackUsedToday && styles.strikeBtnDone,
                 ]}
+                disabled={raid.dailyAttackUsedToday}
                 onPress={() => {
                   const res = lockDailyRaidStrike(raid.id);
                   if (!res.ok) setNotice(res.error ?? null);
@@ -182,7 +208,12 @@ export const GuildHallScreen: React.FC = () => {
                     );
                 }}
               >
-                <Text style={styles.strikeBtnText}>
+                <Text
+                  style={[
+                    styles.strikeBtnText,
+                    raid.dailyAttackUsedToday && styles.strikeBtnTextDone,
+                  ]}
+                >
                   {raid.dailyAttackUsedToday
                     ? '✓ Daily Strike Locked'
                     : '⚔️ Lock Daily Combat Strike'}
@@ -376,8 +407,14 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   claimBtnDone: {
-    backgroundColor: COLORS.bgElevated,
-    opacity: 0.6,
+    backgroundColor: '#1E293B',
+    borderColor: '#334155',
+    borderWidth: 1,
+    opacity: 1,
+  },
+  claimBtnTextDone: {
+    color: '#A1A1AA',
+    fontWeight: '700',
   },
   claimBtnText: {
     color: COLORS.bgDeep,
@@ -405,6 +442,26 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     padding: 14,
     marginBottom: 12,
+  },
+  bossHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  bossAvatarFrame: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#DC2626',
+    backgroundColor: '#1E1218',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bossHeaderInfo: {
+    flex: 1,
   },
   raidTopRow: {
     flexDirection: 'row',
@@ -471,10 +528,20 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
+  strikeBtnDone: {
+    backgroundColor: '#1E293B',
+    borderColor: '#334155',
+    borderWidth: 1,
+    opacity: 1,
+  },
   strikeBtnText: {
     color: COLORS.textPrimary,
     fontSize: 12,
     fontWeight: '800',
+  },
+  strikeBtnTextDone: {
+    color: '#A1A1AA',
+    fontWeight: '700',
   },
   rolloverBtn: {
     backgroundColor: COLORS.bgElevated,

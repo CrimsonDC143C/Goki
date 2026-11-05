@@ -88,6 +88,34 @@ export interface LootDrop {
   itemName: string;
   rarity: ItemRarity;
   quantity: number;
+  // Optional Procedural Itemization Metadata (Tiers 1-5, Prefix, Suffix, T5 Unique)
+  baseSlug?: string;
+  tier?: 1 | 2 | 3 | 4 | 5;
+  prefixId?: string | null;
+  prefixLabel?: string | null;
+  prefixSummary?: string | null;
+  suffixId?: string | null;
+  suffixLabel?: string | null;
+  suffixSummary?: string | null;
+  baseStatsSummary?: string;
+  statBonuses?: EquipmentStatBonuses;
+  primaryStatBonuses?: {
+    STR?: number;
+    END?: number;
+    AGI?: number;
+    DEX?: number;
+    CON?: number;
+    WIS?: number;
+    SPR?: number;
+  };
+  uniquePassive?: {
+    uniqueName: string;
+    uniqueLore: string;
+    passiveId: string;
+    passiveName: string;
+    passiveDescription: string;
+    passiveModifiers?: Record<string, number>;
+  } | null;
 }
 
 export interface CoreStatBlock {
@@ -138,6 +166,12 @@ export interface EquipmentStatBonuses {
   dodgeRating?: number;
   critChance?: number;
   critMultiplier?: number;
+  damageMitigationPct?: number;
+  lifeOnHit?: number;
+  armorPenetrationPct?: number;
+  skillPotencyPct?: number;
+  startOfCombatShieldHp?: number;
+  hazardResistancePct?: number;
 }
 
 export interface SystemicFatigueCombatPenalty {

@@ -5,11 +5,14 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiFetch } from '../api/apiClient';
+import { useGame } from '../state/GameContext';
 import { COLORS, CRIMSON_ONI } from '../theme';
 
 export type TriageStatusFilter = 'ALL' | 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'IGNORED';
@@ -64,6 +67,14 @@ const CATEGORY_FILTERS: Array<{ key: TriageCategoryFilter; label: string }> = [
 ];
 
 export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visible, onClose }) => {
+  const insets = useSafeAreaInsets();
+  const safeTop =
+    Platform.OS === 'web'
+      ? 0
+      : Math.max(insets.top, Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 28) + 4);
+  const safeBottom =
+    Platform.OS === 'web' ? 0 : Math.max(insets.bottom, 12);
+
   const [reports, setReports] = useState<BugReportEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -73,6 +84,17 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<{ [id: string]: string }>({});
+
+  const { fatigueState, resilienceShields, simulateLayoffHours } = useGame();
+  const hoursSinceLastWorkout =
+    fatigueState?.lastWorkoutAt !== null && fatigueState?.lastWorkoutAt !== undefined
+      ? Math.round((Date.now() - new Date(fatigueState.lastWorkoutAt).getTime()) / (3600 * 1000))
+      : 0;
+  const antiCollapseStatus = {
+    hoursSinceLastWorkout,
+    isReturningAfterGap: hoursSinceLastWorkout >= 72,
+    resilienceTokenAvailable: resilienceShields > 0 || hoursSinceLastWorkout >= 72,
+  };
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
@@ -201,7 +223,12 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
+      <View
+        style={[
+          styles.modalBackdrop,
+          { paddingTop: safeTop + 12, paddingBottom: safeBottom + 12 },
+        ]}
+      >
         <View style={styles.triageContainer}>
           {/* Header */}
           <View style={styles.header}>
@@ -311,6 +338,42 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
           >
+            {/* 🧪 Simulation & Recovery Debug Tools */}
+            <View style={styles.debugSection}>
+              <View style={styles.debugHeaderRow}>
+                <Text style={styles.debugSectionTitle}>🧪 Simulation &amp; Recovery Debug Tools</Text>
+                <View style={styles.debugBadgePill}>
+                  <Text style={styles.debugBadgePillText}>
+                    {antiCollapseStatus.hoursSinceLastWorkout}h Since Last Workout
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.debugActionsRow}>
+                <Pressable
+                  testID="dev-triage-simulate-layoff-btn"
+                  style={styles.simulateLayoffBtn}
+                  onPress={() => simulateLayoffHours(96)}
+                >
+                  <Text style={styles.simulateLayoffBtnText}>
+                    ⏱️ Simulate 96h Missed-Session Gap
+                  </Text>
+                </Pressable>
+                <View style={styles.debugMetricsPills}>
+                  <Text
+                    style={[
+                      styles.debugStatusText,
+                      antiCollapseStatus.resilienceTokenAvailable
+                        ? styles.debugStatusActive
+                        : styles.debugStatusInactive,
+                    ]}
+                  >
+                    🛡️ Resilience Token:{' '}
+                    {antiCollapseStatus.resilienceTokenAvailable ? 'ACTIVE' : 'INACTIVE'} (
+                    {resilienceShields} Shields)
+                  </Text>
+                </View>
+              </View>
+            </View>
             {loading && reports.length === 0 && (
               <View style={styles.emptyState}>
                 <ActivityIndicator size="large" color="#C69A45" />
@@ -555,7 +618,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     maxWidth: 820,
     width: '100%',
-    maxHeight: '92%',
+    maxHeight: '88%',
     overflow: 'hidden',
   },
   header: {
@@ -898,5 +961,72 @@ const styles = StyleSheet.create({
     color: '#F9FAFB',
     fontSize: 11,
     fontWeight: '800',
+  },
+  debugSection: {
+    backgroundColor: '#1C1525',
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#7C3AED',
+    padding: 12,
+    marginBottom: 14,
+  },
+  debugHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  debugSectionTitle: {
+    color: '#E9D5FF',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  debugBadgePill: {
+    backgroundColor: '#2E1065',
+    borderColor: '#A855F7',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  debugBadgePillText: {
+    color: '#E9D5FF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  debugActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  simulateLayoffBtn: {
+    backgroundColor: '#581C87',
+    borderColor: '#C084FC',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  simulateLayoffBtnText: {
+    color: '#FAF5FF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  debugMetricsPills: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 180,
+  },
+  debugStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  debugStatusActive: {
+    color: '#34D399',
+  },
+  debugStatusInactive: {
+    color: '#9CA3AF',
   },
 });
