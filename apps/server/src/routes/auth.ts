@@ -135,7 +135,21 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       include: {
         stats: true,
         fatigueState: true,
-        equipmentLoadout: true,
+        inventoryItems: { include: { item: true } },
+        equipmentLoadout: {
+          include: {
+            mainHand: { include: { item: true } },
+            offHand: { include: { item: true } },
+            head: { include: { item: true } },
+            chest: { include: { item: true } },
+            legs: { include: { item: true } },
+            boots: { include: { item: true } },
+            accessory1: { include: { item: true } },
+            accessory2: { include: { item: true } },
+          },
+        },
+        bountyCompletions: { include: { bounty: true } },
+        _count: { select: { workoutLogs: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -196,7 +210,21 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       include: {
         stats: true,
         fatigueState: true,
-        equipmentLoadout: true,
+        inventoryItems: { include: { item: true } },
+        equipmentLoadout: {
+          include: {
+            mainHand: { include: { item: true } },
+            offHand: { include: { item: true } },
+            head: { include: { item: true } },
+            chest: { include: { item: true } },
+            legs: { include: { item: true } },
+            boots: { include: { item: true } },
+            accessory1: { include: { item: true } },
+            accessory2: { include: { item: true } },
+          },
+        },
+        bountyCompletions: { include: { bounty: true } },
+        _count: { select: { workoutLogs: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
