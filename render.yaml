@@ -31,7 +31,7 @@ services:
       - key: APP_MIN_REQUIRED_VERSION
         value: "0.1.0"
       - key: ANDROID_APK_DOWNLOAD_URL
-        sync: false
+        value: "https://expo.dev/artifacts/eas/cl7bfJE2S84ueb4LuUG0ygjs4jvN51jLO1SbKpsN9M0.apk"
       - key: APP_RELEASE_NOTES
         value: "v0.2.0 Playtester Release: Clean training history slate, gated Developer Sanctum, and clarified workout modes."
 

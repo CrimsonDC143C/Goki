@@ -56,7 +56,7 @@ export const UpdateBanner: React.FC = () => {
   const handleDownloadApk = async () => {
     const url =
       updateState.manifest?.androidApkDownloadUrl ||
-      'https://expo.dev/accounts/crimsondc143c/projects/gymify-rpg/builds';
+      'https://expo.dev/artifacts/eas/cl7bfJE2S84ueb4LuUG0ygjs4jvN51jLO1SbKpsN9M0.apk';
     try {
       const canOpen = await Linking.canOpenURL(url);
       if (canOpen) {
