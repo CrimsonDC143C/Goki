@@ -29,7 +29,7 @@ services:
       - key: APP_LATEST_VERSION
         value: "0.2.0"
       - key: APP_MIN_REQUIRED_VERSION
-        value: "0.2.0"
+        value: "0.1.0"
       - key: ANDROID_APK_DOWNLOAD_URL
         sync: false
       - key: APP_RELEASE_NOTES

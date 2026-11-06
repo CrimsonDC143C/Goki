@@ -1,7 +1,5 @@
 import { AppState, AppStateStatus, Platform } from 'react-native';
-import Constants from 'expo-constants';
 import {
-  compareSemver,
   isForceUpdateRequired,
   isUpdateAvailable,
 } from '@gymify/game-engine';
@@ -50,10 +48,18 @@ try {
 
 const POLL_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
+/**
+ * Authoritative JS-bundle semantic version.
+ * Using an explicit JS constant (rather than `Constants.expoConfig.version` or `nativeApplicationVersion`)
+ * guarantees that OTA-updated standalone APKs immediately reflect the new JS bundle version (e.g. `0.2.0`)
+ * instead of remaining permanently stuck on the original native binary version (`0.1.0`).
+ */
+export const APP_BUNDLE_VERSION = '0.2.0';
+
 class AutoUpdateManagerService {
   private state: AutoUpdateState = {
     status: 'IDLE',
-    currentVersion: Constants?.expoConfig?.version || '0.2.0',
+    currentVersion: APP_BUNDLE_VERSION,
     manifest: null,
     errorMessage: null,
     lastCheckedAt: null,
@@ -213,46 +219,27 @@ class AutoUpdateManagerService {
         );
       }
 
-      // Check binary upgrade rules if manifest is available
-      if (manifest) {
-        if (
-          isForceUpdateRequired(
-            this.state.currentVersion,
-            manifest.minRequiredVersion
-          )
-        ) {
-          diagnosticLogger.logWarn(
-            'AUTO_UPDATE',
-            'Force binary upgrade required by server manifest',
-            {
-              currentVersion: this.state.currentVersion,
-              minRequired: manifest.minRequiredVersion,
-            }
-          );
-          this.updateState({ status: 'FORCE_BINARY_UPDATE' });
-          return this.getState();
-        }
-
-        if (
-          isUpdateAvailable(
-            this.state.currentVersion,
-            manifest.latestVersion
-          )
-        ) {
-          diagnosticLogger.logInfo(
-            'AUTO_UPDATE',
-            'Newer binary / APK version available on server manifest',
-            {
-              currentVersion: this.state.currentVersion,
-              latestVersion: manifest.latestVersion,
-            }
-          );
-          this.updateState({ status: 'BINARY_UPDATE_AVAILABLE' });
-          return this.getState();
-        }
+      // 2. Check Forced Binary Upgrade first (only triggers when minRequiredVersion > currentVersion)
+      if (
+        manifest &&
+        isForceUpdateRequired(
+          this.state.currentVersion,
+          manifest.minRequiredVersion
+        )
+      ) {
+        diagnosticLogger.logWarn(
+          'AUTO_UPDATE',
+          'Force binary upgrade required by server manifest',
+          {
+            currentVersion: this.state.currentVersion,
+            minRequired: manifest.minRequiredVersion,
+          }
+        );
+        this.updateState({ status: 'FORCE_BINARY_UPDATE' });
+        return this.getState();
       }
 
-      // 2. Native OTA Update Check (Expo Updates)
+      // 3. Native OTA Update Check (Expo Updates) — always attempt OTA before prompting manual APK download
       const updates = ExpoUpdates;
       if (updates && updates.isEnabled && !__DEV__ && Platform.OS !== 'web') {
         const updateCheck = await updates.checkForUpdateAsync();
@@ -293,6 +280,26 @@ class AutoUpdateManagerService {
             return this.getState();
           }
         }
+      }
+
+      // 4. Optional Binary APK Prompt (only if server latestVersion > currentVersion AND no OTA bundle matched)
+      if (
+        manifest &&
+        isUpdateAvailable(
+          this.state.currentVersion,
+          manifest.latestVersion
+        )
+      ) {
+        diagnosticLogger.logInfo(
+          'AUTO_UPDATE',
+          'Newer binary / APK version available on server manifest (no matching OTA found)',
+          {
+            currentVersion: this.state.currentVersion,
+            latestVersion: manifest.latestVersion,
+          }
+        );
+        this.updateState({ status: 'BINARY_UPDATE_AVAILABLE' });
+        return this.getState();
       }
 
       // If we reached here without returning, check if an update is already staged

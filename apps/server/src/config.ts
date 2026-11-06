@@ -14,7 +14,7 @@ const envSchema = z.object({
   DIAGNOSTICS_WEBHOOK_URL: z.string().optional(),
   ADMIN_EMAILS: z.string().optional(),
   APP_LATEST_VERSION: z.string().default('0.2.0'),
-  APP_MIN_REQUIRED_VERSION: z.string().default('0.2.0'),
+  APP_MIN_REQUIRED_VERSION: z.string().default('0.1.0'),
   ANDROID_APK_DOWNLOAD_URL: z.string().optional(),
   APP_RELEASE_NOTES: z
     .string()

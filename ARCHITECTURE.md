@@ -456,7 +456,7 @@ The backend is declaratively configured via the repository root [`render.yaml`](
      * `CORS_ORIGIN: "*"` (supports both mobile clients and web clients).
      * `DIAGNOSTICS_WEBHOOK_URL`: Connected to our dedicated `#bug-reports` Discord server channel for real-time playtester alerts.
      * `ADMIN_EMAILS`: Optional comma-separated list of developer emails permitted to query/mutate `/api/diagnostics/reports` in production.
-     * `APP_LATEST_VERSION: "0.2.0"` & `APP_MIN_REQUIRED_VERSION: "0.2.0"`.
+     * `APP_LATEST_VERSION: "0.2.0"` & `APP_MIN_REQUIRED_VERSION: "0.1.0"` (keeping `minRequiredVersion` at `"0.1.0"` so existing `0.1.0` standalone APKs receive `v0.2.0` seamlessly via OTA without a forced binary download prompt).
 
 ### B. Mobile Client Deployment: Expo Application Services (`eas.json`)
 
@@ -574,7 +574,7 @@ Gymify RPG targets diverse deployment targets including Standalone Android APKs,
 ### C. Backend Version Manifest Endpoint (`apps/server`)
 * **`GET /api/version`:** Public, non-authenticated endpoint returning:
   * `latestVersion`: `process.env.APP_LATEST_VERSION` (default `"0.2.0"`)
-  * `minRequiredVersion`: `process.env.APP_MIN_REQUIRED_VERSION` (default `"0.2.0"`)
+  * `minRequiredVersion`: `process.env.APP_MIN_REQUIRED_VERSION` (default `"0.1.0"`, ensuring OTA-compatible `0.1.0` binaries are never blocked by a false-positive APK force-update modal)
   * `androidApkDownloadUrl`: Direct link to latest EAS preview/production APK build
   * `releaseNotes`: Descriptive summary of the release
   * `serverTimestamp`: ISO timestamp of the response
