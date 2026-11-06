@@ -3,9 +3,7 @@
     "name": "Gymify RPG",
     "slug": "gymify-rpg",
     "version": "0.2.0",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "0.1.0",
     "updates": {
       "url": "https://u.expo.dev/18696d92-3fb6-4aa5-b4c3-e89952db9031",
       "checkAutomatically": "ON_LOAD",
