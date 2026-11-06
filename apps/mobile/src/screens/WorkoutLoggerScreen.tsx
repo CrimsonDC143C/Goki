@@ -32,6 +32,18 @@ import {
   CompletedExerciseEntry,
   PostWorkoutEncouragementSummary,
   evaluatePostWorkoutSummary,
+  GeneratedWarmupSet,
+  TrainingMetricTooltipKey,
+  WeightUnit,
+  calculateProgressiveOverloadTarget,
+  convertDisplayWeightToKg,
+  convertKgToDisplayWeight,
+  formatCleanWeightNumber,
+  formatCompactPrevPill,
+  isWarmupSetType,
+  resolveExerciseWeightUnit,
+  resolveGhostRowForSetOrder,
+  resolvePreviousExerciseSessionSets,
 } from '@gymify/game-engine';
 import {
   OfflineDraftExerciseBlock,
@@ -43,6 +55,13 @@ import { WorkoutCategoryGateway } from '../components/WorkoutCategoryGateway';
 import { DynamicRestTimer } from '../components/DynamicRestTimer';
 import { PresetDesignerModal } from '../components/PresetDesignerModal';
 import { ActivityPickerModal } from '../components/ActivityPickerModal';
+import {
+  MetricInfoBadge,
+  MetricInfoTooltipModal,
+} from '../components/MetricInfoTooltipModal';
+import { PlatesAndWarmupModal } from '../components/PlatesAndWarmupModal';
+import { ExerciseStickyNoteRow } from '../components/ExerciseStickyNoteRow';
+import { ShareableWorkoutReceiptModal } from '../components/ShareableWorkoutReceiptModal';
 import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { useGame, ExerciseCatalogItem } from '../state/GameContext';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
@@ -229,6 +248,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     savePreset,
     deletePreset,
     recordRecentActivity,
+    exerciseGymPreferences,
+    saveExerciseStickyNote,
+    saveExerciseWeightUnit,
+    saveExerciseBarWeightKg,
+    defaultWeightUnit,
+    warmupPresetCount,
+    setWarmupPresetCount,
     stats,
     gameMode,
     lastHybridConsolidation,
@@ -328,9 +354,18 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [scrollOffsetY, setScrollOffsetY] = useState<number>(0);
   const [postWorkoutSummary, setPostWorkoutSummary] = useState<PostWorkoutEncouragementSummary | null>(null);
+  const [lastCompletedWorkout, setLastCompletedWorkout] = useState<CompletedWorkoutRecord | null>(null);
+  const [lastCompletedSummary, setLastCompletedSummary] = useState<PostWorkoutEncouragementSummary | null>(null);
+  const [showShareReceipt, setShowShareReceipt] = useState<boolean>(false);
   const [sessionPresetTemplate, setSessionPresetTemplate] = useState<WorkoutPresetDefinition | null>(null);
   const [editingPresetDraft, setEditingPresetDraft] = useState<WorkoutPresetDefinition | null>(null);
   const [presetSavedInSession, setPresetSavedInSession] = useState<boolean>(false);
+  const [platesModalBlockId, setPlatesModalBlockId] = useState<string | null>(null);
+  const [tooltipState, setTooltipState] = useState<{
+    key: TrainingMetricTooltipKey;
+    headline?: string | null;
+    note?: string | null;
+  } | null>(null);
 
   // Micro-animation for Boss Damage / XP Ticker
   const microPulseAnim = useRef(new Animated.Value(1)).current;
@@ -367,6 +402,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   // Active Session Reference from State Machine
   const activeSession = workoutMachine.activeSession;
   const phase = workoutMachine.phase;
+  const activeGymId = activeSession?.arrivalBoon.gymId ?? selectedGym.id;
+  const activeGymName = activeSession?.arrivalBoon.gymName ?? selectedGym.name;
 
   // Live Boss Current HP Math
   const maxBossHp = selectedBoss.maxHp;
@@ -446,25 +483,48 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     setActiveCategory(null);
   };
 
+  const resolveBlockUnit = useCallback(
+    (block: OfflineDraftExerciseBlock): WeightUnit =>
+      block.weightUnit ??
+      resolveExerciseWeightUnit(
+        exerciseGymPreferences,
+        block.exerciseId,
+        activeGymId,
+        defaultWeightUnit
+      ),
+    [activeGymId, defaultWeightUnit, exerciseGymPreferences]
+  );
+
   const handleLoadPreset = (preset: WorkoutPresetDefinition) => {
     const stamp = Date.now();
     const rawBlocks = preset.blocks?.exerciseBlocks || [];
-    const blocks: OfflineDraftExerciseBlock[] = rawBlocks.map((b, bIdx) => ({
-      blockId: `blk_${stamp}_${bIdx + 1}`,
-      exerciseId: b.exerciseSlug,
-      exerciseName: b.exerciseName,
-      supersetGroupId: b.supersetGroupId ?? null,
-      sets: b.sets.map((s, sIdx) => ({
-        id: `set_${stamp}_${bIdx + 1}_${sIdx + 1}`,
-        weightKgStr: String(s.targetWeightKg || 60),
-        repsStr: String(s.targetReps || 8),
-        isWarmup: s.setType === 'WARMUP',
-        setType: s.setType || 'NORMAL',
-        rpe: s.targetRpe ?? 8.5,
+    const blocks: OfflineDraftExerciseBlock[] = rawBlocks.map((b, bIdx) => {
+      const unit = resolveExerciseWeightUnit(
+        exerciseGymPreferences,
+        b.exerciseSlug,
+        activeGymId,
+        defaultWeightUnit
+      );
+      return {
+        blockId: `blk_${stamp}_${bIdx + 1}`,
+        exerciseId: b.exerciseSlug,
+        exerciseName: b.exerciseName,
         supersetGroupId: b.supersetGroupId ?? null,
-        completed: false,
-      })),
-    }));
+        weightUnit: unit,
+        sets: b.sets.map((s, sIdx) => ({
+          id: `set_${stamp}_${bIdx + 1}_${sIdx + 1}`,
+          weightKgStr: formatCleanWeightNumber(
+            convertKgToDisplayWeight(s.targetWeightKg || 60, unit)
+          ),
+          repsStr: String(s.targetReps || 8),
+          isWarmup: s.setType === 'WARMUP',
+          setType: s.setType || 'NORMAL',
+          rpe: s.targetRpe ?? 8.5,
+          supersetGroupId: b.supersetGroupId ?? null,
+          completed: false,
+        })),
+      };
+    });
 
     if (blocks.length > 0) {
       setExerciseBlocks(blocks);
@@ -476,22 +536,33 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   const handleLoadSessionIntoWorkout = useCallback(
     (workout: CompletedWorkoutRecord) => {
       const nowMs = Date.now();
-      const blocks: OfflineDraftExerciseBlock[] = (workout.exercises || []).map((ex, bIdx) => ({
-        blockId: `blk_hist_${nowMs}_${bIdx + 1}`,
-        exerciseId: ex.exerciseId,
-        exerciseName: ex.exerciseName || ex.exerciseId,
-        supersetGroupId: null,
-        sets: (ex.sets || []).map((s, sIdx) => ({
-          id: `set_hist_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
-          weightKgStr: String(s.weightKg ?? 0),
-          repsStr: String(s.reps ?? 0),
-          isWarmup: s.setType === 'WARMUP' || !!s.isWarmup,
-          setType: s.setType || 'NORMAL',
-          rpe: s.rpe ?? 8.5,
+      const blocks: OfflineDraftExerciseBlock[] = (workout.exercises || []).map((ex, bIdx) => {
+        const unit = resolveExerciseWeightUnit(
+          exerciseGymPreferences,
+          ex.exerciseId,
+          activeGymId,
+          defaultWeightUnit
+        );
+        return {
+          blockId: `blk_hist_${nowMs}_${bIdx + 1}`,
+          exerciseId: ex.exerciseId,
+          exerciseName: ex.exerciseName || ex.exerciseId,
           supersetGroupId: null,
-          completed: false,
-        })),
-      }));
+          weightUnit: unit,
+          sets: (ex.sets || []).map((s, sIdx) => ({
+            id: `set_hist_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
+            weightKgStr: formatCleanWeightNumber(
+              convertKgToDisplayWeight(s.weightKg ?? 0, unit)
+            ),
+            repsStr: String(s.reps ?? 0),
+            isWarmup: s.setType === 'WARMUP' || !!s.isWarmup,
+            setType: s.setType || 'NORMAL',
+            rpe: s.rpe ?? 8.5,
+            supersetGroupId: null,
+            completed: false,
+          })),
+        };
+      });
 
       if (blocks.length > 0) {
         setExerciseBlocks(blocks);
@@ -500,21 +571,186 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       setShowTrainingHistory(false);
       triggerSensoryCue('WORKOUT_PRESET_LOADED');
     },
-    []
+    [activeGymId, defaultWeightUnit, exerciseGymPreferences]
   );
 
-  // Resistance Exercise Set Row Handlers
+  // Resistance Exercise Set Row Handlers (Smart Mid-Workout Swap)
   const handleSelectExercise = (blockId: string, exerciseId: string) => {
     const ex = exercises.find((e) => e.id === exerciseId);
+    const nextUnit = resolveExerciseWeightUnit(
+      exerciseGymPreferences,
+      exerciseId,
+      activeGymId,
+      defaultWeightUnit
+    );
+    const prevLookup = resolvePreviousExerciseSessionSets({
+      exerciseId,
+      workoutHistory,
+      activeGymId,
+    });
+
     setExerciseBlocks((prev) =>
-      prev.map((b) =>
-        b.blockId === blockId
-          ? { ...b, exerciseId, exerciseName: ex?.name ?? exerciseId }
-          : b
-      )
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        return {
+          ...b,
+          exerciseId,
+          exerciseName: ex?.name ?? exerciseId,
+          weightUnit: nextUnit,
+          sets: b.sets.map((s) =>
+            s.completed
+              ? s
+              : {
+                  ...s,
+                  weightKgStr: prevLookup.found ? '' : '60',
+                  repsStr: prevLookup.found ? '' : '8',
+                }
+          ),
+        };
+      })
     );
     recordRecentActivity(exerciseId);
     setOpenExercisePickerBlockId(null);
+  };
+
+  const handleMoveExerciseBlock = (blockIndex: number, direction: -1 | 1) => {
+    setExerciseBlocks((prev) => {
+      const targetIndex = blockIndex + direction;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(blockIndex, 1);
+      if (!moved) return prev;
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleToggleBlockWeightUnit = (blockId: string) => {
+    const target = exerciseBlocks.find((b) => b.blockId === blockId);
+    if (!target) return;
+    const oldUnit = resolveBlockUnit(target);
+    const nextUnit: WeightUnit = oldUnit === 'KG' ? 'LBS' : 'KG';
+
+    saveExerciseWeightUnit({
+      exerciseId: target.exerciseId,
+      unit: nextUnit,
+      activeGymId,
+      activeGymName,
+    });
+
+    setExerciseBlocks((prev) =>
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        return {
+          ...b,
+          weightUnit: nextUnit,
+          sets: b.sets.map((s) => {
+            if (!s.weightKgStr.trim()) return s;
+            const kg = convertDisplayWeightToKg(Number(s.weightKgStr) || 0, oldUnit);
+            return {
+              ...s,
+              weightKgStr: formatCleanWeightNumber(convertKgToDisplayWeight(kg, nextUnit)),
+            };
+          }),
+        };
+      })
+    );
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleApplyOverloadTarget = (
+    blockId: string,
+    targetDisplayWeight: number,
+    targetReps: number,
+    targetRpe: number,
+    unit: WeightUnit
+  ) => {
+    const weightStr = formatCleanWeightNumber(targetDisplayWeight);
+    const repsStr = String(Math.max(1, Math.floor(targetReps)));
+    setExerciseBlocks((prev) =>
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        return {
+          ...b,
+          weightUnit: unit,
+          sets: b.sets.map((s) => {
+            if (s.completed || isWarmupSetType(s.setType, s.isWarmup) || s.setType === 'DROP_SET') {
+              return s;
+            }
+            return {
+              ...s,
+              weightKgStr: weightStr,
+              repsStr,
+              rpe: targetRpe,
+            };
+          }),
+        };
+      })
+    );
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleCopyPrevToRow = (
+    blockId: string,
+    setId: string,
+    displayWeightStr: string,
+    repsStr: string,
+    rpe: number | null
+  ) => {
+    setValidationError(null);
+    setExerciseBlocks((prev) =>
+      prev.map((b) =>
+        b.blockId === blockId
+          ? {
+              ...b,
+              sets: b.sets.map((s) =>
+                s.id === setId
+                  ? {
+                      ...s,
+                      weightKgStr: displayWeightStr,
+                      repsStr,
+                      rpe: rpe ?? s.rpe,
+                    }
+                  : s
+              ),
+            }
+          : b
+      )
+    );
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleInsertWarmupSets = (
+    blockId: string,
+    warmupSets: GeneratedWarmupSet[],
+    unit: WeightUnit
+  ) => {
+    if (warmupSets.length === 0) return;
+    const stamp = Date.now();
+    setExerciseBlocks((prev) =>
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        const keptSets = b.sets.filter(
+          (s) => s.completed || !isWarmupSetType(s.setType, s.isWarmup)
+        );
+        const generatedRows: OfflineDraftSetRow[] = warmupSets.map((ws, idx) => ({
+          id: `set_wu_${stamp}_${idx + 1}`,
+          weightKgStr: formatCleanWeightNumber(ws.displayWeight),
+          repsStr: String(ws.reps),
+          isWarmup: true,
+          setType: 'WARMUP',
+          rpe: ws.rpe,
+          completed: false,
+        }));
+        return {
+          ...b,
+          weightUnit: unit,
+          sets: [...generatedRows, ...keptSets],
+        };
+      })
+    );
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
   const handleUpdateSetField = (
@@ -625,14 +861,19 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 
         const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         const lastRow = b.sets[b.sets.length - 1];
+        const prevLookup = resolvePreviousExerciseSessionSets({
+          exerciseId: b.exerciseId,
+          workoutHistory,
+          activeGymId,
+        });
         return {
           ...b,
           sets: [
             ...b.sets,
             {
               id: `set_${stamp}`,
-              weightKgStr: lastRow?.weightKgStr ?? '60',
-              repsStr: lastRow?.repsStr ?? '8',
+              weightKgStr: lastRow?.weightKgStr ?? (prevLookup.found ? '' : '60'),
+              repsStr: lastRow?.repsStr ?? (prevLookup.found ? '' : '8'),
               isWarmup: false,
               setType: 'NORMAL',
               rpe: lastRow?.rpe ?? 8.5,
@@ -663,6 +904,18 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     const nextExercise =
       resistanceCatalog.find((e) => !usedIds.has(e.id)) ?? resistanceCatalog[0];
     const nextId = nextExercise?.id ?? 'bench_press';
+    const nextUnit = resolveExerciseWeightUnit(
+      exerciseGymPreferences,
+      nextId,
+      activeGymId,
+      defaultWeightUnit
+    );
+    const prevLookup = resolvePreviousExerciseSessionSets({
+      exerciseId: nextId,
+      workoutHistory,
+      activeGymId,
+    });
+    const setCount = prevLookup.workingSets.length > 0 ? prevLookup.workingSets.length : 1;
 
     setExerciseBlocks((prev) => [
       ...prev,
@@ -670,17 +923,16 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         blockId: `blk_${stamp}`,
         exerciseId: nextId,
         exerciseName: nextExercise?.name ?? nextId,
-        sets: [
-          {
-            id: `set_${stamp}_1`,
-            weightKgStr: '60',
-            repsStr: '8',
-            isWarmup: false,
-            setType: 'NORMAL',
-            rpe: 8.5,
-            completed: false,
-          },
-        ],
+        weightUnit: nextUnit,
+        sets: Array.from({ length: setCount }, (_, idx) => ({
+          id: `set_${stamp}_${idx + 1}`,
+          weightKgStr: prevLookup.found ? '' : '60',
+          repsStr: prevLookup.found ? '' : '8',
+          isWarmup: false,
+          setType: 'NORMAL',
+          rpe: prevLookup.workingSets[idx]?.rpe ?? 8.5,
+          completed: false,
+        })),
       },
     ]);
   };
@@ -692,7 +944,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     });
   };
 
-  // Primary Checkbox Set Completed Event Handler (Ticking DONE)
+  // Primary Checkbox Set Completed Event Handler (Ticking DONE + 1-Tap Ghost Auto-Fill)
   const handleToggleSetCompleted = (blockId: string, setId: string) => {
     setValidationError(null);
     let justCompleted = false;
@@ -701,18 +953,67 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 
     const nextBlocks = exerciseBlocks.map((b) => {
       if (b.blockId !== blockId) return b;
-      completedBlock = b;
-      return {
-        ...b,
-        sets: b.sets.map((s) => {
-          if (s.id === setId) {
-            justCompleted = !s.completed;
-            completedRow = s;
-            return { ...s, completed: !s.completed };
-          }
-          return s;
-        }),
-      };
+      const unit = resolveBlockUnit(b);
+      const prevLookup = resolvePreviousExerciseSessionSets({
+        exerciseId: b.exerciseId,
+        workoutHistory,
+        activeGymId,
+      });
+
+      let workingCounter = 0;
+      let warmupCounter = 0;
+
+      const updatedSets = b.sets.map((s) => {
+        const isWu = isWarmupSetType(s.setType, s.isWarmup);
+        const wIdx = workingCounter;
+        const wuIdx = warmupCounter;
+        if (isWu) warmupCounter += 1;
+        else workingCounter += 1;
+
+        if (s.id !== setId) return s;
+
+        justCompleted = !s.completed;
+        if (!justCompleted) {
+          completedRow = { ...s, completed: false };
+          return completedRow;
+        }
+
+        const ghost = resolveGhostRowForSetOrder({
+          lookup: prevLookup,
+          setType: s.setType,
+          isWarmup: s.isWarmup,
+          workingOrderIndex: wIdx,
+          warmupOrderIndex: wuIdx,
+        });
+
+        const filledWeightStr =
+          s.weightKgStr.trim().length > 0
+            ? s.weightKgStr
+            : ghost
+              ? formatCleanWeightNumber(convertKgToDisplayWeight(ghost.weightKg, unit))
+              : '60';
+        const filledRepsStr =
+          s.repsStr.trim().length > 0
+            ? s.repsStr
+            : ghost
+              ? String(ghost.reps)
+              : '8';
+        const filledRpe = s.rpe ?? ghost?.rpe ?? 8.5;
+
+        const nextRow: OfflineDraftSetRow = {
+          ...s,
+          weightKgStr: filledWeightStr,
+          repsStr: filledRepsStr,
+          rpe: filledRpe,
+          completed: true,
+        };
+        completedRow = nextRow;
+        return nextRow;
+      });
+
+      const updatedBlock = { ...b, weightUnit: unit, sets: updatedSets };
+      completedBlock = updatedBlock;
+      return updatedBlock;
     });
 
     setExerciseBlocks(nextBlocks);
@@ -735,7 +1036,11 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     if (completedRow && completedBlock) {
       const exBlock = completedBlock as OfflineDraftExerciseBlock;
       const setRow = completedRow as OfflineDraftSetRow;
-      const weightKg = Number(setRow.weightKgStr) || 0;
+      const blockUnit = resolveBlockUnit(exBlock);
+      const weightKg = convertDisplayWeightToKg(
+        Math.max(0, Number(setRow.weightKgStr) || 0),
+        blockUnit
+      );
       const reps = Number(setRow.repsStr) || 0;
       const rowRpe = setRow.rpe ?? 8.5;
       const rowSetType = setRow.setType || 'NORMAL';
@@ -1042,6 +1347,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     const historyExercises: CompletedExerciseEntry[] = [];
     for (const block of exerciseBlocks) {
       const exMeta = exercises.find((e) => e.id === block.exerciseId);
+      const bUnit = resolveBlockUnit(block);
       const completedRows = block.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
       if (completedRows.length > 0) {
         historyExercises.push({
@@ -1049,7 +1355,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           exerciseName: exMeta?.name ?? block.exerciseName ?? block.exerciseId,
           sets: completedRows.map((s, idx) => ({
             setNumber: idx + 1,
-            weightKg: Math.max(0, Number(s.weightKgStr) || 0),
+            weightKg: convertDisplayWeightToKg(Math.max(0, Number(s.weightKgStr) || 0), bUnit),
             reps: Math.floor(Number(s.repsStr) || 0),
             rpe: s.rpe ?? null,
             setType: s.setType,
@@ -1063,6 +1369,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     const currentWorkout: CompletedWorkoutRecord = {
       id: `online_hist_${nowMs}`,
       characterId: activeCharacterId ?? null,
+      gymId: activeGymId,
+      gymName: activeGymName,
       source: 'ONLINE',
       performedAtIso: new Date(nowMs).toISOString(),
       durationSeconds: sessionElapsedSec,
@@ -1087,6 +1395,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       isSystemSeed: false,
       blocks: {
         exerciseBlocks: exerciseBlocks.map((b) => {
+          const bUnit = resolveBlockUnit(b);
           const completedSets = b.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
           const chosenSets = completedSets.length > 0 ? completedSets : b.sets;
           return {
@@ -1095,7 +1404,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             exerciseName: b.exerciseName || b.exerciseId,
             supersetGroupId: b.supersetGroupId ?? undefined,
             sets: chosenSets.map((s) => ({
-              targetWeightKg: Math.max(0, Number(s.weightKgStr) || 0),
+              targetWeightKg: convertDisplayWeightToKg(
+                Math.max(0, Number(s.weightKgStr) || 0),
+                bUnit
+              ),
               targetReps: Math.max(1, Math.floor(Number(s.repsStr) || 0)),
               setType: s.setType || 'NORMAL',
               targetRpe: s.rpe ?? 8.5,
@@ -1122,14 +1434,40 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     }
 
     setValidationError(null);
+    setLastCompletedWorkout(currentWorkout);
+    setLastCompletedSummary(summary);
     setPostWorkoutSummary(summary);
     setSessionPresetTemplate(draftTemplate);
     setPresetSavedInSession(false);
   };
 
+  const renderShareableReceiptModal = () => {
+    const rp = activeSession?.rewardPayload;
+    return (
+      <ShareableWorkoutReceiptModal
+        visible={showShareReceipt && lastCompletedWorkout !== null}
+        workout={lastCompletedWorkout}
+        summary={lastCompletedSummary ?? postWorkoutSummary}
+        initialUnit={defaultWeightUnit}
+        streakFallback={consistencyStreak + 1}
+        rpgContext={{
+          bossName: selectedBoss.name,
+          gameMode,
+          finalXpByStat: rp?.finalXpByStat ?? null,
+          totalGoldAwarded: rp?.totalGoldAwarded ?? null,
+          lootChestTier: rp?.lootChest.tier ?? null,
+          lootChestName: rp?.lootChest.chestName ?? null,
+          raidEnergy: lastHybridConsolidation?.raidEnergy ?? null,
+          critTriggered: Boolean(rp?.workoutEvaluation.criticalTrainingBonus.triggered),
+        }}
+        onClose={() => setShowShareReceipt(false)}
+      />
+    );
+  };
+
   const renderPostWorkoutSummaryModal = () => (
     <Modal
-      visible={postWorkoutSummary !== null && !showPresetDesigner}
+      visible={postWorkoutSummary !== null && !showPresetDesigner && !showShareReceipt}
       transparent
       animationType="fade"
       onRequestClose={() => setPostWorkoutSummary(null)}
@@ -1211,6 +1549,20 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           )}
 
           <View style={styles.postWorkoutActions}>
+            <TouchableOpacity
+              style={styles.shareReceiptActionBtn}
+              onPress={() => {
+                triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                setShowShareReceipt(true);
+              }}
+              activeOpacity={0.75}
+              testID="post-workout-share-receipt-btn"
+            >
+              <Text style={styles.shareReceiptActionBtnText}>
+                🧾 Share 9:16 RPG Raid Receipt
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[
                 styles.postWorkoutSavePresetBtn,
@@ -1408,6 +1760,18 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           )}
         </View>
 
+        <Pressable
+          style={styles.shareReceiptActionBtn}
+          onPress={() => {
+            triggerSensoryCue('SET_MICRO_REWARD_TICK');
+            setShowShareReceipt(true);
+          }}
+        >
+          <Text style={styles.shareReceiptActionBtnText}>
+            🧾 SHARE 9:16 GUILD RAID RECEIPT
+          </Text>
+        </Pressable>
+
         <Pressable style={styles.thresholdStartBtn} onPress={proceedToHybridLootReview}>
           <Text style={styles.thresholdStartTitle}>
             🎁 ENTER LOOT REVIEW &amp; STAT ALLOCATION
@@ -1418,6 +1782,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         </Pressable>
 
         {renderPostWorkoutSummaryModal()}
+        {renderShareableReceiptModal()}
 
         <PresetDesignerModal
           visible={showPresetDesigner}
@@ -1550,6 +1915,17 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           </View>
         </View>
 
+        {/* Share 9:16 Raid Receipt Action */}
+        <Pressable
+          style={styles.shareReceiptActionBtn}
+          onPress={() => {
+            triggerSensoryCue('SET_MICRO_REWARD_TICK');
+            setShowShareReceipt(true);
+          }}
+        >
+          <Text style={styles.shareReceiptActionBtnText}>🧾 SHARE 9:16 GUILD RAID RECEIPT</Text>
+        </Pressable>
+
         {/* Save Routine as Preset Action */}
         <Pressable
           style={styles.saveAsPresetBtn}
@@ -1575,6 +1951,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             🏰 SAVE &amp; RETURN TO BASE
           </Text>
         </Pressable>
+
+        {renderShareableReceiptModal()}
 
         <PresetDesignerModal
           visible={showPresetDesigner}
@@ -1845,11 +2223,25 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                 !!prevBlock?.supersetGroupId &&
                 prevBlock.supersetGroupId === block.supersetGroupId;
 
+              const blockUnit = resolveBlockUnit(block);
               const prRecord = historicalPRs[block.exerciseId];
-              const prevHint =
-                prRecord && prRecord.bestE1RM > 0
-                  ? `Best: ${prRecord.bestE1RM}kg e1RM`
-                  : '80kg × 8 @ 8';
+              const prevLookup = resolvePreviousExerciseSessionSets({
+                exerciseId: block.exerciseId,
+                workoutHistory,
+                activeGymId,
+              });
+              const overloadRec = calculateProgressiveOverloadTarget({
+                exerciseId: block.exerciseId,
+                workoutHistory,
+                activeGymId,
+                isCompound: exMeta ? exMeta.baseXpFactor >= 1.15 : true,
+                equipmentType: exMeta?.equipmentType,
+                historicalPR: prRecord ?? null,
+                unit: blockUnit,
+              });
+
+              let workingOrderCounter = 0;
+              let warmupOrderCounter = 0;
 
               return (
                 <React.Fragment key={block.blockId}>
@@ -1872,7 +2264,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 
                     {/* Exercise Selector & Actions Header */}
                     <View style={styles.exerciseCardHeader}>
-                      <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+                      <View style={{ flex: 1, minWidth: 0, marginRight: 6 }}>
                         <Pressable
                           style={styles.exerciseSelectorBtn}
                           onPress={() => setOpenExercisePickerBlockId(block.blockId)}
@@ -1880,12 +2272,54 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                           <Text style={styles.exerciseSelectorText} numberOfLines={1}>
                             {exMeta?.name ?? block.exerciseName ?? block.exerciseId}
                           </Text>
-                          <Text style={styles.exerciseSelectorCaret}>🔍 ▼</Text>
+                          <Text style={styles.exerciseSelectorCaret}>⇄ ▼</Text>
                         </Pressable>
-                        <Text style={styles.prevSessionHintText}>Prev: {prevHint}</Text>
+
+                        <View style={styles.subMetaRow}>
+                          {prRecord && prRecord.bestE1RM > 0 ? (
+                            <View style={styles.e1rmInlineBadge}>
+                              <Text style={styles.prevSessionHintText}>
+                                🏆 Best:{' '}
+                                {formatCleanWeightNumber(
+                                  convertKgToDisplayWeight(prRecord.bestE1RM, blockUnit)
+                                )}
+                                {blockUnit === 'LBS' ? 'lb' : 'kg'} e1RM
+                              </Text>
+                              <MetricInfoBadge
+                                onPress={() => setTooltipState({ key: 'E1RM' })}
+                              />
+                            </View>
+                          ) : prevLookup.found && !prevLookup.matchedActiveGym && prevLookup.sourceGymName ? (
+                            <Text style={styles.prevSessionHintText} numberOfLines={1}>
+                              Prev from {prevLookup.sourceGymName}
+                            </Text>
+                          ) : null}
+                        </View>
                       </View>
 
                       <View style={styles.cardHeaderActions}>
+                        {exerciseBlocks.length > 1 && (
+                          <View style={styles.reorderGroup}>
+                            <TouchableOpacity
+                              style={[styles.reorderBtn, bIdx === 0 && styles.reorderBtnDisabled]}
+                              disabled={bIdx === 0}
+                              onPress={() => handleMoveExerciseBlock(bIdx, -1)}
+                            >
+                              <Text style={styles.reorderBtnText}>↑</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.reorderBtn,
+                                bIdx === exerciseBlocks.length - 1 && styles.reorderBtnDisabled,
+                              ]}
+                              disabled={bIdx === exerciseBlocks.length - 1}
+                              onPress={() => handleMoveExerciseBlock(bIdx, 1)}
+                            >
+                              <Text style={styles.reorderBtnText}>↓</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+
                         <TouchableOpacity
                           style={[styles.linkSupersetBtn, isGrouped && styles.linkSupersetBtnActive]}
                           onPress={() => handleToggleSuperset(bIdx)}
@@ -1896,7 +2330,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                               isGrouped && styles.linkSupersetBtnTextActive,
                             ]}
                           >
-                            {isGrouped ? '🔗 Superset' : '🔗 Link'}
+                            {isGrouped ? '🔗 SS' : '🔗 Link'}
                           </Text>
                         </TouchableOpacity>
 
@@ -1911,23 +2345,130 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                       </View>
                     </View>
 
-                    {/* Table Column Headers */}
+                    {/* Gym-Aware Sticky Per-Exercise Note */}
+                    <ExerciseStickyNoteRow
+                      exerciseId={block.exerciseId}
+                      activeGymId={activeGymId}
+                      activeGymName={activeGymName}
+                      preferences={exerciseGymPreferences}
+                      onSaveNote={saveExerciseStickyNote}
+                    />
+
+                    {/* Ergonomics Toolbar: Overload Target + Plates/Warm-Up + KG/LBS Toggle */}
+                    <View style={styles.ergonomicsStrip}>
+                      {overloadRec.available ? (
+                        <View style={styles.overloadPillGroup}>
+                          <TouchableOpacity
+                            style={[
+                              styles.overloadTargetPill,
+                              overloadRec.triggersPrCrit && styles.overloadTargetPillCrit,
+                            ]}
+                            onPress={() =>
+                              handleApplyOverloadTarget(
+                                block.blockId,
+                                overloadRec.targetDisplayWeight,
+                                overloadRec.targetReps,
+                                overloadRec.targetRpe,
+                                blockUnit
+                              )
+                            }
+                            activeOpacity={0.75}
+                          >
+                            <Text style={styles.overloadTargetText} numberOfLines={1}>
+                              {overloadRec.pillLabel}
+                            </Text>
+                          </TouchableOpacity>
+                          <MetricInfoBadge
+                            onPress={() =>
+                              setTooltipState({
+                                key: 'OVERLOAD_TARGET',
+                                headline: overloadRec.pillLabel,
+                                note: overloadRec.rationaleText,
+                              })
+                            }
+                          />
+                        </View>
+                      ) : null}
+
+                      <View style={styles.ergonomicsRightTools}>
+                        <TouchableOpacity
+                          style={styles.platesHelperBtn}
+                          onPress={() => setPlatesModalBlockId(block.blockId)}
+                          activeOpacity={0.75}
+                        >
+                          <Text style={styles.platesHelperBtnText}>🧮 Plates / Warm-Up</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[
+                            styles.unitTogglePill,
+                            blockUnit === 'LBS' && styles.unitTogglePillImperial,
+                          ]}
+                          onPress={() => handleToggleBlockWeightUnit(block.blockId)}
+                          activeOpacity={0.75}
+                        >
+                          <Text style={styles.unitTogglePillText}>{blockUnit}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    {/* 6-Column Table Headers: TYPE | PREV | KG/LBS | REPS | RPE | DONE */}
                     <View style={styles.setTableHeader}>
-                      <Text style={[styles.colHeader, { width: 44 }]}>TYPE</Text>
-                      <Text style={[styles.colHeader, styles.colInput]}>KG</Text>
+                      <View style={[styles.colHeaderWithInfo, { width: 36 }]}>
+                        <Text style={styles.colHeader}>SET</Text>
+                        <MetricInfoBadge
+                          onPress={() => setTooltipState({ key: 'SET_TYPES' })}
+                        />
+                      </View>
+                      <Text style={[styles.colHeader, { width: 58 }]}>PREV</Text>
+                      <Text style={[styles.colHeader, styles.colInput]}>{blockUnit}</Text>
                       <Text style={[styles.colHeader, styles.colInput]}>REPS</Text>
-                      <Text style={[styles.colHeader, { width: 52 }]}>RPE</Text>
-                      <Text style={[styles.colHeader, styles.colCheck]}>DONE</Text>
+                      <View style={[styles.colHeaderWithInfo, { width: 44 }]}>
+                        <Text style={styles.colHeader}>RPE</Text>
+                        <MetricInfoBadge
+                          onPress={() => setTooltipState({ key: 'RPE' })}
+                        />
+                      </View>
+                      <Text style={[styles.colHeader, styles.colCheck]}>✓</Text>
                       {block.sets.length > 1 && <View style={styles.colDeleteSpacer} />}
                     </View>
 
                     {/* Set Rows */}
                     {block.sets.map((row) => {
                       const rowSetType = row.setType || (row.isWarmup ? 'WARMUP' : 'NORMAL');
+                      const isWu = isWarmupSetType(rowSetType, row.isWarmup);
+                      const wIdx = workingOrderCounter;
+                      const wuIdx = warmupOrderCounter;
+                      if (isWu) warmupOrderCounter += 1;
+                      else workingOrderCounter += 1;
+
                       const badgeDesc = SET_TYPE_DESCRIPTORS.find((d) => d.type === rowSetType);
                       const tagColor = SET_TYPE_COLORS[rowSetType] || '#9CA3AF';
                       const rawCode = badgeDesc?.shortCode || 'N';
-                      const displayCode = rawCode === 'N' ? '1' : rawCode;
+                      const displayCode = rawCode === 'N' ? String(wIdx + 1) : rawCode;
+
+                      const ghostRow = resolveGhostRowForSetOrder({
+                        lookup: prevLookup,
+                        setType: rowSetType,
+                        isWarmup: row.isWarmup,
+                        workingOrderIndex: wIdx,
+                        warmupOrderIndex: wuIdx,
+                      });
+
+                      const ghostDispWeightStr = ghostRow
+                        ? formatCleanWeightNumber(
+                            convertKgToDisplayWeight(ghostRow.weightKg, blockUnit)
+                          )
+                        : '';
+                      const ghostRepsStr = ghostRow ? String(ghostRow.reps) : '';
+                      const prevPill = ghostRow
+                        ? formatCompactPrevPill({
+                            weightKg: ghostRow.weightKg,
+                            reps: ghostRow.reps,
+                            unit: blockUnit,
+                            rpe: ghostRow.rpe,
+                          })
+                        : null;
 
                       return (
                         <View
@@ -1944,11 +2485,47 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                             onPress={() => handleCycleSetType(block.blockId, row.id)}
                           >
                             <Text style={[styles.setTypeBtnText, { color: tagColor }]}>
-                              [{displayCode}]
+                              {displayCode}
                             </Text>
                           </TouchableOpacity>
 
-                          {/* KG numeric TextInput */}
+                          {/* Per-Set `PREV` 1-Tap Copy Pill */}
+                          <TouchableOpacity
+                            style={[
+                              styles.prevSetPill,
+                              !prevPill && styles.prevSetPillEmpty,
+                            ]}
+                            disabled={!ghostRow}
+                            onPress={() => {
+                              if (ghostRow) {
+                                handleCopyPrevToRow(
+                                  block.blockId,
+                                  row.id,
+                                  ghostDispWeightStr,
+                                  ghostRepsStr,
+                                  ghostRow.rpe
+                                );
+                              }
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            {prevPill ? (
+                              <>
+                                <Text style={styles.prevSetMainText} numberOfLines={1}>
+                                  {prevPill.mainText}
+                                </Text>
+                                {prevPill.rpeSubText ? (
+                                  <Text style={styles.prevSetSubText} numberOfLines={1}>
+                                    {prevPill.rpeSubText}
+                                  </Text>
+                                ) : null}
+                              </>
+                            ) : (
+                              <Text style={styles.prevSetEmptyText}>—</Text>
+                            )}
+                          </TouchableOpacity>
+
+                          {/* KG/LBS numeric TextInput with Ghost Placeholder */}
                           <TextInput
                             style={[
                               styles.numericInput,
@@ -1959,12 +2536,14 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                               handleUpdateSetField(block.blockId, row.id, 'weightKgStr', val)
                             }
                             keyboardType="decimal-pad"
-                            placeholder="0"
-                            placeholderTextColor={CRIMSON_ONI.ashMuted}
+                            placeholder={ghostDispWeightStr || '0'}
+                            placeholderTextColor={
+                              ghostDispWeightStr ? 'rgba(253, 230, 138, 0.42)' : CRIMSON_ONI.ashMuted
+                            }
                             selectTextOnFocus
                           />
 
-                          {/* REPS numeric TextInput */}
+                          {/* REPS numeric TextInput with Ghost Placeholder */}
                           <TextInput
                             style={[
                               styles.numericInput,
@@ -1975,8 +2554,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                               handleUpdateSetField(block.blockId, row.id, 'repsStr', val)
                             }
                             keyboardType="number-pad"
-                            placeholder="0"
-                            placeholderTextColor={CRIMSON_ONI.ashMuted}
+                            placeholder={ghostRepsStr || '0'}
+                            placeholderTextColor={
+                              ghostRepsStr ? 'rgba(253, 230, 138, 0.42)' : CRIMSON_ONI.ashMuted
+                            }
                             selectTextOnFocus
                           />
 
@@ -1990,7 +2571,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                             </Text>
                           </TouchableOpacity>
 
-                          {/* DONE Checkbox */}
+                          {/* DONE Checkbox (1-Tap Auto-Fills Ghost Values if Empty!) */}
                           <Pressable
                             style={[
                               styles.checkBtn,
@@ -2361,6 +2942,66 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         onBack={() => setShowTrainingHistory(false)}
         onLoadSessionIntoWorkout={handleLoadSessionIntoWorkout}
       />
+
+      {/* 15. Inline Barbell Plate & Configurable Warm-Up Generator Modal */}
+      {(() => {
+        const targetBlk = platesModalBlockId
+          ? exerciseBlocks.find((b) => b.blockId === platesModalBlockId) ?? null
+          : null;
+        if (!targetBlk) return null;
+        const bUnit = resolveBlockUnit(targetBlk);
+        const exMeta = exercises.find((e) => e.id === targetBlk.exerciseId);
+        const firstWorkRow = targetBlk.sets.find(
+          (s) => !isWarmupSetType(s.setType, s.isWarmup) && Number(s.weightKgStr) > 0
+        );
+        const prevLookup = resolvePreviousExerciseSessionSets({
+          exerciseId: targetBlk.exerciseId,
+          workoutHistory,
+          activeGymId,
+        });
+        const initialWorkingKg = firstWorkRow
+          ? convertDisplayWeightToKg(Number(firstWorkRow.weightKgStr) || 0, bUnit)
+          : prevLookup.workingSets[0]?.weightKg ?? 60;
+
+        const savedBarKg = exerciseGymPreferences[targetBlk.exerciseId]?.barWeightKg;
+        const eqSlug = `${exMeta?.equipmentType || ''} ${targetBlk.exerciseId}`.toLowerCase();
+        const defaultBarKg =
+          savedBarKg !== undefined
+            ? savedBarKg
+            : eqSlug.includes('landmine')
+              ? 0
+              : eqSlug.includes('smith')
+                ? 10
+                : 20;
+
+        return (
+          <PlatesAndWarmupModal
+            visible={Boolean(targetBlk)}
+            exerciseName={exMeta?.name ?? targetBlk.exerciseName ?? targetBlk.exerciseId}
+            equipmentType={exMeta?.equipmentType}
+            unit={bUnit}
+            initialWorkingWeightKg={initialWorkingKg}
+            barWeightKg={defaultBarKg}
+            warmupPresetCount={warmupPresetCount}
+            onSelectBarWeightKg={(barKg) => saveExerciseBarWeightKg(targetBlk.exerciseId, barKg)}
+            onSelectWarmupPresetCount={setWarmupPresetCount}
+            onInsertWarmupSets={(sets) =>
+              handleInsertWarmupSets(targetBlk.blockId, sets, bUnit)
+            }
+            onClose={() => setPlatesModalBlockId(null)}
+          />
+        );
+      })()}
+
+      {/* 16. Beginner-Friendly Metric Info `(i)` Tooltip Modal */}
+      <MetricInfoTooltipModal
+        metricKey={tooltipState?.key ?? null}
+        contextualHeadline={tooltipState?.headline ?? null}
+        contextualNote={tooltipState?.note ?? null}
+        onClose={() => setTooltipState(null)}
+      />
+
+      {renderShareableReceiptModal()}
     </View>
   );
 };
@@ -2373,6 +3014,23 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#121114',
+  },
+  shareReceiptActionBtn: {
+    backgroundColor: '#292214',
+    borderColor: '#C69A45',
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  shareReceiptActionBtnText: {
+    color: '#FDE68A',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.4,
   },
   topBar: {
     flexDirection: 'row',
@@ -2811,49 +3469,158 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
+  subMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  e1rmInlineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  reorderGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  reorderBtn: {
+    width: 22,
+    height: 24,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#3E3A4B',
+    backgroundColor: '#23202B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reorderBtnDisabled: {
+    opacity: 0.35,
+  },
+  reorderBtnText: {
+    color: '#D1D5DB',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  ergonomicsStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    marginBottom: 8,
+  },
+  overloadPillGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    flexShrink: 1,
+  },
+  overloadTargetPill: {
+    backgroundColor: '#1E2723',
+    borderColor: '#10B981',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexShrink: 1,
+  },
+  overloadTargetPillCrit: {
+    backgroundColor: '#2B2214',
+    borderColor: '#C69A45',
+  },
+  overloadTargetText: {
+    color: '#FDE68A',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  ergonomicsRightTools: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginLeft: 'auto',
+  },
+  platesHelperBtn: {
+    backgroundColor: '#1D2430',
+    borderColor: '#38BDF8',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  platesHelperBtnText: {
+    color: '#7DD3FC',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  unitTogglePill: {
+    backgroundColor: '#24222F',
+    borderColor: '#4A4658',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    minWidth: 34,
+    alignItems: 'center',
+  },
+  unitTogglePillImperial: {
+    borderColor: '#C69A45',
+    backgroundColor: '#332716',
+  },
+  unitTogglePillText: {
+    color: '#E5E7EB',
+    fontSize: 10,
+    fontWeight: '900',
+  },
 
-  // Table Columns
+  // 6-Column Table Columns (`TYPE | PREV | KG/LBS | REPS | RPE | DONE`)
   setTableHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     paddingBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#2B2836',
     marginBottom: 6,
   },
+  colHeaderWithInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
   colHeader: {
     color: '#8A8794',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '800',
     textAlign: 'center',
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
   },
   colInput: {
     flex: 1,
   },
   colCheck: {
-    width: 48,
+    width: 38,
   },
   colDeleteSpacer: {
-    width: 24,
+    width: 18,
   },
   setRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
+    gap: 5,
+    paddingVertical: 3,
   },
   setRowCompleted: {
-    opacity: 0.82,
+    opacity: 0.85,
   },
   dropSetRowIndent: {
-    paddingLeft: 8,
+    paddingLeft: 6,
     backgroundColor: '#241719',
     borderRadius: 6,
   },
   setTypeBtn: {
-    width: 44,
+    width: 36,
     height: 36,
     borderWidth: 1,
     borderRadius: 6,
@@ -2862,8 +3629,39 @@ const styles = StyleSheet.create({
     backgroundColor: '#22202B',
   },
   setTypeBtnText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
+  },
+  prevSetPill: {
+    width: 58,
+    height: 36,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#343140',
+    backgroundColor: '#1B1922',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  prevSetPillEmpty: {
+    opacity: 0.45,
+  },
+  prevSetMainText: {
+    color: '#D1D5DB',
+    fontSize: 10,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  prevSetSubText: {
+    color: '#9CA3AF',
+    fontSize: 8,
+    fontWeight: '700',
+    marginTop: -1,
+  },
+  prevSetEmptyText: {
+    color: '#6B7280',
+    fontSize: 10,
+    fontWeight: '700',
   },
   numericInput: {
     flex: 1,
@@ -2873,17 +3671,18 @@ const styles = StyleSheet.create({
     borderColor: '#383545',
     borderRadius: 6,
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
     textAlign: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
+    fontVariant: ['tabular-nums'],
   },
   numericInputCompleted: {
     borderColor: '#10B981',
     backgroundColor: '#172722',
   },
   rpePillBtn: {
-    width: 52,
+    width: 44,
     height: 36,
     backgroundColor: '#23212C',
     borderWidth: 1,
@@ -2894,11 +3693,11 @@ const styles = StyleSheet.create({
   },
   rpePillText: {
     color: '#FDE68A',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
   checkBtn: {
-    width: 48,
+    width: 38,
     height: 36,
     borderRadius: 6,
     borderWidth: 1,
@@ -2913,14 +3712,14 @@ const styles = StyleSheet.create({
   },
   checkBtnText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
   },
   checkBtnTextCompleted: {
     color: '#FFFFFF',
   },
   deleteSetBtn: {
-    width: 24,
+    width: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -17,16 +17,21 @@ import {
   CompletedSetEntry,
   CompletedWorkoutRecord,
   ProgressionDelta,
+  TrainingMetricTooltipKey,
   buildTrainingHistoryMatrix,
   extractRoutineScopeOptions,
   buildExerciseProgressionCards,
   buildSessionLogCards,
+  evaluatePostWorkoutSummary,
   ExerciseProgressionCardData,
   ExerciseSparklinePoint,
   SessionLogCardData,
 } from '@gymify/game-engine';
 import { useGame } from '../state/GameContext';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+import { WeeklyVolumeLandmarksCard } from '../components/WeeklyVolumeLandmarksCard';
+import { MetricInfoBadge, MetricInfoTooltipModal } from '../components/MetricInfoTooltipModal';
+import { ShareableWorkoutReceiptModal } from '../components/ShareableWorkoutReceiptModal';
 
 export interface TrainingHistoryScreenProps {
   onBack: () => void;
@@ -200,7 +205,7 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
   visible = true,
   onLoadSessionIntoWorkout,
 }) => {
-  const { workoutHistory, presets } = useGame();
+  const { workoutHistory, presets, exercises, defaultWeightUnit, consistencyStreak } = useGame();
   const insets = useSafeAreaInsets();
   const safeTop =
     Platform.OS === 'web'
@@ -225,8 +230,28 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
   const [expandedExerciseCards, setExpandedExerciseCards] = useState<Record<string, boolean>>({});
   const [expandedSessionCards, setExpandedSessionCards] = useState<Record<string, boolean>>({});
 
-  // Cell Detail Modal State
+  // Cell Detail, Metric Tooltip & Shareable Receipt Modal States
   const [selectedCell, setSelectedCell] = useState<SelectedCellDetail | null>(null);
+  const [tooltipState, setTooltipState] = useState<{
+    key: TrainingMetricTooltipKey;
+    headline?: string | null;
+    note?: string | null;
+  } | null>(null);
+  const [receiptWorkout, setReceiptWorkout] = useState<CompletedWorkoutRecord | null>(null);
+
+  const receiptSummary = useMemo(() => {
+    if (!receiptWorkout) return null;
+    const tTarget = new Date(receiptWorkout.performedAtIso).getTime();
+    const olderWorkouts = workoutHistory.filter(
+      (w) => w.id !== receiptWorkout.id && new Date(w.performedAtIso).getTime() < tTarget
+    );
+    return evaluatePostWorkoutSummary({
+      currentWorkout: receiptWorkout,
+      previousWorkouts: olderWorkouts,
+      consistencyStreak: Math.max(1, consistencyStreak),
+      cardioSegmentCount: 0,
+    });
+  }, [receiptWorkout, workoutHistory, consistencyStreak]);
 
   // Routine Scope Options
   const routineOptions = useMemo(
@@ -430,6 +455,19 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* 2B. WEEKLY MUSCLE VOLUME LANDMARKS (MEV / MAV / MRV) */}
+      <WeeklyVolumeLandmarksCard
+        workoutHistory={workoutHistory}
+        exercisesCatalog={exercises}
+        onPressInfo={(headline, note) =>
+          setTooltipState({
+            key: 'MEV_MAV_MRV',
+            headline,
+            note,
+          })
+        }
+      />
 
       {/* ==================================================================== */}
       {/* MODE 1: ROUTINE-SCOPED PROGRESSION MATRIX                            */}
@@ -763,8 +801,13 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
                         <Text style={styles.cardSessionCountSub}>
                           {card.totalSessions} session{card.totalSessions === 1 ? '' : 's'} logged
                         </Text>
-                        <View style={styles.prBadgePill}>
-                          <Text style={styles.prBadgeText}>{card.allTimePrBadge}</Text>
+                        <View style={styles.prBadgeRow}>
+                          <View style={styles.prBadgePill}>
+                            <Text style={styles.prBadgeText}>{card.allTimePrBadge}</Text>
+                          </View>
+                          <MetricInfoBadge
+                            onPress={() => setTooltipState({ key: 'E1RM' })}
+                          />
                         </View>
                       </View>
 
@@ -924,6 +967,11 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
                         <Text style={styles.sessionTitleText} numberOfLines={1}>
                           {session.workoutTitle}
                         </Text>
+                        {session.rawWorkout.gymName ? (
+                          <Text style={styles.sessionGymTagText} numberOfLines={1}>
+                            📍 {session.rawWorkout.gymName}
+                          </Text>
+                        ) : null}
                       </View>
 
                       {/* Header Metrics */}
@@ -993,8 +1041,20 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
                         activeOpacity={0.7}
                       >
                         <Text style={styles.sessionExpandBtnText}>
-                          {isExpanded ? '▴ Hide Sets' : '🔍 View All Sets'}
+                          {isExpanded ? '▴ Hide Sets' : '🔍 Sets'}
                         </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.sessionReceiptBtn}
+                        onPress={() => {
+                          triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                          setReceiptWorkout(session.rawWorkout);
+                        }}
+                        activeOpacity={0.75}
+                        testID="history-session-receipt-btn"
+                      >
+                        <Text style={styles.sessionReceiptBtnText}>🧾 9:16 Receipt</Text>
                       </TouchableOpacity>
 
                       {onLoadSessionIntoWorkout && (
@@ -1006,7 +1066,7 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
                           }}
                           activeOpacity={0.7}
                         >
-                          <Text style={styles.loadWorkoutBtnText}>🔄 Load into Workout</Text>
+                          <Text style={styles.loadWorkoutBtnText}>🔄 Load</Text>
                         </TouchableOpacity>
                       )}
                     </View>
@@ -1115,6 +1175,24 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
           </Pressable>
         </Modal>
       )}
+
+      {/* Shareable 9:16 Post-Workout Raid Receipt Modal */}
+      <ShareableWorkoutReceiptModal
+        visible={receiptWorkout !== null}
+        workout={receiptWorkout}
+        summary={receiptSummary}
+        initialUnit={defaultWeightUnit}
+        streakFallback={Math.max(1, consistencyStreak)}
+        onClose={() => setReceiptWorkout(null)}
+      />
+
+      {/* Beginner-Friendly `(i)` Metric Info Tooltip Modal */}
+      <MetricInfoTooltipModal
+        metricKey={tooltipState?.key ?? null}
+        contextualHeadline={tooltipState?.headline ?? null}
+        contextualNote={tooltipState?.note ?? null}
+        onClose={() => setTooltipState(null)}
+      />
     </View>
   );
 
@@ -1133,6 +1211,30 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#121114',
+  },
+  prBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sessionGymTagText: {
+    color: '#7DD3FC',
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  sessionReceiptBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#292214',
+    borderWidth: 1,
+    borderColor: '#C69A45',
+  },
+  sessionReceiptBtnText: {
+    color: '#FDE68A',
+    fontSize: 11,
+    fontWeight: '800',
   },
   topBar: {
     flexDirection: 'row',

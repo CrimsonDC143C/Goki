@@ -14,5 +14,6 @@ export * from './diagnostics';
 export * from './version';
 export * from './stat-radar';
 export * from './training-history-tracker';
+export * from './intra-workout-ergonomics';
 export * from './strengthlog-exercise-catalog';
 export * from './item-affix-engine';

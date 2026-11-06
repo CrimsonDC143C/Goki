@@ -97,6 +97,17 @@ import {
   rollProceduralItemInstance,
   proceduralItemToLootDrop,
   aggregateEquippedItemModifiers,
+  ExerciseGymPreferenceMap,
+  WarmupPresetCount,
+  WeightUnit,
+  convertDisplayWeightToKg,
+  convertKgToDisplayWeight,
+  formatCleanWeightNumber,
+  normalizeGymId,
+  resolveExerciseWeightUnit,
+  upsertExerciseBarWeightKg,
+  upsertExerciseStickyNote,
+  upsertExerciseWeightUnit,
 } from '@gymify/game-engine';
 import {
   OfflineDraftExerciseBlock,
@@ -483,6 +494,27 @@ interface GameContextValue {
   deleteCustomExercise: (exerciseId: string) => void;
   recentActivityIds: string[];
   recordRecentActivity: (activityId: string) => void;
+
+  // Intra-Workout Ergonomics & Gym-Aware Preferences
+  exerciseGymPreferences: ExerciseGymPreferenceMap;
+  saveExerciseStickyNote: (params: {
+    exerciseId: string;
+    note: string;
+    activeGymId?: string | null;
+    activeGymName?: string | null;
+    saveAsGlobal?: boolean;
+  }) => void;
+  saveExerciseWeightUnit: (params: {
+    exerciseId: string;
+    unit: WeightUnit;
+    activeGymId?: string | null;
+    activeGymName?: string | null;
+  }) => void;
+  saveExerciseBarWeightKg: (exerciseId: string, barWeightKg: number) => void;
+  defaultWeightUnit: WeightUnit;
+  setDefaultWeightUnit: (unit: WeightUnit) => void;
+  warmupPresetCount: WarmupPresetCount;
+  setWarmupPresetCount: (count: WarmupPresetCount) => void;
 }
 
 const STARTER_EXERCISES: ExerciseCatalogItem[] = [
@@ -1181,6 +1213,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [customPresets, setCustomPresets] = useState<WorkoutPresetDefinition[]>([]);
   const [customExercises, setCustomExercises] = useState<SeedExerciseDefinition[]>([]);
   const [recentActivityIds, setRecentActivityIds] = useState<string[]>([]);
+  const [exerciseGymPreferences, setExerciseGymPreferences] = useState<ExerciseGymPreferenceMap>({});
+  const [defaultWeightUnit, setDefaultWeightUnitState] = useState<WeightUnit>('KG');
+  const [warmupPresetCount, setWarmupPresetCountState] = useState<WarmupPresetCount>(2);
   const [workoutHistory, setWorkoutHistory] = useState<CompletedWorkoutRecord[]>(
     DEFAULT_SAMPLE_WORKOUT_HISTORY
   );
@@ -1233,6 +1268,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   customExercisesRef.current = customExercises;
   const recentActivityIdsRef = useRef<string[]>(recentActivityIds);
   recentActivityIdsRef.current = recentActivityIds;
+  const exerciseGymPrefsRef = useRef<ExerciseGymPreferenceMap>(exerciseGymPreferences);
+  exerciseGymPrefsRef.current = exerciseGymPreferences;
+  const defaultWeightUnitRef = useRef<WeightUnit>(defaultWeightUnit);
+  defaultWeightUnitRef.current = defaultWeightUnit;
+  const warmupPresetCountRef = useRef<WarmupPresetCount>(warmupPresetCount);
+  warmupPresetCountRef.current = warmupPresetCount;
   const workoutHistoryRef = useRef<CompletedWorkoutRecord[]>(workoutHistory);
   workoutHistoryRef.current = workoutHistory;
   const isSyncingOfflineRef = useRef(false);
@@ -1253,6 +1294,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         partial.customExercises ?? customExercisesRef.current,
       recentActivityIds:
         partial.recentActivityIds ?? recentActivityIdsRef.current,
+      exerciseGymPreferences:
+        partial.exerciseGymPreferences ?? exerciseGymPrefsRef.current,
+      defaultWeightUnit:
+        partial.defaultWeightUnit ?? defaultWeightUnitRef.current,
+      warmupPresetCount:
+        partial.warmupPresetCount ?? warmupPresetCountRef.current,
       workoutHistory:
         partial.workoutHistory ?? workoutHistoryRef.current,
       characterProfile:
@@ -1266,6 +1313,65 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     void savePersistedOfflineBundle(nextBundle);
   }, []);
+
+  const saveExerciseStickyNote = useCallback(
+    (params: {
+      exerciseId: string;
+      note: string;
+      activeGymId?: string | null;
+      activeGymName?: string | null;
+      saveAsGlobal?: boolean;
+    }) => {
+      const next = upsertExerciseStickyNote(exerciseGymPrefsRef.current, params);
+      exerciseGymPrefsRef.current = next;
+      setExerciseGymPreferences(next);
+      persistBundleSnapshot({ exerciseGymPreferences: next });
+    },
+    [persistBundleSnapshot]
+  );
+
+  const saveExerciseWeightUnit = useCallback(
+    (params: {
+      exerciseId: string;
+      unit: WeightUnit;
+      activeGymId?: string | null;
+      activeGymName?: string | null;
+    }) => {
+      const next = upsertExerciseWeightUnit(exerciseGymPrefsRef.current, params);
+      exerciseGymPrefsRef.current = next;
+      setExerciseGymPreferences(next);
+      persistBundleSnapshot({ exerciseGymPreferences: next });
+    },
+    [persistBundleSnapshot]
+  );
+
+  const saveExerciseBarWeightKg = useCallback(
+    (exerciseId: string, barWeightKg: number) => {
+      const next = upsertExerciseBarWeightKg(exerciseGymPrefsRef.current, exerciseId, barWeightKg);
+      exerciseGymPrefsRef.current = next;
+      setExerciseGymPreferences(next);
+      persistBundleSnapshot({ exerciseGymPreferences: next });
+    },
+    [persistBundleSnapshot]
+  );
+
+  const setDefaultWeightUnit = useCallback(
+    (unit: WeightUnit) => {
+      defaultWeightUnitRef.current = unit;
+      setDefaultWeightUnitState(unit);
+      persistBundleSnapshot({ defaultWeightUnit: unit });
+    },
+    [persistBundleSnapshot]
+  );
+
+  const setWarmupPresetCount = useCallback(
+    (count: WarmupPresetCount) => {
+      warmupPresetCountRef.current = count;
+      setWarmupPresetCountState(count);
+      persistBundleSnapshot({ warmupPresetCount: count });
+    },
+    [persistBundleSnapshot]
+  );
 
   const recordWorkoutHistory = useCallback((record: CompletedWorkoutRecord) => {
     const taggedRecord: CompletedWorkoutRecord = {
@@ -1321,6 +1427,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (loaded.customExercises && loaded.customExercises.length > 0) {
         customExercisesRef.current = loaded.customExercises;
         setCustomExercises(loaded.customExercises);
+      }
+      if (loaded.exerciseGymPreferences) {
+        exerciseGymPrefsRef.current = loaded.exerciseGymPreferences;
+        setExerciseGymPreferences(loaded.exerciseGymPreferences);
+      }
+      if (loaded.defaultWeightUnit) {
+        defaultWeightUnitRef.current = loaded.defaultWeightUnit;
+        setDefaultWeightUnitState(loaded.defaultWeightUnit);
+      }
+      if (loaded.warmupPresetCount) {
+        warmupPresetCountRef.current = loaded.warmupPresetCount;
+        setWarmupPresetCountState(loaded.warmupPresetCount);
       }
       if (loaded.recentActivityIds && loaded.recentActivityIds.length > 0) {
         recentActivityIdsRef.current = loaded.recentActivityIds;
@@ -2724,15 +2842,26 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (preset: WorkoutPresetDefinition, mode: 'OFFLINE' | 'ONLINE' = 'OFFLINE') => {
       const nowMs = Date.now();
       const exerciseBlocks = preset.blocks?.exerciseBlocks || [];
+      const activeGymId =
+        offlineDraftRef.current.gymId ?? arrivalBanner?.gymId ?? 'open-world';
       const blocks: OfflineDraftExerciseBlock[] = exerciseBlocks.map((b, bIdx) => {
+        const resolvedUnit = resolveExerciseWeightUnit(
+          exerciseGymPrefsRef.current,
+          b.exerciseSlug,
+          activeGymId,
+          defaultWeightUnitRef.current
+        );
         return {
           blockId: `blk_${nowMs}_${bIdx + 1}`,
           exerciseId: b.exerciseSlug,
           exerciseName: b.exerciseName,
           supersetGroupId: b.supersetGroupId ?? null,
+          weightUnit: resolvedUnit,
           sets: b.sets.map((s, sIdx) => ({
             id: `set_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
-            weightKgStr: String(s.targetWeightKg || 0),
+            weightKgStr: formatCleanWeightNumber(
+              convertKgToDisplayWeight(s.targetWeightKg || 0, resolvedUnit)
+            ),
             repsStr: String(s.targetReps || 0),
             isWarmup: s.setType === 'WARMUP',
             setType: s.setType || 'NORMAL',
@@ -2744,9 +2873,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (mode === 'OFFLINE') {
-        updateOfflineDraft(() => ({
+        updateOfflineDraft((prev) => ({
           sessionId: `offline_${nowMs}`,
           startedAtMs: nowMs,
+          gymId: prev.gymId ?? arrivalBanner?.gymId ?? null,
+          gymName: prev.gymName ?? arrivalBanner?.gymName ?? null,
           category: preset.category,
           secondaryCategories: [],
           sourcePresetId: preset.id,
@@ -2757,7 +2888,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }));
       }
     },
-    [updateOfflineDraft]
+    [arrivalBanner, updateOfflineDraft]
   );
 
   /**
@@ -3424,10 +3555,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     for (const block of draft.exerciseBlocks) {
       const exMeta = STARTER_EXERCISES.find((e) => e.id === block.exerciseId);
       const exName = exMeta?.name ?? block.exerciseId;
+      const blockUnit = block.weightUnit ?? 'KG';
       for (const row of block.sets) {
         if (!row.completed) continue;
         const reps = Math.floor(Number(row.repsStr) || 0);
-        const weightKg = Math.max(0, Number(row.weightKgStr) || 0);
+        const weightKg = convertDisplayWeightToKg(
+          Math.max(0, Number(row.weightKgStr) || 0),
+          blockUnit
+        );
         if (reps > 0) {
           completedSets.push({
             exerciseId: block.exerciseId,
@@ -3499,6 +3634,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const historyExercises: CompletedExerciseEntry[] = [];
     for (const block of draft.exerciseBlocks) {
       const exMeta = STARTER_EXERCISES.find((e) => e.id === block.exerciseId);
+      const blockUnit = block.weightUnit ?? 'KG';
       const completedRows = block.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
       if (completedRows.length > 0) {
         historyExercises.push({
@@ -3506,7 +3642,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           exerciseName: exMeta?.name ?? block.exerciseName ?? block.exerciseId,
           sets: completedRows.map((s, idx) => ({
             setNumber: idx + 1,
-            weightKg: Math.max(0, Number(s.weightKgStr) || 0),
+            weightKg: convertDisplayWeightToKg(
+              Math.max(0, Number(s.weightKgStr) || 0),
+              blockUnit
+            ),
             reps: Math.floor(Number(s.repsStr) || 0),
             rpe: s.rpe ?? null,
             setType: s.setType,
@@ -3516,9 +3655,16 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    const resolvedOfflineGymId =
+      normalizeGymId(draft.gymId ?? arrivalBanner?.gymId) ?? 'open-world';
+    const resolvedOfflineGymName =
+      draft.gymName ?? arrivalBanner?.gymName ?? 'Open World';
+
     const offlineRecord: CompletedWorkoutRecord = {
       id: `offline_hist_${nowMs}`,
       characterId: ownerCharacterId,
+      gymId: resolvedOfflineGymId,
+      gymName: resolvedOfflineGymName,
       source: 'OFFLINE',
       performedAtIso: new Date(nowMs).toISOString(),
       durationSeconds: elapsedSec,
@@ -3596,7 +3742,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
 
     return { ok: true };
-  }, [persistBundleSnapshot, syncOfflineWorkouts]);
+  }, [arrivalBanner, persistBundleSnapshot, syncOfflineWorkouts]);
 
   const activeCharacterPendingReceipts = useMemo(
     () =>
@@ -5117,6 +5263,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const onlineRecord: CompletedWorkoutRecord = {
         id: `online_hist_${now.getTime()}`,
         characterId: ownerCharacterId,
+        gymId: normalizeGymId(active.arrivalBoon?.gymId) ?? 'open-world',
+        gymName: active.arrivalBoon?.gymName ?? 'Open World',
         source: 'ONLINE',
         performedAtIso: now.toISOString(),
         durationSeconds: payload.durationSeconds,
@@ -5251,6 +5399,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     deleteCustomExercise,
     recentActivityIds,
     recordRecentActivity,
+    exerciseGymPreferences,
+    saveExerciseStickyNote,
+    saveExerciseWeightUnit,
+    saveExerciseBarWeightKg,
+    defaultWeightUnit,
+    setDefaultWeightUnit,
+    warmupPresetCount,
+    setWarmupPresetCount,
     historicalPRs,
     workoutsLoggedCount,
     consistencyStreak,

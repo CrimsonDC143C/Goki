@@ -27,6 +27,10 @@ export interface CompletedWorkoutRecord {
   id: string;
   /** Silent identifier attaching the historical workout to the character it was completed on. */
   characterId?: string | null;
+  /** Silent gym location identifier (e.g., 'iron-sanctum', 'titan-foundry', 'home-outpost', 'open-world'). */
+  gymId?: string | null;
+  /** Human-readable gym / sanctum name captured at workout completion. */
+  gymName?: string | null;
   source: 'ONLINE' | 'OFFLINE';
   performedAtIso: string;
   durationSeconds: number;
@@ -1240,6 +1244,8 @@ export const DEFAULT_SAMPLE_WORKOUT_HISTORY: CompletedWorkoutRecord[] = [
   // Session 1: Upper Body Push (1 day ago) - PRs set
   {
     id: 'sample_wk_push_3',
+    gymId: 'iron-sanctum',
+    gymName: 'Iron Sanctum Barbell Club',
     source: 'OFFLINE',
     performedAtIso: new Date(NOW - ONE_DAY_MS * 1).toISOString(),
     durationSeconds: 3240, // 54 mins
@@ -1288,6 +1294,8 @@ export const DEFAULT_SAMPLE_WORKOUT_HISTORY: CompletedWorkoutRecord[] = [
   // Session 2: Heavy Back & Pull (3 days ago) - PRs set
   {
     id: 'sample_wk_pull_2',
+    gymId: 'iron-sanctum',
+    gymName: 'Iron Sanctum Barbell Club',
     source: 'ONLINE',
     performedAtIso: new Date(NOW - ONE_DAY_MS * 3).toISOString(),
     durationSeconds: 3600, // 60 mins
@@ -1336,6 +1344,8 @@ export const DEFAULT_SAMPLE_WORKOUT_HISTORY: CompletedWorkoutRecord[] = [
   // Session 3: Upper Body Push/Pull Supersets (4 days ago)
   {
     id: 'sample_wk_push_pull_1',
+    gymId: 'home-outpost',
+    gymName: 'Home Outpost',
     source: 'OFFLINE',
     performedAtIso: new Date(NOW - ONE_DAY_MS * 4).toISOString(),
     durationSeconds: 3120, // 52 mins

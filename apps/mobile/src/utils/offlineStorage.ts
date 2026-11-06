@@ -11,6 +11,9 @@ import {
   CompletedWorkoutRecord,
   DEFAULT_SAMPLE_WORKOUT_HISTORY,
   SeedExerciseDefinition,
+  ExerciseGymPreferenceMap,
+  WarmupPresetCount,
+  WeightUnit,
 } from '@gymify/game-engine';
 
 export interface OfflineDraftSetRow {
@@ -29,6 +32,7 @@ export interface OfflineDraftExerciseBlock {
   exerciseId: string;
   exerciseName?: string;
   supersetGroupId?: string | null;
+  weightUnit?: WeightUnit;
   sets: OfflineDraftSetRow[];
 }
 
@@ -45,6 +49,8 @@ export interface OfflineDraftCardioItem {
 export interface OfflineWorkoutDraft {
   sessionId: string;
   startedAtMs: number;
+  gymId?: string | null;
+  gymName?: string | null;
   category?: WorkoutCategory;
   secondaryCategories?: WorkoutCategory[];
   sourcePresetId?: string | null;
@@ -98,6 +104,9 @@ export interface PersistedOfflineBundle {
   workoutHistory?: CompletedWorkoutRecord[];
   customExercises?: SeedExerciseDefinition[];
   recentActivityIds?: string[];
+  exerciseGymPreferences?: ExerciseGymPreferenceMap;
+  defaultWeightUnit?: WeightUnit;
+  warmupPresetCount?: WarmupPresetCount;
 }
 
 const STORAGE_KEY = 'gymify_offline_bundle_v1';
@@ -124,6 +133,9 @@ let memoryFallbackBundle: PersistedOfflineBundle = {
   workoutHistory: DEFAULT_SAMPLE_WORKOUT_HISTORY,
   customExercises: [],
   recentActivityIds: [],
+  exerciseGymPreferences: {},
+  defaultWeightUnit: 'KG',
+  warmupPresetCount: 2,
 };
 
 let writeChain: Promise<void> = Promise.resolve();
@@ -228,6 +240,9 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
       workoutHistory: DEFAULT_SAMPLE_WORKOUT_HISTORY,
       customExercises: [],
       recentActivityIds: [],
+      exerciseGymPreferences: {},
+      defaultWeightUnit: 'KG',
+      warmupPresetCount: 2,
     };
   }
   const obj = raw as Partial<PersistedOfflineBundle>;
@@ -261,6 +276,13 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
         : DEFAULT_SAMPLE_WORKOUT_HISTORY,
     customExercises: Array.isArray(obj.customExercises) ? obj.customExercises : [],
     recentActivityIds: Array.isArray(obj.recentActivityIds) ? obj.recentActivityIds : [],
+    exerciseGymPreferences:
+      obj.exerciseGymPreferences && typeof obj.exerciseGymPreferences === 'object'
+        ? obj.exerciseGymPreferences
+        : {},
+    defaultWeightUnit: obj.defaultWeightUnit === 'LBS' ? 'LBS' : 'KG',
+    warmupPresetCount:
+      obj.warmupPresetCount === 1 || obj.warmupPresetCount === 3 ? obj.warmupPresetCount : 2,
   };
 }
 
