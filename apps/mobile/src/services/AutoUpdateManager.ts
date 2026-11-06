@@ -53,7 +53,7 @@ const POLL_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 class AutoUpdateManagerService {
   private state: AutoUpdateState = {
     status: 'IDLE',
-    currentVersion: Constants?.expoConfig?.version || '0.1.0',
+    currentVersion: Constants?.expoConfig?.version || '0.2.0',
     manifest: null,
     errorMessage: null,
     lastCheckedAt: null,

@@ -244,7 +244,7 @@ Gymify RPG/
      * **Stage 1 (Center-Screen Focus Overlay):** High-focus modal overlay (`rgba(10, 12, 18, 0.82)` backdrop) triggered on set log across both live hybrid dungeon and offline logging sessions. Features an SVG stamina ring countdown, elapsed-time-preserving interval controls (`-15s`, `+15s`, `+30s`, and quick-tap presets `1m`, `1.5m`, `2m`, `3m`, `4m` highlighting recommended rest duration), compact `(i)` physiological rationale tooltip toggle, and state-aware action buttons (`"View Workout / Minimize Timer"` + muted `"Skip Rest & Begin Next Set"` while counting down, transitioning automatically to emerald `"⚡ STAMINA FULL — BEGIN NEXT SET"` at `0:00` with somatic haptic and audio chime triggers).
      * **Stage 2 (Pinned Parallax Floating HUD Pill/Ring):** Anchored to the viewport header with scroll-reactive parallax depth (`scrollOffsetY`) when minimized or during ambient browsing. Displays a miniature SVG stamina ring, remaining countdown, emerald completion flash, and tap-to-expand gesture.
    * **Visual RPG Paperdoll Equipment Screen, 2–3–2 Hexagonal Stat Honeycomb, & Non-Blocking Scroll-Through Parallax Tooltip (`CharacterProfileScreen.tsx`):**
-     * **Single-Row Utility Header Bar:** Cleanly deduplicated bar housing the Standard/Ironman roster pill, persistent SFX mute toggle, `Report Bug`, `Dev Triage`, and `Updates` with inline version pill.
+     * **Single-Row Utility Header Bar:** Cleanly deduplicated bar housing the Standard/Ironman roster pill, persistent SFX mute toggle, `Report Bug`, gated `🛠️ Dev Triage` (hidden by default for playtesters and unlocked via `EXPO_PUBLIC_ENABLE_DEV_TOOLS === 'true'`, an admin email check, or a secret 5-tap developer gesture on the `v0.2.0` version badge), and `Updates` with inline `v0.2.0` version pill.
      * **2–3–2 Pointy-Top Hexagonal Stat Honeycomb Grid:** Replaces rectangular stat cards with a centered 3-row SVG `<Polygon>` honeycomb (`AGI, DEX` on top; `STR, CON, END` in the middle; `SPR, WIS` on the bottom). Each `96x108` hexagon renders a dark track (`#141722`), inner border track (`#2A2F3D`), and a **glowing purple XP progress outline** (`stroke="#A855F7"`, outer glow `#C084FC`) proportional to `currentXp / xpToNextLevel`, stat glyph, 3-letter code, level, and gold `+N` unspent talent point badge, paired with a clean headerless Attribute Radar card (`height={210}`).
      * **True `2:3` Character Art Frame & Relocated Appearance (`🎨`) Button:** `CharacterPortraitFrame.tsx` (`variant="hero"`), `CharacterProfileScreen.tsx`, and `LandingScreen.tsx` constrain the standing hero frame to explicit `aspectRatio: 2 / 3` (`contentFit="cover"`, `contentPosition="top center"`), eliminating side pillarbox bars. The `🎨 Appearance` button (`testID="profile-customize-appearance-btn"`) is relocated off the artwork into the Paperdoll section header row next to the `⚡ Power {totalItemPower}` badge.
      * **Wide Full-Art Paperdoll with 58x58 Square Frames:** Dual-layer hero composition flanked by Left Column (Helm, Chest, Greaves, Boots) and Right Column (Main Hand, Off-Hand, Ring 1, Amulet 2) with uniform 58x58 px slot frames, rarity-colored glow borders, 1:1 bespoke icons, and `T1`–`T5` corner badges.
@@ -275,8 +275,8 @@ Gymify RPG/
    * Real-time exercise search and filtering in `OfflineWorkoutScreen.tsx` with instant substring matching, active pill highlighting, and scroll containment.
    * Workout Category Gateway (`WorkoutCategoryGateway.tsx`) enabling athletes to select between Gym/Resistance, Cardio, Sport, and Active Recovery logging workflows.
    * Three top-level modes on Landing Screen:
-     * **Quick Offline Workout:** Zero latency, local storage persistence, set types, superset groupings, real-time exercise search filter, and automatic queueing for server sync.
-     * **Enter Dungeon (Live Hybrid):** Full 5-state workout loop, boss encounter damage, dynamic rest timer, stamina ring, live BPM wearable HUD, and focus lock.
+     * **Quick Offline Workout:** Minimalist zero-HUD spreadsheet logger with zero latency, local storage persistence, set types, superset groupings, real-time exercise search filter, and automatic queueing for deferred RPG spoils sync.
+     * **Enter Dungeon (Live Hybrid):** Recommended full 5-state RPG boss encounter + 6-column workout logger with dynamic rest timer, stamina ring, live BPM wearable HUD, focus lock, and local resilience that survives signal drops.
      * **Enter World:** Complete RPG navigation hub featuring a 7-Stat UI overhaul in the Character Profile (displaying STR, END, AGI, DEX, CON, WIS, SPR with levels and XP progress bars), dynamic multi-stat XP receipts in post-workout summaries, TalentBuilder across all 10 trees, GatheringNode, Dungeon, and GuildHall.
    * Low-latency (<15ms) haptic feedback (iOS/Android) and Web Audio harmonic synth fallback (Web).
    * Local push notifications for rest timer completion and gathering node capacity.
@@ -308,9 +308,9 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
 ## 6. Key File & Symbol Index
 
 * **Deployment, Cloud Infrastructure, & Asset Pipelines:**
-  * [`render.yaml`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/render.yaml) — Render blueprint orchestrating PostgreSQL (`free`), Redis (`free`), and Fastify API web service (`free`).
+  * [`render.yaml`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/render.yaml) — Render Pro Workspace blueprint orchestrating paid, always-on instances for Managed PostgreSQL 16 (`gymify-postgres`), Managed Redis 7 (`gymify-redis` with `noeviction`), and the Fastify API web service (`gymify-server`).
   * [`apps/mobile/eas.json`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/eas.json) — Expo Application Services (EAS) build profiles for standalone Android APK and iOS preview distributions.
-  * [`apps/mobile/app.json`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/app.json) — Expo native configuration, HealthKit / Health Connect permissions, `expo-build-properties` (`minSdkVersion: 26`, Proguard disabled).
+  * [`apps/mobile/app.json`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/app.json) — Expo native configuration (`v0.2.0`), HealthKit / Health Connect permissions, `expo-build-properties` (`minSdkVersion: 26`, Proguard disabled).
   * [`scripts/generate-layer-icons.mjs`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/scripts/generate-layer-icons.mjs) — Standalone generation and asset processing script connecting to Layer.ai MCP for batch 1:1 dark fantasy RPG icon synthesis.
 * **Game Engine Core:**
   * [`packages/game-engine/src/item-affix-engine.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/game-engine/src/item-affix-engine.ts) — Procedural Itemization & 5-Tier Affix Engine: 32 base equippable items, 12 prefixes, 10 suffixes, 32 T5 Mythic Uniques with passives, affix scaling, and equipment modifier aggregation.
@@ -330,7 +330,7 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
   * [`packages/database/prisma/seed.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/packages/database/prisma/seed.ts) — Exercises, starter presets, 10 talent trees, starter items, 24h dungeon, and 7d raids.
   * [`apps/server/src/index.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/server/src/index.ts) — Fastify server entrypoint with cloud-ready `0.0.0.0` binding and dynamic port configuration.
   * [`apps/server/src/app.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/server/src/app.ts) — Fastify instance builder, error handlers, JWT authentication, WebSockets, BigInt serialization hooks.
-  * [`apps/server/src/middleware/auth.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/server/src/middleware/auth.ts) — JWT validation and route protection.
+  * [`apps/server/src/middleware/auth.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/server/src/middleware/auth.ts) — JWT validation (`requireAuth`, `optionalAuth`) and admin route protection (`requireAdmin` via `ADMIN_EMAILS`).
   * [`apps/server/src/routes/auth.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/server/src/routes/auth.ts) — Registration, login, and profile resolution.
   * [`apps/server/src/routes/characters.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/server/src/routes/characters.ts) — Dual-character roster routes (`STANDARD` vs `IRONMAN_VERIFIED`), 30-day soft-delete archival & restoration, permanent erasure, and hydration of per-character `inventoryItems`, relational `equipmentLoadout`, `bountyCompletions`, and `_count.workoutLogs`.
   * [`apps/server/src/routes/guilds-raids.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/server/src/routes/guilds-raids.ts) — Guild bounties, character-scoped Rank-Up Trial verification (`workoutsLogged` count per `characterId`), and 7-day Raid Boss attacks.
@@ -355,9 +355,9 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
   * [`apps/mobile/assets/sprites/index.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/assets/sprites/index.ts) — 2D sprite asset registry supporting drop-in PNG/WebP files and vector data URIs for heroes, enemies, and loot chests.
   * [`apps/mobile/src/utils/sensoryFeedback.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/utils/sensoryFeedback.ts) — Low-latency somatic haptics combined with `AudioManager` SFX cues.
   * [`apps/mobile/src/utils/restNotificationScheduler.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/utils/restNotificationScheduler.ts) — Unified single-slot lockscreen/background rest timer notification scheduler (`scheduleRestNotification`, `cancelRestNotification`) with Android `MAX`-importance haptic vibration channel.
-  * [`apps/mobile/src/utils/offlineStorage.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/utils/offlineStorage.ts) — Local file-system and `localStorage` persistence bundle storing global `workoutHistory` alongside per-character `PersistedCharacterProfile` state (`inventory`, `equipmentLoadout`, `workoutsLoggedCount`, `completedBountySlugs`, `consistencyStreak`, `historicalPRs`).
-  * [`apps/mobile/src/state/GameContext.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/state/GameContext.tsx) — Monolithic state manager coordinating local engine fallback, strict per-character inventory & 8-slot equipment loadout isolation (`EMPTY_EQUIPMENT_LOADOUT`, `sanitizeEquipmentLoadout`, `mapServerInventoryItems`, `clearActiveCharacterState`), character-scoped workout progression & guild bounties, global training history retention, offline sync queue, server API calls, procedural gear drops, and aggregated equipment combat modifiers.
-  * [`apps/mobile/src/screens/LandingScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/LandingScreen.tsx) — Main Hub landing screen with active hero verification, conditional 2:3 full-body hero portrait vs. **No Active Hero Selected** creation gateway (`⚡ Forge Your Hero`), `Hero Required` locks on **Online Workout** and **Enter World**, and unclaimed spoils badges.
+  * [`apps/mobile/src/utils/offlineStorage.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/utils/offlineStorage.ts) — Local file-system and `localStorage` persistence bundle storing global `workoutHistory` (initialized to a clean `[]` slate for new playtesters) alongside per-character `PersistedCharacterProfile` state (`inventory`, `equipmentLoadout`, `workoutsLoggedCount`, `completedBountySlugs`, `consistencyStreak`, `historicalPRs`).
+  * [`apps/mobile/src/state/GameContext.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/state/GameContext.tsx) — Monolithic state manager coordinating local engine fallback, strict per-character inventory & 8-slot equipment loadout isolation (`EMPTY_EQUIPMENT_LOADOUT`, `sanitizeEquipmentLoadout`, `mapServerInventoryItems`, `clearActiveCharacterState`), character-scoped workout progression & guild bounties, clean `[]` initial training history slate for new installs, offline sync queue, server API calls, procedural gear drops, and aggregated equipment combat modifiers.
+  * [`apps/mobile/src/screens/LandingScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/LandingScreen.tsx) — Main Hub landing screen with active hero verification, conditional 2:3 full-body hero portrait vs. **No Active Hero Selected** creation gateway (`⚡ Forge Your Hero`), `Hero Required` locks on **Enter Dungeon (Live Hybrid)** and **Enter World**, clarified playtester workout mode subtitles (**Enter Dungeon (Live Hybrid)** vs. **Quick Offline Workout**), and unclaimed spoils badges.
   * [`apps/mobile/src/screens/TrainingHistoryScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/TrainingHistoryScreen.tsx) — 3-mode global Training History hub (`Matrix`, `By Exercise`, `Session Log`) displaying all historical workouts across characters, routine scopes, 7-day `MEV/MAV/MRV` muscle volume landmarks, e1RM progression sparklines, PR badges, `9:16` receipt cards, and composable history pruning (`WipeTrainingHistoryModal`).
   * [`apps/mobile/src/components/WipeTrainingHistoryModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/WipeTrainingHistoryModal.tsx) — Composable training history wipe/prune modal with live impact preview, multi-modifier filters (time window, gym, modality, source, exercise strip vs. session removal), 2-step armed confirmation, and demo sample restoration.
   * [`apps/mobile/src/screens/WorkoutLoggerScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/WorkoutLoggerScreen.tsx) — Live hybrid workout interface featuring a compact 4-row Pre-Flight Readiness Summary in `Idle`, 6-column `SET | PREV | KG/LBS | REPS | RPE | ✓` intra-workout set table with ghost placeholders and 1-tap `✓` auto-fill, `🎯 Overload Target` pill, `🧮 Plates / Warm-Up` helper, gym-aware sticky notes, mid-workout `↑`/`↓` reorder & swap, two-stage dynamic rest timer, boss encounter damage, and consolidated `LootReview` phase with `9:16` receipt export.
@@ -377,7 +377,7 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
   * [`apps/mobile/src/components/battle/sprites/SpriteAnimator.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/battle/sprites/SpriteAnimator.tsx) & [`spriteManifest.ts`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/battle/sprites/spriteManifest.ts) — 100×100 px hardware-accelerated sprite sheet slicer, worklet-safe animated style dependencies, portrait-mode (size=56) single-frame centering, foot-row baseline alignment, and attackImpactFrame manifest.
   * [`apps/mobile/src/components/PresetDesignerModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/PresetDesignerModal.tsx) & [`ActivityPickerModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/ActivityPickerModal.tsx) — 90%-height bottom-sheet Routine Designer and exercise selector with sticky header/footer and compact ~54px 2-line exercise rows (displaying 9–10 visible exercises simultaneously).
   * [`apps/mobile/src/components/PostWorkoutCelebrationModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/PostWorkoutCelebrationModal.tsx) — Post-workout encouragement pop-up modal displaying deterministic lift progression callouts, PR breaks, streak sustaining dialogue, and embedded routine preset saving.
-  * [`apps/mobile/src/components/DeveloperTriageModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/DeveloperTriageModal.tsx) — In-app diagnostics and developer sanctum connecting to `/api/diagnostics/reports`, featuring multi-dimensional status/severity/type filters, triage actions, and the relocated 96h missed-session gap debug simulator (`simulateLayoffHours(96)`).
+  * [`apps/mobile/src/components/DeveloperTriageModal.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/components/DeveloperTriageModal.tsx) — In-app diagnostics and developer sanctum connecting to `/api/diagnostics/reports` (gated by `EXPO_PUBLIC_ENABLE_DEV_TOOLS`, admin email check, or 5-tap version badge unlock gesture), featuring multi-dimensional status/severity/type filters, triage actions, demo sample workout restoration, and the relocated 96h missed-session gap debug simulator (`simulateLayoffHours(96)`).
   * [`apps/mobile/src/screens/GatheringNodeScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/GatheringNodeScreen.tsx) — Idle gathering screen with decluttered subheaders, 1:1 material item icons, interactive Horizontal Step Slider (15m to 120m in 5m increments), and quick-tap duration labels (30m, 60m, 120m).
   * [`apps/mobile/src/screens/DungeonScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/DungeonScreen.tsx) — 24-hour dungeon expeditions across 5 rank-gated tiers with boss-then-chest sequence (N-1 Boss $\rightarrow$ N Loot Cache), horizontal rank selector bar, uncluttered header, and streamlined battle replay player.
   * [`apps/mobile/src/screens/GuildHallScreen.tsx`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/apps/mobile/src/screens/GuildHallScreen.tsx) — Guild hub and weekly raid sanctum featuring crisp 56x56 cropped boss sprite avatars (SpriteAnimator with DEMON_BOSS_SPRITE_CONFIG and GREATSWORD_SKELETON_SPRITE_CONFIG) alongside Ignisrax and Vaelgor HP bars.
@@ -396,7 +396,7 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
 ```
                    +-------------------------------------------------+
                    |           Mobile Clients (Production)           |
-                   |   - Android Standalone APK (EAS preview)        |
+                   |   - Android Standalone APK (EAS preview v0.2.0) |
                    |   - iOS Simulator / Ad-Hoc Build (EAS preview)  |
                    |   - Web SPA Client (Expo Web / Static Hosting)  |
                    +-----------------------+-------------------------+
@@ -406,13 +406,13 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
                                            |
                                            v
        +-------------------------------------------------------------------------+
-       |                         Render Cloud Platform                           |
+       |               Render Cloud Platform (Render Pro Workspace)              |
        |                              (render.yaml)                              |
        |                                                                         |
        |   +-----------------------------------------------------------------+   |
        |   |                     Fastify Web Service                         |   |
        |   |                      (gymify-server)                            |   |
-       |   |   - Node.js Runtime (Node >= 20.0, Free Plan)                   |   |
+       |   |   - Node.js Runtime (Node >= 20.0, Paid Always-On Instance)     |   |
        |   |   - Bound to 0.0.0.0:${PORT}                                    |   |
        |   |   - Build: npm install --include=dev && npx prisma generate --schema=./packages/database/prisma/schema.prisma && npm run build |   |
        |   |   - Start: npm start --workspace=@gymify/server                 |   |
@@ -424,28 +424,29 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
        |   +----------------------------+   +--------------------------------+   |
        |   |    PostgreSQL Database     |   |       Redis Key-Value          |   |
        |   |     (gymify-postgres)      |   |        (gymify-redis)          |   |
+       |   | - Managed PostgreSQL 16    |   | - Managed Redis 7              |   |
        |   | - 31 Models, 26 Enums      |   | - MaxMemory: noeviction        |   |
        |   | - Internal Connection URI  |   | - 4 Scheduled Worker Queues    |   |
-       |   | - Free Plan                |   | - Free Plan                    |   |
+       |   | - Paid Always-On Instance  |   | - Paid Always-On Instance      |   |
        |   +----------------------------+   +--------------------------------+   |
        +-------------------------------------------------------------------------+
 ```
 
 ### A. Backend Deployment: Render Blueprint (`render.yaml`)
 
-The backend is fully declaratively configured via the repository root [`render.yaml`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/render.yaml) Blueprint, enabling 1-click infrastructure provisioning on Render:
+The backend is declaratively configured via the repository root [`render.yaml`](file:///c:/Users/Icarus/Desktop/Gymify%20RPG/render.yaml) Blueprint and deployed in our **Render Pro Workspace** running paid, always-on instances:
 
 1. **PostgreSQL Database (`gymify-postgres`):**
-   * Managed PostgreSQL 16 database running on Render's `free` plan with internal network isolation.
+   * Managed PostgreSQL 16 database running on a paid, always-on Render Pro instance with internal network isolation.
    * Auto-provisions the database connection string and injects `DATABASE_URL` directly into the Fastify Web Service.
 2. **Redis Service (`gymify-redis`):**
-   * Managed Redis instance on Render's `free` plan dedicated to BullMQ async queue workers (`gathering-completion`, `dungeon-resolution`, `fatigue-transition`, `raid-rollover`).
+   * Managed Redis 7 instance running on a paid, always-on Render Pro instance dedicated to BullMQ async queue workers (`gathering-completion`, `dungeon-resolution`, `fatigue-transition`, `raid-rollover`).
    * Configured with `maxmemoryPolicy: noeviction` to ensure BullMQ delayed jobs and repeatable timers are never prematurely evicted under memory pressure.
    * Connection string is automatically injected as `REDIS_URL`.
 3. **Fastify Node.js Web Service (`gymify-server`):**
-   * **Plan:** Render `free` tier plan.
+   * **Plan:** Paid, always-on Render Pro instance (zero cold-start spin-down latency).
    * **Build Command:** `npm install --include=dev && npx prisma generate --schema=./packages/database/prisma/schema.prisma && npm run build` (installs devDependencies in production, generates Prisma client, and compiles all workspaces).
-   * **Start Command:** `npm start --workspace=@gymify/server` (launches `dist/index.js`).
+   * **Start Command:** `npx prisma db push --schema=./packages/database/prisma/schema.prisma && npm start --workspace=@gymify/server` (applies schema migrations and launches `dist/index.js`).
    * **Network Binding:** Binds explicitly to `host: '0.0.0.0'` and dynamic port `port: Number(process.env.PORT) || 4000` to satisfy Render cloud ingress routing.
    * **Injected Environment:**
      * `NODE_ENV: production`
@@ -453,6 +454,9 @@ The backend is fully declaratively configured via the repository root [`render.y
      * `REDIS_URL`: Injected from `gymify-redis` connection string.
      * `JWT_SECRET`: Cryptographically generated via Render `generateValue: true`.
      * `CORS_ORIGIN: "*"` (supports both mobile clients and web clients).
+     * `DIAGNOSTICS_WEBHOOK_URL`: Connected to our dedicated `#bug-reports` Discord server channel for real-time playtester alerts.
+     * `ADMIN_EMAILS`: Optional comma-separated list of developer emails permitted to query/mutate `/api/diagnostics/reports` in production.
+     * `APP_LATEST_VERSION: "0.2.0"` & `APP_MIN_REQUIRED_VERSION: "0.2.0"`.
 
 ### B. Mobile Client Deployment: Expo Application Services (`eas.json`)
 
@@ -505,10 +509,10 @@ The Prisma schema (`packages/database/prisma/schema.prisma`) defines the persist
 
 * **`POST /api/diagnostics/report`:**
   * **Zod Payload Validation:** Validates payload boundaries, enforcing string length limits and capping breadcrumbs (max 200) to eliminate payload bloat vulnerabilities.
-  * **Optional Authentication (`optionalAuth`):** If a valid Bearer JWT is passed, the user's `userId` is automatically bound to the report. If unauthenticated, reports are gracefully accepted anonymously so startup/login crashes are never dropped.
-  * **Developer Alert Webhook:** If the `DIAGNOSTICS_WEBHOOK_URL` environment variable (Discord or Slack incoming webhook) is configured, the server asynchronously dispatches a rich color-coded embed with error snippets and severity tags without blocking the HTTP response.
-* **`GET /api/diagnostics/reports`:** Protected route (`requireAuth`) supporting query filters (`severity`, `category`, `status`, `limit`) ordered chronologically descending (`createdAt desc`).
-* **`PATCH /api/diagnostics/reports/:id`:** Protected route (`requireAuth`) allowing developers to update report triage states (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`).
+  * **Optional Authentication (`optionalAuth`):** If a valid Bearer JWT is passed, the user's `userId` is automatically bound to the report. If unauthenticated, reports are gracefully accepted anonymously so startup/login crashes and playtester submissions are never dropped.
+  * **Live Discord `#bug-reports` Alert Webhook (`DIAGNOSTICS_WEBHOOK_URL`):** Actively connected in production to our dedicated `#bug-reports` Discord server channel. Whenever a playtester submits a bug report, fatal crash scroll, or feature suggestion, the server asynchronously dispatches a rich color-coded Discord embed with error snippets, stack traces, and severity tags in real time without blocking the HTTP response.
+* **`GET /api/diagnostics/reports`:** Protected developer route (`[requireAuth, requireAdmin]`) supporting query filters (`severity`, `category`, `status`, `limit`) ordered chronologically descending (`createdAt desc`). Access is permitted if `process.env.ADMIN_EMAILS` is unset/empty, if the authenticated user's email is in `process.env.ADMIN_EMAILS`, or in non-production (`development`/`test`) environments.
+* **`PATCH /api/diagnostics/reports/:id`:** Protected developer route (`[requireAuth, requireAdmin]`) allowing admins to update report triage states (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`).
 * **Fastify Global Error Hook:** Unhandled 500 server exceptions automatically persist to `BugReport` with `severity: FATAL` and `deviceMetadata: { source: 'fastify-server' }`.
 
 ### C. In-Memory Ring Buffer & Sanitization (`@gymify/game-engine` & `DiagnosticLogger`)
@@ -539,9 +543,9 @@ The Prisma schema (`packages/database/prisma/schema.prisma`) defines the persist
   * Dynamically pivots modal UI when **💡 Feature Suggestion** is selected: sets severity to `INFO`, adjusts placeholders for gameplay/mechanic proposals, and styles the submission button with a positive emerald theme.
   * Contains an expandable **"View Recent Logs & Telemetry"** accordion with a **"Copy JSON"** button allowing athletes and QA testers to inspect or export their diagnostic bundle directly.
 * **`DeveloperTriageModal.tsx` ("Developer Sanctum"):**
-  * Accessible directly from `CharacterProfileScreen` via the **🛠️ Dev Triage** badge button in the deduplicated single-row utility bar.
+  * Accessible from `CharacterProfileScreen` via the **🛠️ Dev Triage** badge button in the deduplicated single-row utility bar. Hidden by default for normal playtesters and only shown when `process.env.EXPO_PUBLIC_ENABLE_DEV_TOOLS === 'true'`, when the signed-in user's email passes the admin check (`EXPO_PUBLIC_ADMIN_EMAILS` / `@gymify.rpg`), or when unlocked for the current session via a **secret 5-tap developer gesture** on the inline `v0.2.0` version badge (`"🛠️ Developer Sanctum Unlocked"` toast + somatic haptic).
   * Connects to `GET /api/diagnostics/reports` to inspect live reports directly from mobile or desktop browser without needing database GUI clients.
-  * Houses the relocated debug action **"Simulate 96h Missed-Session Gap"** (`simulateLayoffHours(96)`), moving it out of the main athlete profile to test Tavern Well-Rested and comeback anti-abandonment bonuses without UI clutter.
+  * Houses the relocated debug action **"Simulate 96h Missed-Session Gap"** (`simulateLayoffHours(96)`) as well as **"Restore Demo Sample Workouts"** (`restoreSampleWorkoutHistory()`), moving debug utilities out of the main athlete profile so fresh playtesters start with a clean `[]` training history slate.
   * Provides multi-dimensional filter chips (`Status`: `ALL`, `OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`; `Severity`: `ALL`, `FATAL`, `ERROR`, `WARNING`, `INFO`; `Type`: `All Items`, `💡 Suggestions`, `🐛 Bugs Only`, `💥 Crashes`, `🔄 Sync`, `🎨 UI/UX`).
   * Visual separation: **Feature Suggestions** are highlighted with emerald card borders and badges to immediately stand out from red crash exceptions and critical warnings.
   * Expanding a card reveals full stack traces, component stacks, sanitized state snapshots, and rolling breadcrumb event timelines.
@@ -569,8 +573,8 @@ Gymify RPG targets diverse deployment targets including Standalone Android APKs,
 
 ### C. Backend Version Manifest Endpoint (`apps/server`)
 * **`GET /api/version`:** Public, non-authenticated endpoint returning:
-  * `latestVersion`: `process.env.APP_LATEST_VERSION` (default `"0.1.0"`)
-  * `minRequiredVersion`: `process.env.APP_MIN_REQUIRED_VERSION` (default `"0.1.0"`)
+  * `latestVersion`: `process.env.APP_LATEST_VERSION` (default `"0.2.0"`)
+  * `minRequiredVersion`: `process.env.APP_MIN_REQUIRED_VERSION` (default `"0.2.0"`)
   * `androidApkDownloadUrl`: Direct link to latest EAS preview/production APK build
   * `releaseNotes`: Descriptive summary of the release
   * `serverTimestamp`: ISO timestamp of the response
@@ -580,7 +584,7 @@ Gymify RPG targets diverse deployment targets including Standalone Android APKs,
   1. **Cold Start:** Queried immediately on initial application boot.
   2. **Foreground Resume:** Triggered whenever the athlete returns to Gymify RPG (`AppState: active`).
   3. **Periodic Heartbeat:** Background polling every 15 minutes while the app remains open.
-  4. **Manual In-App Check:** One-tap `🔄 Updates` button with inline version badge in `CharacterProfileScreen`.
+  4. **Manual In-App Check:** One-tap `🔄 Updates` button with inline `v0.2.0` version badge in `CharacterProfileScreen` (tapping the inline version badge 5 times also triggers the secret Developer Sanctum unlock gesture).
 * **"Zero Interrupted Sets Guarantee":**
   * When an OTA download finishes, `AutoUpdateManager` consults registered workout guards (`isIntraWorkoutFocusLocked(phase)` and active draft set progress).
   * If the athlete is currently training, resting, or holds uncompleted sets, the reload is staged under `WAITING_FOR_WORKOUT`.

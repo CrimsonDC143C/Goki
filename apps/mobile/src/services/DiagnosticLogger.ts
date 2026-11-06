@@ -133,7 +133,7 @@ class DiagnosticLoggerService {
       platform: Platform.OS,
       osVersion: String(Platform.Version),
       isWeb: Platform.OS === 'web',
-      appVersion: Constants.expoConfig?.version ?? '0.1.0',
+      appVersion: Constants.expoConfig?.version ?? '0.2.0',
       sessionId: Constants.sessionId ?? 'session_unknown',
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'native',
     };

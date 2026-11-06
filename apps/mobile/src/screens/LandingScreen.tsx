@@ -242,7 +242,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             <View style={styles.actionHeaderRow}>
               <View style={styles.actionTitleCluster}>
                 <Text style={styles.actionIcon}>📓</Text>
-                <Text style={styles.actionTitle}>Offline Workout</Text>
+                <Text style={styles.actionTitle}>Quick Offline Workout</Text>
               </View>
               {draftCompletedItems > 0 ? (
                 <View style={styles.subtleStatusPill}>
@@ -255,7 +255,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
               )}
             </View>
             <Text style={styles.actionSubtitle}>
-              Quick-log sets &amp; cardio with zero RPG distractions.
+              Minimalist zero-HUD spreadsheet logger — fast set &amp; cardio tracking that syncs RPG spoils later.
             </Text>
           </Pressable>
 
@@ -286,7 +286,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                     !hasActiveHero && styles.actionTitleLocked,
                   ]}
                 >
-                  Online Workout
+                  Enter Dungeon (Live Hybrid)
                 </Text>
               </View>
               {!hasActiveHero ? (
@@ -305,8 +305,8 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             </View>
             <Text style={styles.actionSubtitle}>
               {hasActiveHero
-                ? 'Full intra-workout RPG telemetry, PR Crits, & live raid channeling.'
-                : 'Forge or select an active hero first to unlock live RPG workout telemetry.'}
+                ? 'Recommended: Full RPG boss encounter + 6-column workout logger (survives signal drops).'
+                : 'Forge or select an active hero first to unlock the full RPG boss encounter & workout logger.'}
             </Text>
           </Pressable>
 

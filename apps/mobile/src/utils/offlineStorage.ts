@@ -9,7 +9,6 @@ import {
   WorkoutPresetDefinition,
   STARTER_WORKOUT_PRESETS,
   CompletedWorkoutRecord,
-  DEFAULT_SAMPLE_WORKOUT_HISTORY,
   SeedExerciseDefinition,
   ExerciseGymPreferenceMap,
   WarmupPresetCount,
@@ -130,7 +129,7 @@ let memoryFallbackBundle: PersistedOfflineBundle = {
   availableCharacters: [],
   deletedCharacters: [],
   activeCharacterId: null,
-  workoutHistory: DEFAULT_SAMPLE_WORKOUT_HISTORY,
+  workoutHistory: [],
   customExercises: [],
   recentActivityIds: [],
   exerciseGymPreferences: {},
@@ -237,7 +236,7 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
       availableCharacters: [],
       deletedCharacters: [],
       activeCharacterId: null,
-      workoutHistory: DEFAULT_SAMPLE_WORKOUT_HISTORY,
+      workoutHistory: [],
       customExercises: [],
       recentActivityIds: [],
       exerciseGymPreferences: {},
@@ -272,7 +271,7 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
     activeCharacterId: typeof obj.activeCharacterId === 'string' ? obj.activeCharacterId : null,
     workoutHistory: Array.isArray(obj.workoutHistory)
       ? obj.workoutHistory
-      : DEFAULT_SAMPLE_WORKOUT_HISTORY,
+      : [],
     customExercises: Array.isArray(obj.customExercises) ? obj.customExercises : [],
     recentActivityIds: Array.isArray(obj.recentActivityIds) ? obj.recentActivityIds : [],
     exerciseGymPreferences:

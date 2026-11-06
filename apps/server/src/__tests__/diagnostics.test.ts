@@ -324,6 +324,70 @@ describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () 
     await app.close();
   });
 
+  it('enforces ADMIN_EMAILS check on GET and PATCH /api/diagnostics/reports in production', async () => {
+    const app = await buildServerApp({ db: mockDb });
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevAdminEmails = process.env.ADMIN_EMAILS;
+
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.ADMIN_EMAILS = 'admin@gymify.rpg, lead@gymify.rpg';
+
+      const nonAdminToken = app.jwt.sign({
+        userId: 'playtester_1',
+        email: 'playtester@example.com',
+        username: 'playtester',
+      });
+
+      const adminToken = app.jwt.sign({
+        userId: 'admin_1',
+        email: 'ADMIN@gymify.rpg',
+        username: 'admin',
+      });
+
+      // 1. Non-admin blocked with 403 on GET and PATCH
+      const deniedGet = await app.inject({
+        method: 'GET',
+        url: '/api/diagnostics/reports',
+        headers: { authorization: `Bearer ${nonAdminToken}` },
+      });
+      expect(deniedGet.statusCode).toBe(403);
+
+      const deniedPatch = await app.inject({
+        method: 'PATCH',
+        url: '/api/diagnostics/reports/bug_1',
+        headers: { authorization: `Bearer ${nonAdminToken}` },
+        payload: { status: 'RESOLVED' },
+      });
+      expect(deniedPatch.statusCode).toBe(403);
+
+      // 2. Admin allowed on GET
+      const allowedGet = await app.inject({
+        method: 'GET',
+        url: '/api/diagnostics/reports',
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(allowedGet.statusCode).toBe(200);
+
+      // 3. When ADMIN_EMAILS is unset/empty in production, authenticated users are allowed
+      process.env.ADMIN_EMAILS = '';
+      const openWhenEmptyGet = await app.inject({
+        method: 'GET',
+        url: '/api/diagnostics/reports',
+        headers: { authorization: `Bearer ${nonAdminToken}` },
+      });
+      expect(openWhenEmptyGet.statusCode).toBe(200);
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevAdminEmails === undefined) {
+        delete process.env.ADMIN_EMAILS;
+      } else {
+        process.env.ADMIN_EMAILS = prevAdminEmails;
+      }
+      await app.close();
+    }
+  });
+
   it('forwards diagnostic alerts via webhook formatting when webhook is configured', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     global.fetch = fetchMock;

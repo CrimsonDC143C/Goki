@@ -2,7 +2,7 @@ import { BugReportCategory, BugReportSeverity, BugReportStatus, Prisma, PrismaCl
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { env } from '../config';
-import { optionalAuth, requireAuth } from '../middleware/auth';
+import { optionalAuth, requireAdmin, requireAuth } from '../middleware/auth';
 
 const severityEnum = z.enum(['INFO', 'WARNING', 'ERROR', 'FATAL']);
 const categoryEnum = z.enum([
@@ -194,7 +194,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, db: PrismaClient
   app.get(
     '/api/diagnostics/reports',
     {
-      preHandler: [requireAuth],
+      preHandler: [requireAuth, requireAdmin],
     },
     async (request, reply) => {
       const query = queryReportsSchema.parse(request.query);
@@ -229,7 +229,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, db: PrismaClient
   app.patch(
     '/api/diagnostics/reports/:id',
     {
-      preHandler: [requireAuth],
+      preHandler: [requireAuth, requireAdmin],
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };

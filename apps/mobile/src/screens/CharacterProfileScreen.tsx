@@ -31,6 +31,7 @@ import { DeveloperTriageModal } from '../components/DeveloperTriageModal';
 import { Image as ExpoImage } from 'expo-image';
 import { autoUpdateManager, AutoUpdateState } from '../services/AutoUpdateManager';
 import { audioManager } from '../services/AudioManager';
+import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import {
   InventoryEntry,
   isEquippableInventoryEntry,
@@ -296,10 +297,62 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   const [spoilsModalOpen, setSpoilsModalOpen] = useState<boolean>(false);
   const [bugReportModalVisible, setBugReportModalVisible] = useState<boolean>(false);
   const [devTriageModalVisible, setDevTriageModalVisible] = useState<boolean>(false);
+  const [devSanctumUnlocked, setDevSanctumUnlocked] = useState<boolean>(false);
+  const [devSanctumUnlockToast, setDevSanctumUnlockToast] = useState<string | null>(null);
+  const versionTapCountRef = useRef<number>(0);
+  const versionTapResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [updateState, setUpdateState] = useState<AutoUpdateState>(() =>
     autoUpdateManager.getState()
   );
   const [isMuted, setIsMuted] = useState<boolean>(audioManager.isMuted());
+
+  const isAdminUser = useMemo(() => {
+    const email = currentUser?.email?.trim().toLowerCase() ?? '';
+    if (!email) return false;
+    const rawAdmins = (process.env.EXPO_PUBLIC_ADMIN_EMAILS ?? '').trim();
+    const configuredAdmins = rawAdmins
+      ? rawAdmins
+          .split(',')
+          .map((e: string) => e.trim().toLowerCase())
+          .filter(Boolean)
+      : [];
+    return (
+      configuredAdmins.includes(email) ||
+      email === 'admin@gymify.rpg' ||
+      email === 'dev@gymify.rpg' ||
+      email.endsWith('@gymify.rpg')
+    );
+  }, [currentUser?.email]);
+
+  const isDevToolsEnabled =
+    process.env.EXPO_PUBLIC_ENABLE_DEV_TOOLS === 'true' ||
+    isAdminUser ||
+    devSanctumUnlocked;
+
+  const handleVersionBadgePress = () => {
+    if (versionTapResetTimerRef.current) {
+      clearTimeout(versionTapResetTimerRef.current);
+    }
+    const nextCount = versionTapCountRef.current + 1;
+    versionTapCountRef.current = nextCount;
+
+    if (nextCount >= 5) {
+      versionTapCountRef.current = 0;
+      if (!devSanctumUnlocked) {
+        setDevSanctumUnlocked(true);
+      }
+      triggerSensoryCue('CHEST_OPEN_REVEAL');
+      setDevSanctumUnlockToast('🛠️ Developer Sanctum Unlocked');
+      setTimeout(() => {
+        setDevSanctumUnlockToast(null);
+      }, 4000);
+      return;
+    }
+
+    versionTapResetTimerRef.current = setTimeout(() => {
+      versionTapCountRef.current = 0;
+    }, 2500);
+  };
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -784,13 +837,15 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             <Text style={styles.utilityBtnText}>🐛 Bug</Text>
           </Pressable>
 
-          <Pressable
-            style={[styles.utilityBtn, styles.utilityBtnGold]}
-            onPress={() => setDevTriageModalVisible(true)}
-            testID="profile-open-triage-btn"
-          >
-            <Text style={[styles.utilityBtnText, styles.utilityBtnTextGold]}>🛠️ Triage</Text>
-          </Pressable>
+          {isDevToolsEnabled && (
+            <Pressable
+              style={[styles.utilityBtn, styles.utilityBtnGold]}
+              onPress={() => setDevTriageModalVisible(true)}
+              testID="profile-open-triage-btn"
+            >
+              <Text style={[styles.utilityBtnText, styles.utilityBtnTextGold]}>🛠️ Dev Triage</Text>
+            </Pressable>
+          )}
 
           <Pressable
             style={[
@@ -813,11 +868,32 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                 ? '📥'
                 : '🔄'}
             </Text>
-            <View style={styles.versionBadgeInline}>
+            <Pressable
+              style={styles.versionBadgeInline}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                handleVersionBadgePress();
+              }}
+              hitSlop={6}
+              testID="profile-version-badge-btn"
+            >
               <Text style={styles.versionBadgeInlineText}>v{updateState.currentVersion}</Text>
-            </View>
+            </Pressable>
           </Pressable>
         </View>
+
+        {devSanctumUnlockToast && (
+          <Pressable
+            style={[styles.feedbackBanner, styles.feedbackBannerInfo, { marginTop: 8, marginBottom: 4 }]}
+            onPress={() => setDevSanctumUnlockToast(null)}
+            testID="dev-sanctum-unlock-toast"
+          >
+            <Text style={[styles.feedbackBannerText, styles.feedbackTextInfo]}>
+              {devSanctumUnlockToast}
+            </Text>
+            <Text style={styles.feedbackDismiss}>✕</Text>
+          </Pressable>
+        )}
 
         {/* Fatigue & Rest Status Pill + Summary */}
         <Pressable

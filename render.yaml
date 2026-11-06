@@ -1,9 +1,9 @@
 services:
-  # Fastify Node API Web Service
+  # Fastify Node API Web Service (Render Pro Workspace - Paid Always-On Instance)
   - type: web
     name: gymify-server
     runtime: node
-    plan: free
+    plan: starter
     buildCommand: npm install --include=dev && npx prisma generate --schema=./packages/database/prisma/schema.prisma && npm run build
     startCommand: npx prisma db push --schema=./packages/database/prisma/schema.prisma && npm start --workspace=@gymify/server
     envVars:
@@ -24,25 +24,27 @@ services:
         value: "*"
       - key: DIAGNOSTICS_WEBHOOK_URL
         sync: false
+      - key: ADMIN_EMAILS
+        sync: false
       - key: APP_LATEST_VERSION
-        value: "0.1.0"
+        value: "0.2.0"
       - key: APP_MIN_REQUIRED_VERSION
-        value: "0.1.0"
+        value: "0.2.0"
       - key: ANDROID_APK_DOWNLOAD_URL
         sync: false
       - key: APP_RELEASE_NOTES
-        value: "Performance improvements, bug fixes, and new RPG content."
+        value: "v0.2.0 Playtester Release: Clean training history slate, gated Developer Sanctum, and clarified workout modes."
 
-  # Redis instance for BullMQ background workers and timers
+  # Managed Redis 7 instance for BullMQ background workers and timers (Render Pro - Paid Always-On)
   - type: redis
     name: gymify-redis
-    plan: free
+    plan: starter
     maxmemoryPolicy: noeviction
     ipAllowList: []
 
 databases:
-  # Managed PostgreSQL Database
+  # Managed PostgreSQL 16 Database (Render Pro - Paid Always-On)
   - name: gymify-postgres
     databaseName: gymify_rpg
     user: gymify
-    plan: free
+    plan: basic-256mb

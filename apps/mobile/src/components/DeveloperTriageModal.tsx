@@ -85,7 +85,14 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<{ [id: string]: string }>({});
 
-  const { fatigueState, resilienceShields, simulateLayoffHours } = useGame();
+  const {
+    fatigueState,
+    resilienceShields,
+    simulateLayoffHours,
+    workoutHistory,
+    restoreSampleWorkoutHistory,
+    clearWorkoutHistory,
+  } = useGame();
   const hoursSinceLastWorkout =
     fatigueState?.lastWorkoutAt !== null && fatigueState?.lastWorkoutAt !== undefined
       ? Math.round((Date.now() - new Date(fatigueState.lastWorkoutAt).getTime()) / (3600 * 1000))
@@ -358,6 +365,26 @@ export const DeveloperTriageModal: React.FC<DeveloperTriageModalProps> = ({ visi
                     ⏱️ Simulate 96h Missed-Session Gap
                   </Text>
                 </Pressable>
+                <Pressable
+                  testID="dev-triage-restore-samples-btn"
+                  style={styles.simulateLayoffBtn}
+                  onPress={() => restoreSampleWorkoutHistory()}
+                >
+                  <Text style={styles.simulateLayoffBtnText}>
+                    📥 Restore Demo Sample Workouts ({workoutHistory.length} logged)
+                  </Text>
+                </Pressable>
+                {workoutHistory.length > 0 && (
+                  <Pressable
+                    testID="dev-triage-clear-history-btn"
+                    style={styles.simulateLayoffBtn}
+                    onPress={() => clearWorkoutHistory()}
+                  >
+                    <Text style={styles.simulateLayoffBtnText}>
+                      🧹 Clear Training History
+                    </Text>
+                  </Pressable>
+                )}
                 <View style={styles.debugMetricsPills}>
                   <Text
                     style={[

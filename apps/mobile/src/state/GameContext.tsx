@@ -1245,7 +1245,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [defaultWeightUnit, setDefaultWeightUnitState] = useState<WeightUnit>('KG');
   const [warmupPresetCount, setWarmupPresetCountState] = useState<WarmupPresetCount>(2);
   const [workoutHistory, setWorkoutHistory] = useState<CompletedWorkoutRecord[]>(
-    DEFAULT_SAMPLE_WORKOUT_HISTORY
+    []
   );
 
   // Only workouts silently tagged with the active character's `characterId` count towards its progression

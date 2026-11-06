@@ -28,6 +28,38 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
 }
 
 /**
+ * Fastify preHandler hook to require admin privileges for sensitive developer routes.
+ * Allows access if:
+ * 1. Environment is non-production (`development` or `test`), OR
+ * 2. `process.env.ADMIN_EMAILS` is unset or empty, OR
+ * 3. The authenticated user's email matches an entry in `process.env.ADMIN_EMAILS` (comma-separated, case-insensitive).
+ */
+export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const nodeEnv = process.env.NODE_ENV || 'development';
+  const rawAdmins = (process.env.ADMIN_EMAILS ?? '').trim();
+
+  if (nodeEnv !== 'production' || !rawAdmins) {
+    return;
+  }
+
+  const allowedEmails = rawAdmins
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (allowedEmails.length === 0) {
+    return;
+  }
+
+  const userEmail = request.user?.email?.trim().toLowerCase() ?? '';
+  if (!userEmail || !allowedEmails.includes(userEmail)) {
+    return reply.status(403).send({
+      error: 'Forbidden: Developer Sanctum admin access required',
+    });
+  }
+}
+
+/**
  * Optional authentication hook that populates `request.user` if a token is present,
  * but allows unauthenticated requests to proceed.
  */
