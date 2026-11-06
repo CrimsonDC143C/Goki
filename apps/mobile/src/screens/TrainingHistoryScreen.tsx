@@ -32,6 +32,7 @@ import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { WeeklyVolumeLandmarksCard } from '../components/WeeklyVolumeLandmarksCard';
 import { MetricInfoBadge, MetricInfoTooltipModal } from '../components/MetricInfoTooltipModal';
 import { ShareableWorkoutReceiptModal } from '../components/ShareableWorkoutReceiptModal';
+import { WipeTrainingHistoryModal } from '../components/WipeTrainingHistoryModal';
 
 export interface TrainingHistoryScreenProps {
   onBack: () => void;
@@ -205,7 +206,16 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
   visible = true,
   onLoadSessionIntoWorkout,
 }) => {
-  const { workoutHistory, presets, exercises, defaultWeightUnit, consistencyStreak } = useGame();
+  const {
+    workoutHistory,
+    presets,
+    exercises,
+    defaultWeightUnit,
+    consistencyStreak,
+    registeredGyms,
+    pruneWorkoutHistory,
+    restoreSampleWorkoutHistory,
+  } = useGame();
   const insets = useSafeAreaInsets();
   const safeTop =
     Platform.OS === 'web'
@@ -238,6 +248,7 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
     note?: string | null;
   } | null>(null);
   const [receiptWorkout, setReceiptWorkout] = useState<CompletedWorkoutRecord | null>(null);
+  const [wipeModalVisible, setWipeModalVisible] = useState(false);
 
   const receiptSummary = useMemo(() => {
     if (!receiptWorkout) return null;
@@ -358,19 +369,30 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
           </Text>
         </View>
 
-        {mode !== 'EXERCISE' ? (
+        <View style={styles.topBarActionsRow}>
+          {mode !== 'EXERCISE' && (
+            <TouchableOpacity
+              style={styles.sortToggleBtn}
+              onPress={toggleSortOrder}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.sortToggleText}>
+                {sortOrder === 'LATEST_FIRST' ? '📅 Newest' : '📅 Oldest'}
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={styles.sortToggleBtn}
-            onPress={toggleSortOrder}
-            activeOpacity={0.7}
+            style={styles.wipeHeaderBtn}
+            onPress={() => {
+              triggerSensoryCue('SET_MICRO_REWARD_TICK');
+              setWipeModalVisible(true);
+            }}
+            activeOpacity={0.75}
+            testID="open-wipe-history-modal-btn"
           >
-            <Text style={styles.sortToggleText}>
-              {sortOrder === 'LATEST_FIRST' ? '📅 Newest' : '📅 Oldest'}
-            </Text>
+            <Text style={styles.wipeHeaderBtnText}>🗑️ Wipe</Text>
           </TouchableOpacity>
-        ) : (
-          <View style={{ width: 68 }} />
-        )}
+        </View>
       </View>
 
       {/* 2. SEARCH & MODE SWITCHER */}
@@ -1069,6 +1091,18 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
                           <Text style={styles.loadWorkoutBtnText}>🔄 Load</Text>
                         </TouchableOpacity>
                       )}
+
+                      <TouchableOpacity
+                        style={styles.deleteSessionIconBtn}
+                        onPress={() => {
+                          triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                          pruneWorkoutHistory({ workoutIds: [session.workoutId] });
+                        }}
+                        activeOpacity={0.75}
+                        testID={`delete-session-${session.workoutId}`}
+                      >
+                        <Text style={styles.deleteSessionIconText}>🗑️</Text>
+                      </TouchableOpacity>
                     </View>
                   </View>
                 );
@@ -1193,6 +1227,16 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
         contextualNote={tooltipState?.note ?? null}
         onClose={() => setTooltipState(null)}
       />
+
+      {/* Wipe / Prune Training History Modal with Composable Modifiers */}
+      <WipeTrainingHistoryModal
+        visible={wipeModalVisible}
+        workoutHistory={workoutHistory}
+        registeredGyms={registeredGyms}
+        onClose={() => setWipeModalVisible(false)}
+        onExecutePrune={pruneWorkoutHistory}
+        onRestoreSamples={restoreSampleWorkoutHistory}
+      />
     </View>
   );
 
@@ -1216,6 +1260,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  topBarActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  wipeHeaderBtn: {
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: 'rgba(127, 29, 29, 0.35)',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  wipeHeaderBtnText: {
+    color: '#FCA5A5',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  deleteSessionIconBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: 'rgba(127, 29, 29, 0.28)',
+    borderWidth: 1,
+    borderColor: '#7F1D1D',
+  },
+  deleteSessionIconText: {
+    fontSize: 11,
   },
   sessionGymTagText: {
     color: '#7DD3FC',

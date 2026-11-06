@@ -14,6 +14,8 @@ import {
   evaluatePostWorkoutSummary,
   filterWorkoutsForCharacter,
   countWorkoutsForCharacter,
+  pruneTrainingHistory,
+  rebuildHistoricalPRsFromWorkouts,
   DEFAULT_SAMPLE_WORKOUT_HISTORY,
   CompletedWorkoutRecord,
   CompletedSetEntry,
@@ -513,6 +515,140 @@ describe('Training History Tracker', () => {
       // Null or undefined characterId returns 0
       expect(filterWorkoutsForCharacter(combinedHistory, null)).toEqual([]);
       expect(countWorkoutsForCharacter(combinedHistory, undefined)).toBe(0);
+    });
+  });
+
+  describe('pruneTrainingHistory & rebuildHistoricalPRsFromWorkouts', () => {
+    const fixedNowMs = new Date('2026-11-10T12:00:00Z').getTime();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    const testWorkouts: CompletedWorkoutRecord[] = [
+      {
+        id: 'wk_recent_iron',
+        gymId: 'iron-sanctum',
+        gymName: 'Iron Sanctum',
+        source: 'ONLINE',
+        performedAtIso: new Date(fixedNowMs - 0.5 * DAY_MS).toISOString(), // 12h ago
+        durationSeconds: 3000,
+        workoutCategory: 'GYM',
+        exercises: [
+          {
+            exerciseId: 'bench_press',
+            exerciseName: 'Bench Press',
+            sets: [{ weightKg: 100, reps: 5, setType: 'NORMAL' }],
+          },
+          {
+            exerciseId: 'cable_face_pulls',
+            exerciseName: 'Cable Face Pulls',
+            sets: [{ weightKg: 30, reps: 15, setType: 'NORMAL' }],
+          },
+        ],
+      },
+      {
+        id: 'wk_5d_home',
+        gymId: 'home-outpost',
+        gymName: 'Home Outpost',
+        source: 'OFFLINE',
+        performedAtIso: new Date(fixedNowMs - 5 * DAY_MS).toISOString(), // 5d ago
+        durationSeconds: 2400,
+        workoutCategory: 'CARDIO',
+        exercises: [
+          {
+            exerciseId: 'zone2_run',
+            exerciseName: 'Zone 2 Run',
+            sets: [{ weightKg: 0, reps: 1, setType: 'NORMAL' }],
+          },
+        ],
+      },
+      {
+        id: 'sample_wk_old_45d',
+        gymId: null,
+        gymName: null,
+        source: 'OFFLINE',
+        performedAtIso: new Date(fixedNowMs - 45 * DAY_MS).toISOString(), // 45d ago
+        durationSeconds: 3600,
+        workoutCategory: 'GYM',
+        exercises: [
+          {
+            exerciseId: 'bench_press',
+            exerciseName: 'Bench Press',
+            sets: [{ weightKg: 80, reps: 8, setType: 'NORMAL' }],
+          },
+        ],
+      },
+    ];
+
+    it('wipes all workouts when filter is ALL_TIME + ALL modifiers', () => {
+      const res = pruneTrainingHistory(testWorkouts, { timeWindow: 'ALL_TIME' }, fixedNowMs);
+      expect(res.remainingWorkouts).toHaveLength(0);
+      expect(res.removedSessionsCount).toBe(3);
+      expect(res.modifiedSessionsCount).toBe(0);
+    });
+
+    it('wipes only workouts within a specific time window (LAST_24H, LAST_7D, OLDER_THAN_30D)', () => {
+      const last24h = pruneTrainingHistory(testWorkouts, { timeWindow: 'LAST_24H' }, fixedNowMs);
+      expect(last24h.removedSessionsCount).toBe(1);
+      expect(last24h.remainingWorkouts.map((w) => w.id)).toEqual(['wk_5d_home', 'sample_wk_old_45d']);
+
+      const older30d = pruneTrainingHistory(testWorkouts, { timeWindow: 'OLDER_THAN_30D' }, fixedNowMs);
+      expect(older30d.removedSessionsCount).toBe(1);
+      expect(older30d.remainingWorkouts.map((w) => w.id)).toEqual(['wk_recent_iron', 'wk_5d_home']);
+    });
+
+    it('filters by gym location (including UNSPECIFIED) and workoutCategory / source', () => {
+      const ironOnly = pruneTrainingHistory(testWorkouts, { gymId: 'iron-sanctum' }, fixedNowMs);
+      expect(ironOnly.removedSessionsCount).toBe(1);
+      expect(ironOnly.remainingWorkouts.map((w) => w.id)).toEqual(['wk_5d_home', 'sample_wk_old_45d']);
+
+      const unspecifiedGym = pruneTrainingHistory(testWorkouts, { gymId: 'UNSPECIFIED' }, fixedNowMs);
+      expect(unspecifiedGym.removedSessionsCount).toBe(1);
+      expect(unspecifiedGym.remainingWorkouts.map((w) => w.id)).toEqual(['wk_recent_iron', 'wk_5d_home']);
+
+      const sampleOnly = pruneTrainingHistory(testWorkouts, { source: 'SAMPLE_ONLY' }, fixedNowMs);
+      expect(sampleOnly.removedSessionsCount).toBe(1);
+      expect(sampleOnly.remainingWorkouts.map((w) => w.id)).toEqual(['wk_recent_iron', 'wk_5d_home']);
+    });
+
+    it('supports STRIP_EXERCISE vs REMOVE_SESSION when pruning a specific exercise/activity', () => {
+      // STRIP_EXERCISE: strips bench_press from wk_recent_iron (keeping cable_face_pulls) and drops sample_wk_old_45d (since bench_press was its only exercise)
+      const stripped = pruneTrainingHistory(
+        testWorkouts,
+        { exerciseId: 'bench_press', exercisePruneMode: 'STRIP_EXERCISE' },
+        fixedNowMs
+      );
+      expect(stripped.removedSessionsCount).toBe(1);
+      expect(stripped.modifiedSessionsCount).toBe(1);
+      expect(stripped.removedExerciseEntriesCount).toBe(2);
+      expect(stripped.remainingWorkouts).toHaveLength(2);
+      expect(stripped.remainingWorkouts[0]?.exercises.map((e) => e.exerciseId)).toEqual([
+        'cable_face_pulls',
+      ]);
+
+      // REMOVE_SESSION: removes both sessions that contained bench_press
+      const removedSessions = pruneTrainingHistory(
+        testWorkouts,
+        { exerciseId: 'bench_press', exercisePruneMode: 'REMOVE_SESSION' },
+        fixedNowMs
+      );
+      expect(removedSessions.removedSessionsCount).toBe(2);
+      expect(removedSessions.modifiedSessionsCount).toBe(0);
+      expect(removedSessions.remainingWorkouts.map((w) => w.id)).toEqual(['wk_5d_home']);
+    });
+
+    it('rebuilds historicalPRs accurately from remaining workouts', () => {
+      const prsBefore = rebuildHistoricalPRsFromWorkouts(testWorkouts);
+      // 100kg x 5 -> 100 * (1 + 5/30) = 116.67
+      expect(prsBefore.bench_press?.bestE1RM).toBeCloseTo(116.67, 1);
+
+      const afterRemovingRecent = pruneTrainingHistory(
+        testWorkouts,
+        { workoutIds: ['wk_recent_iron'] },
+        fixedNowMs
+      );
+      const prsAfter = rebuildHistoricalPRsFromWorkouts(afterRemovingRecent.remainingWorkouts);
+      // Falls back to 80kg x 8 -> 101.33
+      expect(prsAfter.bench_press?.bestE1RM).toBeCloseTo(101.33, 1);
+      expect(prsAfter.cable_face_pulls).toBeUndefined();
     });
   });
 });

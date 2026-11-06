@@ -48,10 +48,26 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
     workoutMachine,
     currentUser,
     gameMode,
+    activeCharacterId,
+    characters,
+    deletedCharacters,
   } = useGame();
 
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [charManagerVisible, setCharManagerVisible] = useState(false);
+  const [charManagerInitialView, setCharManagerInitialView] = useState<'ROSTER' | 'CREATE'>('ROSTER');
+
+  const hasActiveHero = Boolean(activeCharacterId && characters.some((c) => c.id === activeCharacterId));
+
+  const openHeroCreation = () => {
+    setCharManagerInitialView('CREATE');
+    setCharManagerVisible(true);
+  };
+
+  const openHallOfHeroes = () => {
+    setCharManagerInitialView('ROSTER');
+    setCharManagerVisible(true);
+  };
 
   useEffect(() => {
     if (!landingToastMessage) return;
@@ -122,50 +138,91 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           </Pressable>
         )}
 
-        {/* Hero Full-Body Character Art Frame + Overlaid Bottom Nameplate */}
+        {/* Hero Full-Body Character Art Frame OR No-Hero Creation Prompt */}
         <View style={styles.heroSection}>
-          <CharacterPortraitFrame
-            variant="hero"
-            height={360}
-            appearanceId={appearanceId}
-            imageSource={characterImageSource ?? characterArtUri}
-          >
-            <View style={styles.nameplateBanner}>
-              <View style={styles.nameplateTopRow}>
-                <Text style={styles.characterNameText} numberOfLines={1}>
-                  {characterName}
-                </Text>
-                <View style={styles.levelBadge}>
-                  <Text style={styles.levelBadgeText}>Lv. {overallLevel}</Text>
+          {hasActiveHero ? (
+            <CharacterPortraitFrame
+              variant="hero"
+              height={360}
+              appearanceId={appearanceId}
+              imageSource={characterImageSource ?? characterArtUri}
+            >
+              <View style={styles.nameplateBanner}>
+                <View style={styles.nameplateTopRow}>
+                  <Text style={styles.characterNameText} numberOfLines={1}>
+                    {characterName}
+                  </Text>
+                  <View style={styles.levelBadge}>
+                    <Text style={styles.levelBadgeText}>Lv. {overallLevel}</Text>
+                  </View>
                 </View>
-              </View>
 
-              <View style={styles.nameplateMetaRow}>
-                <View style={styles.guildRankPill}>
-                  {RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS] ? (
-                    <SvgXml
-                      xml={RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS]}
-                      width={16}
-                      height={16}
-                    />
-                  ) : null}
-                  <Text style={styles.guildRankText}>{adventurerRank} RANK</Text>
-                </View>
-                <View style={styles.locationPill}>
-                  <Text style={styles.locationPillText}>📍 {location}</Text>
+                <View style={styles.nameplateMetaRow}>
+                  <View style={styles.guildRankPill}>
+                    {RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS] ? (
+                      <SvgXml
+                        xml={RANK_CREST_SVGS[adventurerRank.toUpperCase() as keyof typeof RANK_CREST_SVGS]}
+                        width={16}
+                        height={16}
+                      />
+                    ) : null}
+                    <Text style={styles.guildRankText}>{adventurerRank} RANK</Text>
+                  </View>
+                  <View style={styles.locationPill}>
+                    <Text style={styles.locationPillText}>📍 {location}</Text>
+                  </View>
                 </View>
               </View>
+            </CharacterPortraitFrame>
+          ) : (
+            <View style={styles.emptyHeroFrame} testID="landing-no-hero-box">
+              <View style={styles.emptyHeroEmblemBadge}>
+                <Text style={styles.emptyHeroEmblemIcon}>⚔️</Text>
+              </View>
+              <Text style={styles.emptyHeroEyebrow}>HALL OF HEROES</Text>
+              <Text style={styles.emptyHeroTitle}>No Active Hero Selected</Text>
+              <Text style={styles.emptyHeroDesc}>
+                You must forge or select an active hero before entering the World of Verethor.
+                Choose your cosmetic appearance, name your champion, and begin turning physical
+                effort into legend.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.emptyHeroCreateBtn,
+                  pressed && styles.actionCardPressed,
+                ]}
+                onPress={openHeroCreation}
+                testID="landing-create-hero-cta-btn"
+              >
+                <Text style={styles.emptyHeroCreateBtnText}>⚡ Forge Your Hero</Text>
+              </Pressable>
+
+              {(characters.length > 0 || deletedCharacters.length > 0) && (
+                <Pressable
+                  style={styles.emptyHeroSecondaryBtn}
+                  onPress={openHallOfHeroes}
+                  testID="landing-restore-or-select-hero-btn"
+                >
+                  <Text style={styles.emptyHeroSecondaryBtnText}>
+                    {characters.length > 0
+                      ? `Select Existing Hero (${characters.length})`
+                      : `View Fallen Heroes Archive (${deletedCharacters.length})`}
+                  </Text>
+                </Pressable>
+              )}
             </View>
-          </CharacterPortraitFrame>
+          )}
 
           {/* Quick Roster Switcher / Forger Pill */}
           <Pressable
             style={styles.heroManageBtn}
-            onPress={() => setCharManagerVisible(true)}
+            onPress={openHallOfHeroes}
             testID="landing-manage-heroes-btn"
           >
             <Text style={styles.heroManageBtnText}>
-              {gameMode === 'IRONMAN_VERIFIED' ? '🛡️ Ironman Verified' : '⚔️ Standard Honesty'} • Hall of Heroes (Switch / Forge)
+              {hasActiveHero
+                ? `${gameMode === 'IRONMAN_VERIFIED' ? '🛡️ Ironman Verified' : '⚔️ Standard Honesty'} • Hall of Heroes (Switch / Forge)`
+                : '⚔️ Open Hall of Heroes (Manage / Restore Roster)'}
             </Text>
           </Pressable>
         </View>
@@ -207,16 +264,36 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             style={({ pressed }) => [
               styles.actionCard,
               styles.onlineActionCard,
+              !hasActiveHero && styles.actionCardLocked,
               pressed && styles.actionCardPressed,
             ]}
-            onPress={onSelectOnlineWorkout}
+            onPress={() => {
+              if (!hasActiveHero) {
+                openHeroCreation();
+                return;
+              }
+              onSelectOnlineWorkout();
+            }}
+            testID="action-online-workout"
           >
             <View style={styles.actionHeaderRow}>
               <View style={styles.actionTitleCluster}>
-                <Text style={styles.actionIcon}>⚔️</Text>
-                <Text style={[styles.actionTitle, styles.onlineTitle]}>Online Workout</Text>
+                <Text style={styles.actionIcon}>{hasActiveHero ? '⚔️' : '🔒'}</Text>
+                <Text
+                  style={[
+                    styles.actionTitle,
+                    styles.onlineTitle,
+                    !hasActiveHero && styles.actionTitleLocked,
+                  ]}
+                >
+                  Online Workout
+                </Text>
               </View>
-              {hasActiveOnlineSession ? (
+              {!hasActiveHero ? (
+                <View style={styles.lockedActionPill}>
+                  <Text style={styles.lockedActionPillText}>Hero Required</Text>
+                </View>
+              ) : hasActiveOnlineSession ? (
                 <View style={styles.crimsonActivePill}>
                   <Text style={styles.crimsonActivePillText}>
                     {workoutMachine.phase} Active
@@ -227,7 +304,9 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
               )}
             </View>
             <Text style={styles.actionSubtitle}>
-              Full intra-workout RPG telemetry, PR Crits, &amp; live raid channeling.
+              {hasActiveHero
+                ? 'Full intra-workout RPG telemetry, PR Crits, & live raid channeling.'
+                : 'Forge or select an active hero first to unlock live RPG workout telemetry.'}
             </Text>
           </Pressable>
 
@@ -236,13 +315,20 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             style={({ pressed }) => [
               styles.actionCard,
               styles.enterWorldCard,
-              unclaimedSpoilsCount > 0 && styles.enterWorldCardGlowing,
+              hasActiveHero && unclaimedSpoilsCount > 0 && styles.enterWorldCardGlowing,
+              !hasActiveHero && styles.actionCardLocked,
               pressed && styles.actionCardPressed,
             ]}
-            onPress={onEnterWorld}
+            onPress={() => {
+              if (!hasActiveHero) {
+                openHeroCreation();
+                return;
+              }
+              onEnterWorld();
+            }}
             testID="action-enter-world"
           >
-            {spoilsBadgeLabel && (
+            {hasActiveHero && spoilsBadgeLabel && (
               <View style={styles.spoilsReadyBadge}>
                 <SvgXml
                   xml={LOOT_CHEST_SVGS.MYTHIC}
@@ -254,15 +340,23 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             )}
             <View style={styles.actionHeaderRow}>
               <View style={styles.actionTitleCluster}>
-                <Text style={styles.actionIcon}>🏰</Text>
-                <Text style={styles.actionTitle}>
+                <Text style={styles.actionIcon}>{hasActiveHero ? '🏰' : '🔒'}</Text>
+                <Text style={[styles.actionTitle, !hasActiveHero && styles.actionTitleLocked]}>
                   Enter World
                 </Text>
               </View>
-              <Text style={styles.chevronCrimson}>→</Text>
+              {!hasActiveHero ? (
+                <View style={styles.lockedActionPill}>
+                  <Text style={styles.lockedActionPillText}>Hero Required</Text>
+                </View>
+              ) : (
+                <Text style={styles.chevronCrimson}>→</Text>
+              )}
             </View>
             <Text style={styles.actionSubtitle}>
-              Manage character, gear, dungeons, and guild halls.
+              {hasActiveHero
+                ? 'Manage character, gear, dungeons, and guild halls.'
+                : 'Forge or select an active hero to enter the World of Verethor.'}
             </Text>
           </Pressable>
         </View>
@@ -271,12 +365,17 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
       <AuthModal
         visible={authModalVisible}
         onClose={() => setAuthModalVisible(false)}
-        onSuccess={onEnterWorld}
+        onSuccess={() => {
+          if (hasActiveHero) {
+            onEnterWorld();
+          }
+        }}
       />
 
       <CharacterManagerModal
         visible={charManagerVisible}
         onClose={() => setCharManagerVisible(false)}
+        initialView={charManagerInitialView}
       />
     </View>
   );
@@ -361,6 +460,88 @@ const styles = StyleSheet.create({
   heroSection: {
     marginBottom: 16,
     alignItems: 'center',
+  },
+  emptyHeroFrame: {
+    width: '100%',
+    minHeight: 300,
+    backgroundColor: CRIMSON_ONI.charcoalCard,
+    borderWidth: 1.5,
+    borderColor: CRIMSON_ONI.agedGold,
+    borderRadius: 16,
+    paddingHorizontal: 22,
+    paddingVertical: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyHeroEmblemBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(139, 17, 36, 0.25)',
+    borderWidth: 1.5,
+    borderColor: CRIMSON_ONI.agedGold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  emptyHeroEmblemIcon: {
+    fontSize: 26,
+  },
+  emptyHeroEyebrow: {
+    color: CRIMSON_ONI.agedGold,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.8,
+    marginBottom: 4,
+  },
+  emptyHeroTitle: {
+    color: CRIMSON_ONI.ghostWhite,
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptyHeroDesc: {
+    color: CRIMSON_ONI.ashGray,
+    fontSize: 12.5,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: 18,
+    maxWidth: 420,
+  },
+  emptyHeroCreateBtn: {
+    backgroundColor: CRIMSON_ONI.agedGold,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.agedGoldBright,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  emptyHeroCreateBtnText: {
+    color: CRIMSON_ONI.charcoalDeep,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  emptyHeroSecondaryBtn: {
+    marginTop: 10,
+    backgroundColor: 'rgba(30, 29, 35, 0.85)',
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.borderGold,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    width: '100%',
+  },
+  emptyHeroSecondaryBtnText: {
+    color: CRIMSON_ONI.agedGoldBright,
+    fontSize: 11.5,
+    fontWeight: '800',
   },
   heroManageRow: {
     marginTop: 8,
@@ -536,6 +717,27 @@ const styles = StyleSheet.create({
   },
   enterWorldTitle: {
     color: CRIMSON_ONI.agedGoldBright,
+  },
+  actionCardLocked: {
+    opacity: 0.65,
+    borderColor: CRIMSON_ONI.border,
+  },
+  actionTitleLocked: {
+    color: CRIMSON_ONI.ashGray,
+  },
+  lockedActionPill: {
+    backgroundColor: CRIMSON_ONI.charcoalDeep,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.borderGold,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  lockedActionPillText: {
+    color: CRIMSON_ONI.agedGold,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   actionSubtitle: {
     color: CRIMSON_ONI.ashGray,

@@ -140,34 +140,13 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       orderBy: { createdAt: 'asc' },
     });
 
-    let activeCharacters = allCharacters.filter((c) => !c.deletedAt);
+    const activeCharacters = allCharacters.filter((c) => !c.deletedAt);
     const deletedCharacters = allCharacters
       .filter((c) => c.deletedAt && new Date(c.deletedAt).getTime() >= cutoff.getTime())
       .map((c) => ({
         ...c,
         daysRemaining: computeDaysRemaining(new Date(c.deletedAt!)),
       }));
-
-    if (activeCharacters.length === 0 && deletedCharacters.length === 0) {
-      const character = await db.character.create({
-        data: {
-          userId: user.id,
-          name: `${user.username}'s Hero`,
-          gameMode: 'STANDARD',
-          appearanceId: 'oni_warlord',
-          avatarSpriteId: 'oni_warlord',
-          stats: { create: {} },
-          fatigueState: { create: {} },
-          equipmentLoadout: { create: {} },
-        },
-        include: {
-          stats: true,
-          fatigueState: true,
-          equipmentLoadout: true,
-        },
-      });
-      activeCharacters = [character];
-    }
 
     const character = activeCharacters[0] ?? null;
 

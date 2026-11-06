@@ -3,6 +3,7 @@ import {
   SetType,
   WorkoutPresetDefinition,
 } from './workout-presets-rest';
+import { HistoricalExercisePR } from './workout-calculator';
 
 // ============================================================================
 // TRAINING HISTORY DATA STRUCTURES & PROTOCOL
@@ -1521,3 +1522,244 @@ export const DEFAULT_SAMPLE_WORKOUT_HISTORY: CompletedWorkoutRecord[] = [
     ],
   },
 ];
+
+// ============================================================================
+// TRAINING HISTORY WIPE / PRUNE ENGINE (MODIFIERS BY TIME, GYM, ACTIVITY, ETC.)
+// ============================================================================
+
+export type TrainingHistoryTimeWindow =
+  | 'ALL_TIME'
+  | 'LAST_24H'
+  | 'LAST_7D'
+  | 'LAST_30D'
+  | 'OLDER_THAN_30D'
+  | 'OLDER_THAN_90D';
+
+export type TrainingHistorySourceFilter =
+  | 'ALL'
+  | 'ONLINE'
+  | 'OFFLINE'
+  | 'SAMPLE_ONLY';
+
+export type TrainingHistoryExercisePruneMode =
+  | 'STRIP_EXERCISE'
+  | 'REMOVE_SESSION';
+
+export interface TrainingHistoryPruneFilter {
+  /** Time window of workouts to wipe (defaults to 'ALL_TIME'). */
+  timeWindow?: TrainingHistoryTimeWindow;
+  /** Specific gymId to wipe, 'UNSPECIFIED' for untagged sessions, or 'ALL' (default). */
+  gymId?: string | 'ALL' | 'UNSPECIFIED';
+  /** Workout modality/category to wipe ('GYM' | 'CARDIO' | 'SPORT' | 'RECOVERY') or 'ALL' (default). */
+  workoutCategory?: WorkoutCategory | 'ALL';
+  /** Specific source ('ONLINE' | 'OFFLINE' | 'SAMPLE_ONLY') or 'ALL' (default). */
+  source?: TrainingHistorySourceFilter;
+  /** Specific exerciseId / activityId to target, or 'ALL' (default). */
+  exerciseId?: string | 'ALL';
+  /**
+   * When `exerciseId` is set to a specific exercise:
+   * - 'STRIP_EXERCISE': Removes only that exercise's logged sets from matching workouts (and drops the workout only if no other exercises remain).
+   * - 'REMOVE_SESSION': Removes the entire workout session if it contains the exercise.
+   */
+  exercisePruneMode?: TrainingHistoryExercisePruneMode;
+  /** Optional explicit list of workout IDs to delete (for 1-tap single-session deletion). */
+  workoutIds?: readonly string[];
+}
+
+export interface TrainingHistoryPruneResult {
+  remainingWorkouts: CompletedWorkoutRecord[];
+  removedSessionsCount: number;
+  modifiedSessionsCount: number;
+  removedExerciseEntriesCount: number;
+}
+
+function normalizeFilterGymKey(gymId?: string | null): string {
+  if (!gymId) return 'UNSPECIFIED';
+  const cleaned = gymId.trim().toLowerCase();
+  return cleaned.length > 0 ? cleaned : 'UNSPECIFIED';
+}
+
+/**
+ * Checks whether a single workout record matches the non-exercise-stripping criteria
+ * of a `TrainingHistoryPruneFilter`.
+ */
+export function doesWorkoutMatchPruneFilter(
+  workout: CompletedWorkoutRecord,
+  filter: TrainingHistoryPruneFilter,
+  nowMs: number = Date.now()
+): boolean {
+  if (filter.workoutIds && filter.workoutIds.length > 0) {
+    if (!filter.workoutIds.includes(workout.id)) {
+      return false;
+    }
+  }
+
+  // 1. Time Window Check
+  const timeWindow = filter.timeWindow ?? 'ALL_TIME';
+  if (timeWindow !== 'ALL_TIME') {
+    const performedMs = new Date(workout.performedAtIso).getTime();
+    if (!Number.isFinite(performedMs)) return false;
+    const ageMs = Math.max(0, nowMs - performedMs);
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    if (timeWindow === 'LAST_24H' && ageMs > DAY_MS) return false;
+    if (timeWindow === 'LAST_7D' && ageMs > 7 * DAY_MS) return false;
+    if (timeWindow === 'LAST_30D' && ageMs > 30 * DAY_MS) return false;
+    if (timeWindow === 'OLDER_THAN_30D' && ageMs <= 30 * DAY_MS) return false;
+    if (timeWindow === 'OLDER_THAN_90D' && ageMs <= 90 * DAY_MS) return false;
+  }
+
+  // 2. Gym / Sanctum Location Check
+  const targetGym = filter.gymId ?? 'ALL';
+  if (targetGym !== 'ALL') {
+    const recordGym = normalizeFilterGymKey(workout.gymId);
+    if (targetGym === 'UNSPECIFIED') {
+      if (recordGym !== 'UNSPECIFIED') return false;
+    } else if (recordGym !== normalizeFilterGymKey(targetGym)) {
+      return false;
+    }
+  }
+
+  // 3. Workout Category / Modality Check
+  const targetCategory = filter.workoutCategory ?? 'ALL';
+  if (targetCategory !== 'ALL') {
+    const recordCategory = workout.workoutCategory ?? 'GYM';
+    if (recordCategory !== targetCategory) return false;
+  }
+
+  // 4. Session Source Check
+  const targetSource = filter.source ?? 'ALL';
+  if (targetSource !== 'ALL') {
+    if (targetSource === 'SAMPLE_ONLY') {
+      if (!workout.id.startsWith('sample_wk_')) return false;
+    } else if (workout.source !== targetSource) {
+      return false;
+    }
+  }
+
+  // 5. Specific Exercise / Activity Check
+  const targetExercise = filter.exerciseId ?? 'ALL';
+  if (targetExercise !== 'ALL') {
+    const hasExercise = workout.exercises.some((ex) => ex.exerciseId === targetExercise);
+    if (!hasExercise) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Deterministically prunes or wipes `CompletedWorkoutRecord[]` using composable modifiers
+ * (Time Window, Gym Location, Modality/Category, Source, or Specific Exercise/Activity).
+ * Can be used both for live preview counts and for executing the prune.
+ */
+export function pruneTrainingHistory(
+  workouts: readonly CompletedWorkoutRecord[],
+  filter: TrainingHistoryPruneFilter,
+  nowMs: number = Date.now()
+): TrainingHistoryPruneResult {
+  const remainingWorkouts: CompletedWorkoutRecord[] = [];
+  let removedSessionsCount = 0;
+  let modifiedSessionsCount = 0;
+  let removedExerciseEntriesCount = 0;
+
+  const targetExercise = filter.exerciseId ?? 'ALL';
+  const pruneMode: TrainingHistoryExercisePruneMode =
+    filter.exercisePruneMode ?? 'STRIP_EXERCISE';
+
+  for (const wk of workouts) {
+    const matches = doesWorkoutMatchPruneFilter(wk, filter, nowMs);
+    if (!matches) {
+      remainingWorkouts.push(wk);
+      continue;
+    }
+
+    // If targeting a specific exercise in STRIP_EXERCISE mode, strip only that exercise's entry
+    if (targetExercise !== 'ALL' && pruneMode === 'STRIP_EXERCISE') {
+      const keptExercises = wk.exercises.filter((ex) => ex.exerciseId !== targetExercise);
+      const strippedCount = wk.exercises.length - keptExercises.length;
+      removedExerciseEntriesCount += strippedCount;
+
+      if (keptExercises.length === 0) {
+        removedSessionsCount += 1;
+      } else {
+        modifiedSessionsCount += 1;
+        remainingWorkouts.push({
+          ...wk,
+          exercises: keptExercises,
+        });
+      }
+      continue;
+    }
+
+    // Otherwise remove the entire matching workout session
+    removedSessionsCount += 1;
+    removedExerciseEntriesCount += wk.exercises.length;
+  }
+
+  return {
+    remainingWorkouts,
+    removedSessionsCount,
+    modifiedSessionsCount,
+    removedExerciseEntriesCount,
+  };
+}
+
+/**
+ * Rebuilds the `Record<string, HistoricalExercisePR>` dictionary from the remaining
+ * `CompletedWorkoutRecord[]` so that wiping/pruning sessions cleanly recalculates
+ * all-time PR baselines without leaving phantom PRs from deleted workouts.
+ */
+export function rebuildHistoricalPRsFromWorkouts(
+  workouts: readonly CompletedWorkoutRecord[]
+): Record<string, HistoricalExercisePR> {
+  const prs: Record<string, HistoricalExercisePR> = {};
+
+  for (const wk of workouts) {
+    for (const ex of wk.exercises) {
+      const workingSets = ex.sets.filter(
+        (s) => s.reps > 0 && !s.isWarmup && s.setType !== 'WARMUP'
+      );
+      if (workingSets.length === 0) continue;
+
+      let pr = prs[ex.exerciseId];
+      if (!pr) {
+        pr = {
+          exerciseId: ex.exerciseId,
+          bestE1RM: 0,
+          bestSingleSetVolume: 0,
+          bestSessionVolume: 0,
+          maxRepsByWeight: {},
+          bestCardioDurationSecByZone: {},
+        };
+        prs[ex.exerciseId] = pr;
+      }
+
+      let sessionVol = 0;
+      for (const s of workingSets) {
+        const w = Math.max(0, s.weightKg);
+        const r = Math.max(0, s.reps);
+        const e1rm = Math.round(calculateSetE1RM(w, r) * 100) / 100;
+        const setVol = Math.round(w * r * 100) / 100;
+        sessionVol += setVol;
+
+        if (e1rm > pr.bestE1RM) {
+          pr.bestE1RM = e1rm;
+        }
+        if (setVol > pr.bestSingleSetVolume) {
+          pr.bestSingleSetVolume = setVol;
+        }
+        const weightKey = w.toFixed(1);
+        const prevMaxReps = pr.maxRepsByWeight[weightKey] ?? 0;
+        if (r > prevMaxReps) {
+          pr.maxRepsByWeight[weightKey] = r;
+        }
+      }
+
+      sessionVol = Math.round(sessionVol * 100) / 100;
+      if (sessionVol > pr.bestSessionVolume) {
+        pr.bestSessionVolume = sessionVol;
+      }
+    }
+  }
+
+  return prs;
+}

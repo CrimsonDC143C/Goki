@@ -417,9 +417,20 @@ const AppRouter: React.FC = () => {
     syncOfflineWorkouts,
     workoutMachine,
     offlineDraft,
+    activeCharacterId,
+    characters,
   } = useGame();
   const [appMode, setAppMode] = useState<AppMode>('LANDING');
   const [worldTab, setWorldTab] = useState<ActiveTab>(DEFAULT_WORLD_ENTRY_TAB);
+
+  const hasActiveHero = Boolean(activeCharacterId && characters.some((c) => c.id === activeCharacterId));
+
+  // Gate the game world: if no active hero is created/selected, automatically return from WORLD to LANDING
+  useEffect(() => {
+    if (appMode === 'WORLD' && !hasActiveHero) {
+      setAppMode('LANDING');
+    }
+  }, [appMode, hasActiveHero]);
 
   // Initialize dual-layer Auto-Update subsystem
   useEffect(() => {
@@ -458,11 +469,11 @@ const AppRouter: React.FC = () => {
   }, [workoutMachine.phase]);
 
   useEffect(() => {
-    if (notificationTapTick > 0) {
+    if (notificationTapTick > 0 && hasActiveHero) {
       setWorldTab('WORKOUT');
       setAppMode('WORLD');
     }
-  }, [notificationTapTick]);
+  }, [notificationTapTick, hasActiveHero]);
 
   const renderContent = () => {
     if (appMode === 'LANDING') {
@@ -475,10 +486,12 @@ const AppRouter: React.FC = () => {
           <LandingScreen
             onSelectOfflineWorkout={() => setAppMode('OFFLINE_WORKOUT')}
             onSelectOnlineWorkout={() => {
+              if (!hasActiveHero) return;
               setWorldTab('WORKOUT');
               setAppMode('WORLD');
             }}
             onEnterWorld={() => {
+              if (!hasActiveHero) return;
               void syncOfflineWorkouts({ evaluateLocallyIfOffline: true });
               setWorldTab(DEFAULT_WORLD_ENTRY_TAB);
               setAppMode('WORLD');

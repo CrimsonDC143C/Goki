@@ -270,10 +270,9 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
     availableCharacters: Array.isArray(obj.availableCharacters) ? obj.availableCharacters : [],
     deletedCharacters: Array.isArray(obj.deletedCharacters) ? obj.deletedCharacters : [],
     activeCharacterId: typeof obj.activeCharacterId === 'string' ? obj.activeCharacterId : null,
-    workoutHistory:
-      Array.isArray(obj.workoutHistory) && obj.workoutHistory.length > 0
-        ? obj.workoutHistory
-        : DEFAULT_SAMPLE_WORKOUT_HISTORY,
+    workoutHistory: Array.isArray(obj.workoutHistory)
+      ? obj.workoutHistory
+      : DEFAULT_SAMPLE_WORKOUT_HISTORY,
     customExercises: Array.isArray(obj.customExercises) ? obj.customExercises : [],
     recentActivityIds: Array.isArray(obj.recentActivityIds) ? obj.recentActivityIds : [],
     exerciseGymPreferences:

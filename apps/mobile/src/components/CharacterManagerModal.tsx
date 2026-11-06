@@ -26,6 +26,8 @@ export interface CharacterManagerModalProps {
   visible: boolean;
   onClose: () => void;
   initialCustomizeCharacterId?: string | null;
+  initialView?: 'ROSTER' | 'CREATE';
+  initialCreateMode?: 'STANDARD' | 'IRONMAN_VERIFIED';
 }
 
 type ModalView = 'ROSTER' | 'CREATE' | 'CUSTOMIZE' | 'CONFIRM_DELETE';
@@ -34,6 +36,8 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
   visible,
   onClose,
   initialCustomizeCharacterId,
+  initialView,
+  initialCreateMode,
 }) => {
   const {
     characters,
@@ -75,9 +79,20 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
           return;
         }
       }
+      if (initialView === 'CREATE') {
+        const defaultMode =
+          initialCreateMode ??
+          (!characters.some((c) => c.gameMode === 'STANDARD') ? 'STANDARD' : 'IRONMAN_VERIFIED');
+        setCreatingMode(defaultMode);
+        setNewHeroName('');
+        setSelectedAppearanceId(defaultMode === 'IRONMAN_VERIFIED' ? 'oath_sentinel' : 'oni_warlord');
+        setPreviewPose('standing');
+        setCurrentView('CREATE');
+        return;
+      }
       setCurrentView('ROSTER');
     }
-  }, [visible, initialCustomizeCharacterId, characters]);
+  }, [visible, initialCustomizeCharacterId, initialView, initialCreateMode]);
 
   const standardCharacter = characters.find((c) => c.gameMode === 'STANDARD');
   const ironmanCharacter = characters.find((c) => c.gameMode === 'IRONMAN_VERIFIED');
@@ -358,21 +373,84 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
         </Text>
       </View>
 
-      {/* If Creating: Name Input */}
+      {/* If Creating: Game Mode Selector & Name Input */}
       {!isEditingExisting && (
-        <View style={styles.fieldGroup}>
-          <Text style={styles.fieldLabel}>Hero Display Name</Text>
-          <TextInput
-            style={styles.textInput}
-            value={newHeroName}
-            onChangeText={setNewHeroName}
-            placeholder="e.g., Kaelen Shadowstep"
-            placeholderTextColor="#6B7280"
-            maxLength={32}
-            autoCapitalize="words"
-            testID="create-char-name-input"
-          />
-        </View>
+        <>
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Realm Game Mode</Text>
+            <View style={styles.createModeRow}>
+              <Pressable
+                style={[
+                  styles.createModeOption,
+                  creatingMode === 'STANDARD' && styles.createModeOptionStandardActive,
+                  Boolean(standardCharacter) && styles.btnDisabled,
+                ]}
+                onPress={() => {
+                  if (!standardCharacter) {
+                    setErrorMsg(null);
+                    setCreatingMode('STANDARD');
+                  }
+                }}
+                disabled={Boolean(standardCharacter) || loading}
+                testID="create-mode-standard-btn"
+              >
+                <Text
+                  style={[
+                    styles.createModeOptionTitle,
+                    creatingMode === 'STANDARD' && { color: COLORS.gold },
+                  ]}
+                >
+                  ⚔️ Standard (Honesty)
+                </Text>
+                <Text style={styles.createModeOptionSub}>
+                  {standardCharacter ? 'Slot Occupied' : 'Manual & Preset Logging'}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.createModeOption,
+                  creatingMode === 'IRONMAN_VERIFIED' && styles.createModeOptionIronmanActive,
+                  Boolean(ironmanCharacter) && styles.btnDisabled,
+                ]}
+                onPress={() => {
+                  if (!ironmanCharacter) {
+                    setErrorMsg(null);
+                    setCreatingMode('IRONMAN_VERIFIED');
+                  }
+                }}
+                disabled={Boolean(ironmanCharacter) || loading}
+                testID="create-mode-ironman-btn"
+              >
+                <Text
+                  style={[
+                    styles.createModeOptionTitle,
+                    creatingMode === 'IRONMAN_VERIFIED' && { color: '#60A5FA' },
+                  ]}
+                >
+                  🛡️ Ironman (Verified)
+                </Text>
+                <Text style={styles.createModeOptionSub}>
+                  {ironmanCharacter ? 'Slot Occupied' : 'Wearable Biometrics'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.fieldLabel}>Hero Display Name</Text>
+            <TextInput
+              style={styles.textInput}
+              value={newHeroName}
+              onChangeText={setNewHeroName}
+              placeholder="e.g., Kaelen Shadowstep"
+              placeholderTextColor="#6B7280"
+              maxLength={32}
+              autoCapitalize="words"
+              testID="create-char-name-input"
+            />
+          </View>
+        </>
       )}
 
       {/* Action Buttons */}
@@ -1110,6 +1188,38 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginBottom: 6,
     textTransform: 'uppercase',
+  },
+  createModeRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  createModeOption: {
+    flex: 1,
+    backgroundColor: '#181C26',
+    borderWidth: 1.5,
+    borderColor: '#374151',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  createModeOptionStandardActive: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(217, 119, 6, 0.14)',
+  },
+  createModeOptionIronmanActive: {
+    borderColor: '#3B82F6',
+    backgroundColor: 'rgba(59, 130, 246, 0.14)',
+  },
+  createModeOptionTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  createModeOptionSub: {
+    fontSize: 9.5,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
   textInput: {
     backgroundColor: '#1E2330',

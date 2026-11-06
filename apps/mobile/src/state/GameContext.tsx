@@ -88,6 +88,10 @@ import {
   DEFAULT_SAMPLE_WORKOUT_HISTORY,
   filterWorkoutsForCharacter,
   countWorkoutsForCharacter,
+  TrainingHistoryPruneFilter,
+  TrainingHistoryPruneResult,
+  pruneTrainingHistory,
+  rebuildHistoricalPRsFromWorkouts,
   BASE_EQUIPPABLE_ITEMS,
   BASE_EQUIPPABLE_ITEM_BY_SLUG,
   ITEM_TIER_CONFIG,
@@ -360,6 +364,8 @@ interface GameContextValue {
   workoutHistory: CompletedWorkoutRecord[];
   recordWorkoutHistory: (record: CompletedWorkoutRecord) => void;
   clearWorkoutHistory: () => void;
+  pruneWorkoutHistory: (filter: TrainingHistoryPruneFilter) => TrainingHistoryPruneResult;
+  restoreSampleWorkoutHistory: () => void;
 
   // Presets
   presets: WorkoutPresetDefinition[];
@@ -923,10 +929,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const availableCharactersRef = useRef<PersistedCharacterProfile[]>([]);
   availableCharactersRef.current = availableCharacters;
 
-  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(
-    DEFAULT_LOCAL_CHARACTER_ID
-  );
-  const activeCharacterIdRef = useRef<string | null>(DEFAULT_LOCAL_CHARACTER_ID);
+  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
+  const activeCharacterIdRef = useRef<string | null>(null);
   activeCharacterIdRef.current = activeCharacterId;
 
   const [characterName, setCharacterName] = useState('Aric the Ironbound');
@@ -1392,10 +1396,54 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   }, [persistBundleSnapshot]);
 
+  const pruneWorkoutHistory = useCallback(
+    (filter: TrainingHistoryPruneFilter): TrainingHistoryPruneResult => {
+      const result = pruneTrainingHistory(workoutHistoryRef.current, filter);
+      const nextHistory = result.remainingWorkouts;
+      workoutHistoryRef.current = nextHistory;
+      setWorkoutHistory(nextHistory);
+
+      const rebuiltPRs = rebuildHistoricalPRsFromWorkouts(nextHistory);
+      historicalPRsRef.current = rebuiltPRs;
+      setHistoricalPRs(rebuiltPRs);
+
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          historicalPRs: rebuiltPRs,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+      }
+
+      persistBundleSnapshot({
+        workoutHistory: nextHistory,
+        characterProfile: currentProfileRef.current,
+        availableCharacters: availableCharactersRef.current,
+      });
+
+      return result;
+    },
+    [persistBundleSnapshot]
+  );
+
   const clearWorkoutHistory = useCallback(() => {
-    workoutHistoryRef.current = [];
-    setWorkoutHistory([]);
-    persistBundleSnapshot({ workoutHistory: [] });
+    pruneWorkoutHistory({ timeWindow: 'ALL_TIME' });
+  }, [pruneWorkoutHistory]);
+
+  const restoreSampleWorkoutHistory = useCallback(() => {
+    const sample = [...DEFAULT_SAMPLE_WORKOUT_HISTORY];
+    workoutHistoryRef.current = sample;
+    setWorkoutHistory(sample);
+    const rebuiltPRs = rebuildHistoricalPRsFromWorkouts(sample);
+    historicalPRsRef.current = rebuiltPRs;
+    setHistoricalPRs(rebuiltPRs);
+    persistBundleSnapshot({ workoutHistory: sample });
   }, [persistBundleSnapshot]);
 
   // Hydrate persisted offline draft, queued workouts, character profile and unclaimed spoils on boot
@@ -1458,6 +1506,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (loaded.availableCharacters && loaded.availableCharacters.length > 0) {
         availableCharactersRef.current = loaded.availableCharacters;
         setAvailableCharacters(loaded.availableCharacters);
+      } else if (loaded.characterProfile) {
+        availableCharactersRef.current = [loaded.characterProfile];
+        setAvailableCharacters([loaded.characterProfile]);
       }
       if (loaded.deletedCharacters && loaded.deletedCharacters.length > 0) {
         const nowMs = Date.now();
@@ -1484,7 +1535,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeCharacterIdRef.current = null;
         setActiveCharacterId(null);
       }
-      if (loaded.workoutHistory && loaded.workoutHistory.length > 0) {
+      if (Array.isArray(loaded.workoutHistory)) {
         workoutHistoryRef.current = loaded.workoutHistory;
         setWorkoutHistory(loaded.workoutHistory);
       }
@@ -1987,8 +2038,16 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const syncRemoteCharacters = useCallback(
     (primaryChar: any, allChars?: any[], remoteDeleted?: any[]) => {
-      if (!primaryChar && (!allChars || allChars.length === 0)) return;
-      const rawList = allChars && allChars.length > 0 ? allChars : [primaryChar];
+      if (!primaryChar && (!allChars || allChars.length === 0) && (!remoteDeleted || remoteDeleted.length === 0)) {
+        setAvailableCharacters([]);
+        availableCharactersRef.current = [];
+        setActiveCharacterId(null);
+        activeCharacterIdRef.current = null;
+        currentProfileRef.current = null;
+        remoteCharacterIdRef.current = null;
+        return;
+      }
+      const rawList = allChars && allChars.length > 0 ? allChars : primaryChar ? [primaryChar] : [];
       // Filter out characters that are marked deleted, locally permanently erased, or locally soft-deleted
       const activeRawList = rawList.filter((c: any) => {
         if (c.deletedAt) return false;
@@ -2110,6 +2169,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       persistBundleSnapshot({
         availableCharacters: mappedProfiles,
         deletedCharacters: nextDeleted,
+        activeCharacterId: targetChar ? targetChar.id : null,
+        characterProfile: targetChar ?? null,
         ...(updatedHistory ? { workoutHistory: updatedHistory } : {}),
       });
 
@@ -2120,6 +2181,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             applyCharacterToState(res.data.character, res.data);
           }
         });
+      } else {
+        setActiveCharacterId(null);
+        activeCharacterIdRef.current = null;
+        currentProfileRef.current = null;
+        remoteCharacterIdRef.current = null;
       }
     },
     [applyCharacterToState, persistBundleSnapshot]
@@ -5444,6 +5510,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     workoutHistory,
     recordWorkoutHistory,
     clearWorkoutHistory,
+    pruneWorkoutHistory,
+    restoreSampleWorkoutHistory,
     presets,
     savePreset,
     deletePreset,
