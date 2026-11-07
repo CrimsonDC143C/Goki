@@ -1332,6 +1332,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       historicalPRsRef.current = rebuiltPRs;
       setHistoricalPRs(rebuiltPRs);
 
+      // Wipe recent "quick" exercises memory alongside training history
+      const nextRecentIds =
+        filter.exerciseId && filter.exerciseId !== 'ALL'
+          ? recentActivityIdsRef.current.filter((id) => id !== filter.exerciseId)
+          : [];
+      recentActivityIdsRef.current = nextRecentIds;
+      setRecentActivityIds(nextRecentIds);
+
       if (currentProfileRef.current) {
         const updatedProfile: PersistedCharacterProfile = {
           ...currentProfileRef.current,
@@ -1348,6 +1356,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       persistBundleSnapshot({
         workoutHistory: nextHistory,
+        recentActivityIds: nextRecentIds,
         characterProfile: currentProfileRef.current,
         availableCharacters: availableCharactersRef.current,
       });

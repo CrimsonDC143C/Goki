@@ -176,7 +176,6 @@ export const WipeTrainingHistoryModal: React.FC<WipeTrainingHistoryModalProps> =
   };
 
   const handleConfirmWipe = () => {
-    if (totalAffected === 0) return;
     if (!confirmArmed) {
       triggerSensoryCue('SET_MICRO_REWARD_TICK');
       setConfirmArmed(true);
@@ -192,6 +191,7 @@ export const WipeTrainingHistoryModal: React.FC<WipeTrainingHistoryModalProps> =
     if (res.modifiedSessionsCount > 0) {
       parts.push(`stripped activity from ${res.modifiedSessionsCount} session${res.modifiedSessionsCount === 1 ? '' : 's'}`);
     }
+    parts.push('cleared recent quick exercises memory');
     setLastResultBanner(
       `✓ Wipe complete: ${parts.join(' & ')}. (${res.remainingWorkouts.length} session${res.remainingWorkouts.length === 1 ? '' : 's'} remaining)`
     );
@@ -428,7 +428,7 @@ export const WipeTrainingHistoryModal: React.FC<WipeTrainingHistoryModalProps> =
                 </Text>
               )}
               <Text style={styles.previewSubnote}>
-                All-time Personal Records (e1RM & volume baselines) automatically recalculate from remaining history.
+                All-time Personal Records (e1RM & volume baselines) recalculate from remaining history, and recent "Quick" exercises memory is wiped.
               </Text>
             </View>
 
@@ -458,23 +458,23 @@ export const WipeTrainingHistoryModal: React.FC<WipeTrainingHistoryModalProps> =
             <TouchableOpacity
               style={[
                 styles.wipeExecuteBtn,
-                totalAffected === 0 && styles.wipeExecuteBtnDisabled,
                 confirmArmed && styles.wipeExecuteBtnArmed,
               ]}
-              disabled={totalAffected === 0}
               onPress={handleConfirmWipe}
               testID="execute-wipe-history-btn"
             >
               <Text style={styles.wipeExecuteBtnText}>
-                {totalAffected === 0
-                  ? 'No Matching History to Wipe'
-                  : confirmArmed
-                  ? `⚠️ TAP AGAIN TO CONFIRM WIPE (${totalAffected} SESSION${
-                      totalAffected === 1 ? '' : 'S'
-                    })`
-                  : `🗑️ Wipe Matching History (${totalAffected} Session${
+                {confirmArmed
+                  ? totalAffected > 0
+                    ? `⚠️ TAP AGAIN TO CONFIRM WIPE (${totalAffected} SESSION${
+                        totalAffected === 1 ? '' : 'S'
+                      } + QUICK MEMORY)`
+                    : '⚠️ TAP AGAIN TO WIPE RECENT QUICK EXERCISES MEMORY'
+                  : totalAffected > 0
+                  ? `🗑️ Wipe Matching History (${totalAffected} Session${
                       totalAffected === 1 ? '' : 's'
-                    })`}
+                    } + Quick Memory)`
+                  : '🗑️ Wipe Recent Quick Exercises Memory'}
               </Text>
             </TouchableOpacity>
           </View>

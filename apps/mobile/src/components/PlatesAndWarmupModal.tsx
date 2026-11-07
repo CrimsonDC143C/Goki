@@ -22,6 +22,7 @@ import { CRIMSON_ONI } from '../theme';
 
 export interface PlatesAndWarmupModalProps {
   visible: boolean;
+  mode?: 'PLATES' | 'WARMUP';
   exerciseName: string;
   equipmentType?: string;
   unit: WeightUnit;
@@ -53,6 +54,7 @@ const WARMUP_COUNT_OPTIONS: readonly {
 
 export const PlatesAndWarmupModal: React.FC<PlatesAndWarmupModalProps> = ({
   visible,
+  mode = 'PLATES',
   exerciseName,
   unit,
   initialWorkingWeightKg,
@@ -112,7 +114,9 @@ export const PlatesAndWarmupModal: React.FC<PlatesAndWarmupModalProps> = ({
           {/* Header */}
           <View style={styles.headerRow}>
             <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={styles.eyebrow}>🧮 ZERO-MATH GYM HELPER</Text>
+              <Text style={styles.eyebrow}>
+                {mode === 'WARMUP' ? '🌡️ WARM-UP SETS' : '🧮 BARBELL PLATES VISUALIZER'}
+              </Text>
               <Text style={styles.title} numberOfLines={1}>
                 {exerciseName}
               </Text>
@@ -154,125 +158,129 @@ export const PlatesAndWarmupModal: React.FC<PlatesAndWarmupModalProps> = ({
             })}
           </View>
 
-          {/* Section 1: Visual Plate Loader */}
-          <View style={styles.sectionBox}>
-            <Text style={styles.sectionTitle}>
-              {platePlan.loadingMode === 'SINGLE_HORN'
-                ? 'LANDMINE / SINGLE-PIN LOADOUT'
-                : 'PLATES PER SIDE OF BAR'}
-            </Text>
+          {/* Mode 1: Visual Plate Loader */}
+          {mode === 'PLATES' && (
+            <View style={styles.sectionBox}>
+              <Text style={styles.sectionTitle}>
+                {platePlan.loadingMode === 'SINGLE_HORN'
+                  ? 'LANDMINE / SINGLE-PIN LOADOUT'
+                  : 'PLATES PER SIDE OF BAR'}
+              </Text>
 
-            {platePlan.plates.length > 0 ? (
-              <View style={styles.plateRackRow}>
-                <View style={styles.barSleeveStub} />
-                {platePlan.plates.flatMap((item, pIdx) =>
-                  Array.from({ length: Math.min(item.count, 6) }).map((_, cIdx) => {
-                    const isLightText =
-                      item.colorHex === '#F8FAFC' || item.colorHex === '#EAB308';
-                    return (
-                      <View
-                        key={`${pIdx}_${cIdx}`}
-                        style={[
-                          styles.plateVisualChip,
-                          {
-                            backgroundColor: item.colorHex,
-                            height: Math.max(30, Math.min(48, 26 + item.plateWeight * 0.85)),
-                          },
-                        ]}
-                      >
-                        <Text
+              {platePlan.plates.length > 0 ? (
+                <View style={styles.plateRackRow}>
+                  <View style={styles.barSleeveStub} />
+                  {platePlan.plates.flatMap((item, pIdx) =>
+                    Array.from({ length: Math.min(item.count, 6) }).map((_, cIdx) => {
+                      const isLightText =
+                        item.colorHex === '#F8FAFC' || item.colorHex === '#EAB308';
+                      return (
+                        <View
+                          key={`${pIdx}_${cIdx}`}
                           style={[
-                            styles.plateVisualText,
-                            isLightText && { color: '#111827' },
+                            styles.plateVisualChip,
+                            {
+                              backgroundColor: item.colorHex,
+                              height: Math.max(30, Math.min(48, 26 + item.plateWeight * 0.85)),
+                            },
                           ]}
                         >
-                          {formatCleanWeightNumber(item.plateWeight)}
-                        </Text>
-                      </View>
-                    );
-                  })
-                )}
-              </View>
-            ) : null}
+                          <Text
+                            style={[
+                              styles.plateVisualText,
+                              isLightText && { color: '#111827' },
+                            ]}
+                          >
+                            {formatCleanWeightNumber(item.plateWeight)}
+                          </Text>
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
+              ) : null}
 
-            <Text style={styles.plateSummaryText}>{platePlan.summaryText}</Text>
-            {platePlan.remainderDisplayWeight > 0 ? (
-              <Text style={styles.remainderHint}>
-                Closest loadable total: {formatCleanWeightNumber(platePlan.achievableDisplayWeight)}
-                {unitSuffix} ({formatCleanWeightNumber(platePlan.remainderDisplayWeight)}
-                {unitSuffix} micro-gap)
-              </Text>
-            ) : null}
-          </View>
-
-          {/* Section 2: Configurable 1 / 2 / 3-Set Warm-Up Generator */}
-          <View style={styles.sectionBox}>
-            <View style={styles.warmupHeaderRow}>
-              <Text style={styles.sectionTitle}>RAMPED WARM-UP GENERATOR</Text>
-              <Text style={styles.rememberedHint}>Saved preference</Text>
+              <Text style={styles.plateSummaryText}>{platePlan.summaryText}</Text>
+              {platePlan.remainderDisplayWeight > 0 ? (
+                <Text style={styles.remainderHint}>
+                  Closest loadable total: {formatCleanWeightNumber(platePlan.achievableDisplayWeight)}
+                  {unitSuffix} ({formatCleanWeightNumber(platePlan.remainderDisplayWeight)}
+                  {unitSuffix} micro-gap)
+                </Text>
+              ) : null}
             </View>
+          )}
 
-            <View style={styles.warmupCountRow}>
-              {WARMUP_COUNT_OPTIONS.map((opt) => {
-                const active = warmupPresetCount === opt.count;
-                return (
-                  <TouchableOpacity
-                    key={opt.count}
-                    style={[styles.warmupCountBtn, active && styles.warmupCountBtnActive]}
-                    onPress={() => onSelectWarmupPresetCount(opt.count)}
-                    activeOpacity={0.75}
-                  >
-                    <Text
-                      style={[
-                        styles.warmupCountTitle,
-                        active && styles.warmupCountTitleActive,
-                      ]}
+          {/* Mode 2: Configurable 1 / 2 / 3-Set Warm-Up Generator */}
+          {mode === 'WARMUP' && (
+            <View style={styles.sectionBox}>
+              <View style={styles.warmupHeaderRow}>
+                <Text style={styles.sectionTitle}>RAMPED WARM-UP GENERATOR</Text>
+                <Text style={styles.rememberedHint}>Saved preference</Text>
+              </View>
+
+              <View style={styles.warmupCountRow}>
+                {WARMUP_COUNT_OPTIONS.map((opt) => {
+                  const active = warmupPresetCount === opt.count;
+                  return (
+                    <TouchableOpacity
+                      key={opt.count}
+                      style={[styles.warmupCountBtn, active && styles.warmupCountBtnActive]}
+                      onPress={() => onSelectWarmupPresetCount(opt.count)}
+                      activeOpacity={0.75}
                     >
-                      {opt.title}
-                    </Text>
-                    <Text style={styles.warmupCountSub}>{opt.sub}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {warmupSets.length > 0 ? (
-              <View style={styles.warmupPreviewList}>
-                {warmupSets.map((ws) => (
-                  <View key={ws.stepNumber} style={styles.warmupPreviewRow}>
-                    <Text style={styles.warmupTag}>[W{ws.stepNumber}]</Text>
-                    <Text style={styles.warmupPct}>{ws.percentageLabel}</Text>
-                    <Text style={styles.warmupVal}>
-                      {formatCleanWeightNumber(ws.displayWeight)}
-                      {unitSuffix} × {ws.reps} reps
-                    </Text>
-                    <Text style={styles.warmupRpe}>@ RPE {ws.rpe}</Text>
-                  </View>
-                ))}
+                      <Text
+                        style={[
+                          styles.warmupCountTitle,
+                          active && styles.warmupCountTitleActive,
+                        ]}
+                      >
+                        {opt.title}
+                      </Text>
+                      <Text style={styles.warmupCountSub}>{opt.sub}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
-            ) : (
-              <Text style={styles.emptyWarmupHint}>
-                Enter a working weight above 0 to preview ramped warm-up sets.
-              </Text>
-            )}
 
-            <TouchableOpacity
-              style={[
-                styles.insertWarmupBtn,
-                warmupSets.length === 0 && styles.insertWarmupBtnDisabled,
-              ]}
-              disabled={warmupSets.length === 0}
-              onPress={() => {
-                onInsertWarmupSets(warmupSets);
-                onClose();
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.insertWarmupBtnText}>
-                ⚡ Insert {warmupPresetCount} Warm-Up Set{warmupPresetCount > 1 ? 's' : ''} at Top
-              </Text>
-            </TouchableOpacity>
-          </View>
+              {warmupSets.length > 0 ? (
+                <View style={styles.warmupPreviewList}>
+                  {warmupSets.map((ws) => (
+                    <View key={ws.stepNumber} style={styles.warmupPreviewRow}>
+                      <Text style={styles.warmupTag}>[W{ws.stepNumber}]</Text>
+                      <Text style={styles.warmupPct}>{ws.percentageLabel}</Text>
+                      <Text style={styles.warmupVal}>
+                        {formatCleanWeightNumber(ws.displayWeight)}
+                        {unitSuffix} × {ws.reps} reps
+                      </Text>
+                      <Text style={styles.warmupRpe}>@ RPE {ws.rpe}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.emptyWarmupHint}>
+                  Enter a working weight above 0 to preview ramped warm-up sets.
+                </Text>
+              )}
+
+              <TouchableOpacity
+                style={[
+                  styles.insertWarmupBtn,
+                  warmupSets.length === 0 && styles.insertWarmupBtnDisabled,
+                ]}
+                disabled={warmupSets.length === 0}
+                onPress={() => {
+                  onInsertWarmupSets(warmupSets);
+                  onClose();
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.insertWarmupBtnText}>
+                  ⚡ Insert {warmupPresetCount} Warm-Up Set{warmupPresetCount > 1 ? 's' : ''} at Top
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </Pressable>
       </Pressable>
     </Modal>

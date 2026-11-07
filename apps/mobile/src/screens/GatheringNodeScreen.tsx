@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -119,17 +120,63 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
   const [goalMode, setGoalMode] = useState<GoalMode>('TIME');
   const [targetMinutes, setTargetMinutes] = useState<number>(45);
   const [sliderTrackWidth, setSliderTrackWidth] = useState<number>(240);
+  const [isDraggingSlider, setIsDraggingSlider] = useState<boolean>(false);
   const [targetResourceCount, setTargetResourceCount] = useState<number>(20);
   const [notifyOnCompletion, setNotifyOnCompletion] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const handleTrackTouch = (locationX: number) => {
-    const width = Math.max(1, sliderTrackWidth);
-    const ratio = Math.max(0, Math.min(1, locationX / width));
-    const raw = 15 + ratio * (120 - 15);
-    const snapped = Math.round(raw / 5) * 5;
-    handleTimeChange(snapped);
-  };
+  const sliderTrackWidthRef = useRef<number>(240);
+  const targetMinutesRef = useRef<number>(45);
+  const dragStartMinutesRef = useRef<number>(45);
+  const handleTimeChangeRef = useRef<(newMinutes: number) => void>(() => {});
+
+  useEffect(() => {
+    sliderTrackWidthRef.current = sliderTrackWidth;
+  }, [sliderTrackWidth]);
+
+  useEffect(() => {
+    targetMinutesRef.current = targetMinutes;
+  }, [targetMinutes]);
+
+  const sliderPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onShouldBlockNativeResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          setIsDraggingSlider(true);
+          const width = Math.max(1, sliderTrackWidthRef.current);
+          const locX = evt.nativeEvent.locationX;
+          if (typeof locX === 'number' && !Number.isNaN(locX)) {
+            const ratio = Math.max(0, Math.min(1, locX / width));
+            const raw = 15 + ratio * (120 - 15);
+            const snapped = Math.max(15, Math.min(120, Math.round(raw / 5) * 5));
+            dragStartMinutesRef.current = snapped;
+            handleTimeChangeRef.current(snapped);
+          } else {
+            dragStartMinutesRef.current = targetMinutesRef.current;
+          }
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const width = Math.max(1, sliderTrackWidthRef.current);
+          const deltaMinutes = (gestureState.dx / width) * (120 - 15);
+          const raw = dragStartMinutesRef.current + deltaMinutes;
+          const snapped = Math.max(15, Math.min(120, Math.round(raw / 5) * 5));
+          if (snapped !== targetMinutesRef.current) {
+            handleTimeChangeRef.current(snapped);
+          }
+        },
+        onPanResponderRelease: () => {
+          setIsDraggingSlider(false);
+        },
+        onPanResponderTerminate: () => {
+          setIsDraggingSlider(false);
+        },
+      }),
+    []
+  );
 
   // Live timer tick for active UI
   const [nowMs, setNowMs] = useState<number>(Date.now());
@@ -155,11 +202,13 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
   // Dual-input synchronization: Changing one automatically updates the other
   const handleTimeChange = (newMinutes: number) => {
     const clamped = Math.max(1, Math.min(120, Math.round(newMinutes)));
+    targetMinutesRef.current = clamped;
     setTargetMinutes(clamped);
     const durationMs = clamped * 60 * 1000;
     const proj = calculateProjectedYield(tickCalc.tickIntervalMs, tickCalc.yieldPerTick, durationMs);
     setTargetResourceCount(Math.max(1, proj.totalYield));
   };
+  handleTimeChangeRef.current = handleTimeChange;
 
   const handleResourceChange = (newCount: number) => {
     const clamped = Math.max(1, Math.round(newCount));
@@ -236,7 +285,11 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      scrollEnabled={!isDraggingSlider}
+    >
       {/* Top Crimson Header & Node Switcher */}
       <View style={styles.header}>
         <View style={styles.headerTitleRow}>
@@ -476,14 +529,16 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
                   {/* Interactive Slider Track */}
                   <View
                     style={styles.sliderTrackContainer}
-                    onLayout={(e) => setSliderTrackWidth(e.nativeEvent.layout.width)}
-                    onStartShouldSetResponder={() => true}
-                    onMoveShouldSetResponder={() => true}
-                    onResponderGrant={(e) => handleTrackTouch(e.nativeEvent.locationX)}
-                    onResponderMove={(e) => handleTrackTouch(e.nativeEvent.locationX)}
+                    onLayout={(e) => {
+                      const w = e.nativeEvent.layout.width;
+                      sliderTrackWidthRef.current = w;
+                      setSliderTrackWidth(w);
+                    }}
+                    {...sliderPanResponder.panHandlers}
                   >
-                    <View style={styles.sliderTrackBackdrop}>
+                    <View pointerEvents="none" style={styles.sliderTrackBackdrop}>
                       <View
+                        pointerEvents="none"
                         style={[
                           styles.sliderTrackFill,
                           {
@@ -496,6 +551,7 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
                       />
                     </View>
                     <View
+                      pointerEvents="none"
                       style={[
                         styles.sliderThumb,
                         {

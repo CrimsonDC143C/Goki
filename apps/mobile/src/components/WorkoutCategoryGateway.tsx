@@ -20,6 +20,13 @@ import {
 import { MODALITY_BADGE_SVGS } from '../assets/v0Vault';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 
+const COMPACT_PILL_LABELS: Record<WorkoutCategory, string> = {
+  GYM: 'Gym',
+  CARDIO: 'Cardio',
+  SPORT: 'Sport',
+  RECOVERY: 'Recovery',
+};
+
 const CATEGORY_COLORS: Record<WorkoutCategory, string> = {
   GYM: '#E63946',
   CARDIO: '#38BDF8',
@@ -130,32 +137,20 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         {/* Quick Routine Presets Row */}
         <View style={styles.presetSection}>
           <View style={styles.presetSectionHeader}>
-            <Text style={styles.presetSectionTitle}>Or Load a Routine Preset</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              {onOpenTrainingHistory ? (
-                <TouchableOpacity
-                  style={styles.historyLinkBtn}
-                  onPress={() => {
-                    triggerSensoryCue('SET_MICRO_REWARD_TICK');
-                    onOpenTrainingHistory();
-                  }}
-                  testID="gateway-history-link-btn"
-                >
-                  <Text style={styles.historyLinkText}>📊 Training History</Text>
-                </TouchableOpacity>
-              ) : null}
-              {onOpenPresetDesigner ? (
-                <TouchableOpacity
-                  style={styles.designerLinkBtn}
-                  onPress={() => {
-                    triggerSensoryCue('SET_MICRO_REWARD_TICK');
-                    onOpenPresetDesigner();
-                  }}
-                >
-                  <Text style={styles.designerLinkText}>+ Preset Designer</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
+            <Text style={styles.presetSectionTitle} numberOfLines={1}>
+              Or Load a Routine Preset
+            </Text>
+            {onOpenPresetDesigner ? (
+              <TouchableOpacity
+                style={styles.designerLinkBtn}
+                onPress={() => {
+                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                  onOpenPresetDesigner();
+                }}
+              >
+                <Text style={styles.designerLinkText}>+ Preset Designer</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
@@ -201,32 +196,38 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
 
   return (
     <View style={styles.compactHeaderBanner}>
+      {/* Row 1: Full-width evenly-spaced 4-Pill Discipline Bar (with direct remove control on active pills) */}
       <View style={styles.compactMainRow}>
-        {/* Compact 1-Row Segmented Discipline Strip (1-Tap Primary Switch without Inline 4-Card Wall) */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-        >
-          {WORKOUT_CATEGORIES.map((cat) => {
-            const isPrimary = cat.key === selectedCategory;
-            const isSecondary = secondaryCategories.includes(cat.key);
-            const color = CATEGORY_COLORS[cat.key];
-            return (
+        {WORKOUT_CATEGORIES.map((cat) => {
+          const isPrimary = cat.key === selectedCategory;
+          const isSecondary = secondaryCategories.includes(cat.key);
+          const isActive = isPrimary || isSecondary;
+          const color = CATEGORY_COLORS[cat.key];
+          return (
+            <View
+              key={cat.key}
+              style={[
+                styles.switchCategoryBtn,
+                isPrimary && [
+                  styles.activeCategoryPill,
+                  { borderColor: color, backgroundColor: `${color}22` },
+                ],
+                isSecondary && {
+                  borderColor: color,
+                  borderStyle: 'dashed',
+                  backgroundColor: `${color}14`,
+                },
+              ]}
+            >
               <TouchableOpacity
-                key={cat.key}
-                style={[
-                  styles.switchCategoryBtn,
-                  isPrimary && [
-                    styles.activeCategoryPill,
-                    { borderColor: color, backgroundColor: `${color}22`, flex: 0 },
-                  ],
-                  isSecondary && { borderColor: color, borderStyle: 'dashed' },
-                ]}
+                style={styles.pillSelectMainTouch}
                 onPress={() => {
                   triggerSensoryCue('SET_MICRO_REWARD_TICK');
-                  onSelectPrimaryCategory(cat.key);
+                  if (isActive) {
+                    onSelectPrimaryCategory(cat.key);
+                  } else {
+                    onAddSecondarySegment(cat.key);
+                  }
                 }}
                 activeOpacity={0.75}
                 testID={`discipline-pill-${cat.key}`}
@@ -234,16 +235,67 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                 <Text
                   style={[
                     styles.switchCategoryText,
-                    (isPrimary || isSecondary) && { color, fontWeight: '900' },
+                    isActive && { color, fontWeight: '900' },
                   ]}
                   numberOfLines={1}
                 >
-                  {cat.icon} {cat.shortTitle}
+                  {cat.icon} {COMPACT_PILL_LABELS[cat.key]}
                 </Text>
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+
+              {isActive && (
+                <TouchableOpacity
+                  style={styles.pillRemoveBadge}
+                  onPress={() => {
+                    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                    onRemoveSecondarySegment(cat.key);
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}
+                  activeOpacity={0.7}
+                  testID={`remove-discipline-pill-${cat.key}`}
+                >
+                  <Text style={styles.pillRemoveBadgeText}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        })}
+      </View>
+
+      {/* Row 2: Clean Secondary Utility Bar ([📋 Presets], [+ Segment], and Active Segment Chips) */}
+      <View style={styles.compactSecondaryBar}>
+        <View style={styles.secondarySegmentsInlineWrap}>
+          {orderedSegments.length > 1 ? (
+            orderedSegments.map((segCat, idx) => {
+              const segMeta = WORKOUT_CATEGORIES.find((c) => c.key === segCat);
+              const segColor = CATEGORY_COLORS[segCat];
+              return (
+                <View
+                  key={segCat}
+                  style={[styles.secSegmentPill, { borderColor: segColor }]}
+                >
+                  <Text style={[styles.secSegmentText, { color: segColor }]}>
+                    #{idx + 1} {segMeta?.icon} {COMPACT_PILL_LABELS[segCat]}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                      onRemoveSecondarySegment(segCat);
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}
+                    style={styles.secSegmentCloseBtn}
+                  >
+                    <Text style={styles.secSegmentCloseText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })
+          ) : (
+            <Text style={styles.dragHintLabel} numberOfLines={1}>
+              ⠿ Hold &amp; drag cards to reorder
+            </Text>
+          )}
+        </View>
 
         <View style={styles.headerRightActions}>
           <TouchableOpacity
@@ -264,69 +316,6 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         </View>
       </View>
 
-      {/* Reorderable Active Segments Strip (Drag or Tap Arrows to Reorder Workout Segments) */}
-      {orderedSegments.length > 1 ? (
-        <View style={styles.secondarySegmentsList}>
-          <Text style={styles.secondarySegmentsLabel}>Segment Order (Drag / Reorder):</Text>
-          {orderedSegments.map((segCat, idx) => {
-            const segMeta = WORKOUT_CATEGORIES.find((c) => c.key === segCat);
-            const segColor = CATEGORY_COLORS[segCat];
-            const isPrimary = segCat === selectedCategory;
-            return (
-              <View
-                key={segCat}
-                style={[styles.secSegmentPill, { borderColor: segColor }]}
-                onStartShouldSetResponder={() => Boolean(onMoveSegment)}
-                onMoveShouldSetResponder={() => Boolean(onMoveSegment)}
-                onResponderRelease={(e) => {
-                  if (!onMoveSegment) return;
-                  const dx = e.nativeEvent.locationX;
-                  if (dx < 0 && idx > 0) {
-                    onMoveSegment(segCat, -1);
-                  }
-                }}
-              >
-                {onMoveSegment && idx > 0 && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      triggerSensoryCue('SET_MICRO_REWARD_TICK');
-                      onMoveSegment(segCat, -1);
-                    }}
-                    style={{ paddingHorizontal: 3 }}
-                    accessibilityLabel={`Move ${segMeta?.shortTitle} segment up`}
-                  >
-                    <Text style={{ color: '#E5E7EB', fontSize: 11, fontWeight: '900' }}>↑</Text>
-                  </TouchableOpacity>
-                )}
-                <Text style={[styles.secSegmentText, { color: segColor }]}>
-                  #{idx + 1} {segMeta?.icon} {segMeta?.shortTitle}
-                </Text>
-                {onMoveSegment && idx < orderedSegments.length - 1 && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      triggerSensoryCue('SET_MICRO_REWARD_TICK');
-                      onMoveSegment(segCat, 1);
-                    }}
-                    style={{ paddingHorizontal: 3 }}
-                    accessibilityLabel={`Move ${segMeta?.shortTitle} segment down`}
-                  >
-                    <Text style={{ color: '#E5E7EB', fontSize: 11, fontWeight: '900' }}>↓</Text>
-                  </TouchableOpacity>
-                )}
-                {!isPrimary && (
-                  <TouchableOpacity
-                    onPress={() => onRemoveSecondarySegment(segCat)}
-                    style={styles.secSegmentCloseBtn}
-                  >
-                    <Text style={styles.secSegmentCloseText}>✕</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
-
       {/* Secondary Modality Picker Modal */}
       <Modal
         visible={showSecondaryPicker}
@@ -341,42 +330,66 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
           ]}
         >
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Add Secondary Segment</Text>
+            <Text style={styles.modalTitle}>Manage Workout Segments</Text>
             <Text style={styles.modalSub}>
-              Attach an additional workout segment (e.g. post-lift Zone 2 cardio or mobility cooldown).
+              Add or remove workout segments (e.g. post-lift Zone 2 cardio or mobility cooldown).
             </Text>
 
             <View style={styles.modalOptionList}>
-              {WORKOUT_CATEGORIES
-                .filter((cat) => cat.key !== selectedCategory && !secondaryCategories.includes(cat.key))
-                .map((cat) => {
-                  const color = CATEGORY_COLORS[cat.key];
-                  return (
-                    <TouchableOpacity
-                      key={cat.key}
-                      style={[styles.modalOptionBtn, { borderColor: color }]}
-                      onPress={() => {
-                        triggerSensoryCue('SET_MICRO_REWARD_TICK');
+              {WORKOUT_CATEGORIES.map((cat) => {
+                const color = CATEGORY_COLORS[cat.key];
+                const isActive =
+                  cat.key === selectedCategory || secondaryCategories.includes(cat.key);
+                return (
+                  <TouchableOpacity
+                    key={cat.key}
+                    style={[
+                      styles.modalOptionBtn,
+                      { borderColor: isActive ? '#EF4444' : color },
+                    ]}
+                    onPress={() => {
+                      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                      if (isActive) {
+                        onRemoveSecondarySegment(cat.key);
+                      } else {
                         onAddSecondarySegment(cat.key);
-                        setShowSecondaryPicker(false);
-                      }}
-                    >
-                      {CATEGORY_BADGE_SVGS[cat.key] ? (
-                        <View style={styles.modalBadgeWrap}>
-                          <SvgXml xml={CATEGORY_BADGE_SVGS[cat.key]} width={32} height={32} />
-                        </View>
-                      ) : (
-                        <Text style={styles.modalOptionIcon}>{cat.icon}</Text>
-                      )}
-                      <View style={styles.modalOptionTextContainer}>
-                        <Text style={[styles.modalOptionName, { color }]}>
-                          {cat.shortTitle}
-                        </Text>
-                        <Text style={styles.modalOptionDesc}>{cat.title}</Text>
+                      }
+                      setShowSecondaryPicker(false);
+                    }}
+                  >
+                    {CATEGORY_BADGE_SVGS[cat.key] ? (
+                      <View style={styles.modalBadgeWrap}>
+                        <SvgXml xml={CATEGORY_BADGE_SVGS[cat.key]} width={32} height={32} />
                       </View>
-                    </TouchableOpacity>
-                  );
-                })}
+                    ) : (
+                      <Text style={styles.modalOptionIcon}>{cat.icon}</Text>
+                    )}
+                    <View style={styles.modalOptionTextContainer}>
+                      <Text style={[styles.modalOptionName, { color }]}>
+                        {cat.shortTitle} {isActive ? '• Active' : ''}
+                      </Text>
+                      <Text style={styles.modalOptionDesc}>
+                        {isActive ? 'Tap to remove segment from workout' : cat.title}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.modalSegmentActionBadge,
+                        isActive ? styles.modalSegmentRemoveBadge : { borderColor: color },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.modalSegmentActionBadgeText,
+                          isActive ? { color: '#FCA5A5' } : { color },
+                        ]}
+                      >
+                        {isActive ? '✕ Remove' : '+ Add'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             <TouchableOpacity
@@ -636,34 +649,85 @@ const styles = StyleSheet.create({
   compactMainRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 6,
   },
   switchCategoryBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+    paddingVertical: 6,
+    borderRadius: 8,
     backgroundColor: '#2A282E',
     borderColor: '#4A4650',
     borderWidth: 1,
+    gap: 3,
+  },
+  pillSelectMainTouch: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillRemoveBadge: {
+    width: 17,
+    height: 17,
+    borderRadius: 8.5,
+    backgroundColor: 'rgba(239, 68, 68, 0.22)',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillRemoveBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '900',
+    color: '#FCA5A5',
+    lineHeight: 11,
   },
   switchCategoryText: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: '800',
     color: '#D1D5DB',
+    textAlign: 'center',
   },
   activeCategoryPill: {
     flex: 1,
-    flexShrink: 1,
     minWidth: 0,
+    flexDirection: 'row',
     justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    gap: 3,
+  },
+  compactSecondaryBar: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#2B2930',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 14,
-    borderWidth: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  secondarySegmentsInlineWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dragHintLabel: {
+    fontSize: 10.5,
+    color: '#9CA3AF',
+    fontWeight: '700',
   },
   activePillIcon: {
     fontSize: 13,
@@ -755,10 +819,32 @@ const styles = StyleSheet.create({
   },
   secSegmentCloseBtn: {
     marginLeft: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.22)',
+    borderWidth: 1,
+    borderColor: '#EF4444',
   },
   secSegmentCloseText: {
     fontSize: 10,
-    color: '#EF4444',
+    color: '#FCA5A5',
+    fontWeight: '900',
+  },
+  modalSegmentActionBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    marginLeft: 8,
+  },
+  modalSegmentRemoveBadge: {
+    borderColor: '#EF4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.18)',
+  },
+  modalSegmentActionBadgeText: {
+    fontSize: 11,
     fontWeight: '900',
   },
   modalOverlay: {

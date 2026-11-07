@@ -3,6 +3,7 @@ import {
   Alert,
   Animated,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -248,6 +249,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     presets,
     savePreset,
     deletePreset,
+    recentActivityIds,
     recordRecentActivity,
     exerciseGymPreferences,
     saveExerciseStickyNote,
@@ -355,6 +357,17 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     SPORT: sportCatalog[0]?.id ?? 'badminton_session',
     RECOVERY: recoveryCatalog[0]?.id ?? 'foam_roll_thoracic',
   }));
+
+  // When recent "Quick" exercises memory is wiped (e.g. via Wipe Training History), reset quick selection memory
+  useEffect(() => {
+    if (recentActivityIds.length === 0) {
+      setSelectedIdByModality({
+        CARDIO: pureCardioCatalog[0]?.id ?? 'outdoor_tempo_cycling',
+        SPORT: sportCatalog[0]?.id ?? 'badminton_session',
+        RECOVERY: recoveryCatalog[0]?.id ?? 'foam_roll_thoracic',
+      });
+    }
+  }, [recentActivityIds.length, pureCardioCatalog, sportCatalog, recoveryCatalog]);
   const [cardioMinutesStr, setCardioMinutesStr] = useState<string>('20');
   const [cardioZone, setCardioZone] = useState<HeartRateZone>(2);
   const [cardioRpe, setCardioRpe] = useState<number>(7.5);
@@ -388,18 +401,33 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   const [sessionPresetTemplate, setSessionPresetTemplate] = useState<WorkoutPresetDefinition | null>(null);
   const [editingPresetDraft, setEditingPresetDraft] = useState<WorkoutPresetDefinition | null>(null);
   const [presetSavedInSession, setPresetSavedInSession] = useState<boolean>(false);
-  const [platesModalBlockId, setPlatesModalBlockId] = useState<string | null>(null);
+  const [platesModalTarget, setPlatesModalTarget] = useState<{
+    blockId: string;
+    mode: 'PLATES' | 'WARMUP';
+  } | null>(null);
   const [rpeSliderTarget, setRpeSliderTarget] = useState<
     | { mode: 'SET'; blockId: string; setId: string; currentRpe: number; subtitle?: string }
     | { mode: 'CARDIO'; currentRpe: number }
     | null
   >(null);
-  const rpeDragOriginRef = useRef<{ startY: number; startRpe: number } | null>(null);
   const [tooltipState, setTooltipState] = useState<{
     key: TrainingMetricTooltipKey;
     headline?: string | null;
     note?: string | null;
   } | null>(null);
+
+  // Press-and-Hold Vertical Drag-to-Reorder State (Exercise Cards & Workout Segments)
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [draggingSegment, setDraggingSegment] = useState<WorkoutCategory | null>(null);
+  const [isHoldingDragTarget, setIsHoldingDragTarget] = useState<boolean>(false);
+  const blockDragAnimY = useRef(new Animated.Value(0)).current;
+  const segmentDragAnimY = useRef(new Animated.Value(0)).current;
+  const blockHeightsRef = useRef<Record<string, number>>({});
+  const segmentHeightsRef = useRef<Record<string, number>>({});
+  const dragSwapOffsetRef = useRef<number>(0);
+  const dragHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeDragBlockIdRef = useRef<string | null>(null);
+  const activeDragSegmentRef = useRef<WorkoutCategory | null>(null);
 
   // Micro-animation for Boss Damage / XP Ticker
   const microPulseAnim = useRef(new Animated.Value(1)).current;
@@ -529,8 +557,18 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   };
 
   const handleRemoveSecondarySegment = (category: WorkoutCategory) => {
-    setSecondaryCategories((prev) => prev.filter((c) => c !== category));
-    setSegmentOrder((prev) => prev.filter((c) => c !== category));
+    const remaining = orderedSegments.filter((c) => c !== category);
+    if (remaining.length === 0) {
+      setActiveCategory(null);
+      setSecondaryCategories([]);
+      setSegmentOrder([]);
+      return;
+    }
+    const nextPrimary = activeCategory === category ? remaining[0]! : activeCategory!;
+    const nextSecondary = remaining.filter((c) => c !== nextPrimary);
+    setActiveCategory(nextPrimary);
+    setSecondaryCategories(nextSecondary);
+    setSegmentOrder(remaining);
   };
 
   const handleMoveSegment = (category: WorkoutCategory, direction: -1 | 1) => {
@@ -679,18 +717,313 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     setOpenExercisePickerBlockId(null);
   };
 
-  const handleMoveExerciseBlock = (blockIndex: number, direction: -1 | 1) => {
-    setExerciseBlocks((prev) => {
-      const targetIndex = blockIndex + direction;
-      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(blockIndex, 1);
-      if (!moved) return prev;
-      next.splice(targetIndex, 0, moved);
-      return next;
-    });
+  const orderedSegmentsRef = useRef<WorkoutCategory[]>(orderedSegments);
+  orderedSegmentsRef.current = orderedSegments;
+
+  const exerciseBlocksRef = useRef<OfflineDraftExerciseBlock[]>(exerciseBlocks);
+  exerciseBlocksRef.current = exerciseBlocks;
+
+  const blockPanRespondersRef = useRef<Record<string, ReturnType<typeof PanResponder.create>>>({});
+  const segmentPanRespondersRef = useRef<
+    Partial<Record<WorkoutCategory, ReturnType<typeof PanResponder.create>>>
+  >({});
+
+  const clearActiveDragState = useCallback(() => {
+    if (dragHoldTimerRef.current) {
+      clearTimeout(dragHoldTimerRef.current);
+      dragHoldTimerRef.current = null;
+    }
+    activeDragBlockIdRef.current = null;
+    activeDragSegmentRef.current = null;
+    dragSwapOffsetRef.current = 0;
+    blockDragAnimY.setValue(0);
+    segmentDragAnimY.setValue(0);
+    setDraggingBlockId(null);
+    setDraggingSegment(null);
+    setIsHoldingDragTarget(false);
+  }, [blockDragAnimY, segmentDragAnimY]);
+
+  const getBlockPanHandlers = useCallback(
+    (blockId: string) => {
+      if (!blockPanRespondersRef.current[blockId]) {
+        blockPanRespondersRef.current[blockId] = PanResponder.create({
+          onStartShouldSetPanResponder: () => exerciseBlocksRef.current.length > 1,
+          onMoveShouldSetPanResponder: () => activeDragBlockIdRef.current === blockId,
+          onPanResponderTerminationRequest: () => false,
+          onShouldBlockNativeResponder: () => true,
+          onPanResponderGrant: () => {
+            if (exerciseBlocksRef.current.length <= 1) return;
+            setIsHoldingDragTarget(true);
+            dragSwapOffsetRef.current = 0;
+            blockDragAnimY.setValue(0);
+            if (dragHoldTimerRef.current) clearTimeout(dragHoldTimerRef.current);
+            dragHoldTimerRef.current = setTimeout(() => {
+              activeDragBlockIdRef.current = blockId;
+              setDraggingBlockId(blockId);
+              setOpenBlockMenuId(null);
+              triggerSensoryCue('SET_MICRO_REWARD_TICK');
+            }, 220);
+          },
+          onPanResponderMove: (_evt, gestureState) => {
+            if (activeDragBlockIdRef.current !== blockId) {
+              if (Math.abs(gestureState.dx) > 12 || Math.abs(gestureState.dy) > 12) {
+                if (dragHoldTimerRef.current) {
+                  clearTimeout(dragHoldTimerRef.current);
+                  dragHoldTimerRef.current = null;
+                }
+              }
+              return;
+            }
+
+            const curBlocks = exerciseBlocksRef.current;
+            const curIdx = curBlocks.findIndex((b) => b.blockId === blockId);
+            if (curIdx < 0) return;
+
+            let relDy = gestureState.dy - dragSwapOffsetRef.current;
+
+            if (relDy > 0 && curIdx < curBlocks.length - 1) {
+              const nextBlock = curBlocks[curIdx + 1]!;
+              const nextH = Math.max(110, blockHeightsRef.current[nextBlock.blockId] ?? 180);
+              if (relDy > nextH * 0.5) {
+                const swapped = [...curBlocks];
+                const [moved] = swapped.splice(curIdx, 1);
+                if (moved) {
+                  swapped.splice(curIdx + 1, 0, moved);
+                  exerciseBlocksRef.current = swapped;
+                  dragSwapOffsetRef.current += nextH;
+                  relDy = gestureState.dy - dragSwapOffsetRef.current;
+                  setExerciseBlocks(swapped);
+                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                }
+              }
+            } else if (relDy < 0 && curIdx > 0) {
+              const prevBlock = curBlocks[curIdx - 1]!;
+              const prevH = Math.max(110, blockHeightsRef.current[prevBlock.blockId] ?? 180);
+              if (relDy < -prevH * 0.5) {
+                const swapped = [...curBlocks];
+                const [moved] = swapped.splice(curIdx, 1);
+                if (moved) {
+                  swapped.splice(curIdx - 1, 0, moved);
+                  exerciseBlocksRef.current = swapped;
+                  dragSwapOffsetRef.current -= prevH;
+                  relDy = gestureState.dy - dragSwapOffsetRef.current;
+                  setExerciseBlocks(swapped);
+                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                }
+              }
+            }
+
+            blockDragAnimY.setValue(relDy);
+          },
+          onPanResponderRelease: clearActiveDragState,
+          onPanResponderTerminate: clearActiveDragState,
+        });
+      }
+      return blockPanRespondersRef.current[blockId]!.panHandlers;
+    },
+    [blockDragAnimY, clearActiveDragState]
+  );
+
+  const getSegmentPanHandlers = useCallback(
+    (segmentCategory: WorkoutCategory) => {
+      if (!segmentPanRespondersRef.current[segmentCategory]) {
+        segmentPanRespondersRef.current[segmentCategory] = PanResponder.create({
+          onStartShouldSetPanResponder: () => orderedSegmentsRef.current.length > 1,
+          onMoveShouldSetPanResponder: () => activeDragSegmentRef.current === segmentCategory,
+          onPanResponderTerminationRequest: () => false,
+          onShouldBlockNativeResponder: () => true,
+          onPanResponderGrant: () => {
+            if (orderedSegmentsRef.current.length <= 1) return;
+            setIsHoldingDragTarget(true);
+            dragSwapOffsetRef.current = 0;
+            segmentDragAnimY.setValue(0);
+            if (dragHoldTimerRef.current) clearTimeout(dragHoldTimerRef.current);
+            dragHoldTimerRef.current = setTimeout(() => {
+              activeDragSegmentRef.current = segmentCategory;
+              setDraggingSegment(segmentCategory);
+              triggerSensoryCue('SET_MICRO_REWARD_TICK');
+            }, 220);
+          },
+          onPanResponderMove: (_evt, gestureState) => {
+            if (activeDragSegmentRef.current !== segmentCategory) {
+              if (Math.abs(gestureState.dx) > 12 || Math.abs(gestureState.dy) > 12) {
+                if (dragHoldTimerRef.current) {
+                  clearTimeout(dragHoldTimerRef.current);
+                  dragHoldTimerRef.current = null;
+                }
+              }
+              return;
+            }
+
+            const curOrder = [...orderedSegmentsRef.current];
+            const curIdx = curOrder.indexOf(segmentCategory);
+            if (curIdx < 0) return;
+
+            let relDy = gestureState.dy - dragSwapOffsetRef.current;
+
+            if (relDy > 0 && curIdx < curOrder.length - 1) {
+              const nextSeg = curOrder[curIdx + 1]!;
+              const nextH = Math.max(140, segmentHeightsRef.current[nextSeg] ?? 260);
+              if (relDy > nextH * 0.5) {
+                const [moved] = curOrder.splice(curIdx, 1);
+                if (moved) {
+                  curOrder.splice(curIdx + 1, 0, moved);
+                  orderedSegmentsRef.current = curOrder;
+                  dragSwapOffsetRef.current += nextH;
+                  relDy = gestureState.dy - dragSwapOffsetRef.current;
+                  setSegmentOrder(curOrder);
+                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                }
+              }
+            } else if (relDy < 0 && curIdx > 0) {
+              const prevSeg = curOrder[curIdx - 1]!;
+              const prevH = Math.max(140, segmentHeightsRef.current[prevSeg] ?? 260);
+              if (relDy < -prevH * 0.5) {
+                const [moved] = curOrder.splice(curIdx, 1);
+                if (moved) {
+                  curOrder.splice(curIdx - 1, 0, moved);
+                  orderedSegmentsRef.current = curOrder;
+                  dragSwapOffsetRef.current -= prevH;
+                  relDy = gestureState.dy - dragSwapOffsetRef.current;
+                  setSegmentOrder(curOrder);
+                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                }
+              }
+            }
+
+            segmentDragAnimY.setValue(relDy);
+          },
+          onPanResponderRelease: clearActiveDragState,
+          onPanResponderTerminate: clearActiveDragState,
+        });
+      }
+      return segmentPanRespondersRef.current[segmentCategory]!.panHandlers;
+    },
+    [clearActiveDragState, segmentDragAnimY]
+  );
+
+  const handleSetOrAppendDesignation = (blockId: string, targetType: SetType) => {
+    setExerciseBlocks((prev) =>
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        let targetIdx = -1;
+        for (let i = b.sets.length - 1; i >= 0; i -= 1) {
+          if (!b.sets[i]?.completed) {
+            targetIdx = i;
+            break;
+          }
+        }
+        if (targetIdx >= 0) {
+          return {
+            ...b,
+            sets: b.sets.map((s, idx) =>
+              idx === targetIdx
+                ? {
+                    ...s,
+                    setType: targetType,
+                    isWarmup: targetType === 'WARMUP',
+                    rpe: targetType === 'FAILURE' || targetType === 'AMRAP' ? 10 : s.rpe,
+                  }
+                : s
+            ),
+          };
+        }
+        const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const lastRow = b.sets[b.sets.length - 1];
+        return {
+          ...b,
+          sets: [
+            ...b.sets,
+            {
+              id: `set_${stamp}`,
+              weightKgStr: lastRow?.weightKgStr ?? '',
+              repsStr: lastRow?.repsStr ?? '',
+              isWarmup: targetType === 'WARMUP',
+              setType: targetType,
+              rpe: targetType === 'FAILURE' || targetType === 'AMRAP' ? 10 : (lastRow?.rpe ?? 8.5),
+              completed: false,
+            },
+          ],
+        };
+      })
+    );
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
+
+  const handleAbandonRaidAndExit = useCallback(() => {
+    setRestTargetEndTimeMs(null);
+    setRestStartedAtMs(null);
+    setRestCenterModalVisible(false);
+    setRestTimerPinned(false);
+    cancelRestTimerNotification().catch(() => {});
+    abandonHybridSession();
+    setActiveCategory(null);
+    setSecondaryCategories([]);
+    setSegmentOrder([]);
+    setCardioEntries([]);
+    setBossDamageAccumulated(0);
+    setLiveSetsCount(0);
+    setExerciseBlocks((prev) =>
+      prev.map((b) => ({
+        ...b,
+        sets: b.sets.map((s) => ({ ...s, completed: false })),
+      }))
+    );
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+    if (onBackToLanding) {
+      onBackToLanding();
+    }
+  }, [abandonHybridSession, onBackToLanding]);
+
+  const handleBackPress = useCallback(() => {
+    // 1. On the Select Training Discipline landing page (selectedCategory === null):
+    // immediately exit back to the Main Hub (LandingScreen)
+    if (!activeCategory && phase === 'Idle') {
+      if (onBackToLanding) {
+        onBackToLanding();
+      }
+      return;
+    }
+
+    // 2. Inside an active workout: if 0 sets logged, 0 conditioning segments logged, and boss not engaged,
+    // return cleanly to the Select Training Discipline landing page
+    if (phase === 'Idle' && completedSetCount === 0 && cardioEntries.length === 0) {
+      setActiveCategory(null);
+      setSecondaryCategories([]);
+      setSegmentOrder([]);
+      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+      return;
+    }
+
+    // 3. In an active raid (DungeonActive / Resting) or sets/segments logged:
+    // prompt to Abandon Raid, reset state, trigger feedback banner, and navigate back to Main Hub
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      if (window.confirm('Abandon active raid and retreat to the Sanctum?')) {
+        handleAbandonRaidAndExit();
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Abandon Raid?',
+      'Retreat from the active dungeon raid and return to the Main Hub?',
+      [
+        { text: 'Keep Training', style: 'cancel' },
+        {
+          text: 'Abandon Raid',
+          style: 'destructive',
+          onPress: handleAbandonRaidAndExit,
+        },
+      ]
+    );
+  }, [
+    activeCategory,
+    cardioEntries.length,
+    completedSetCount,
+    handleAbandonRaidAndExit,
+    onBackToLanding,
+    phase,
+  ]);
 
   const handleToggleBlockWeightUnit = (blockId: string) => {
     const target = exerciseBlocks.find((b) => b.blockId === blockId);
@@ -1410,6 +1743,12 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     cancelRestTimerNotification().catch(() => {});
 
     if (completedSetCount === 0 && cardioEntries.length === 0) {
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.confirm === 'function') {
+        if (window.confirm('No sets or segments have been logged yet. Abandon the raid and return to the Sanctum?')) {
+          handleAbandonRaidAndExit();
+        }
+        return;
+      }
       Alert.alert(
         'Abandon Raid',
         'No sets or segments have been logged yet. Would you like to abandon the raid?',
@@ -1418,12 +1757,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           {
             text: 'Abandon Raid',
             style: 'destructive',
-            onPress: () => {
-              abandonHybridSession();
-              if (onBackToLanding) {
-                onBackToLanding();
-              }
-            },
+            onPress: handleAbandonRaidAndExit,
           },
         ]
       );
@@ -2113,23 +2447,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       {/* 1. Top Workout Header */}
       <View style={styles.topBar}>
         <View style={styles.topBarLeftGroup}>
-          <Pressable
-            style={styles.backBtn}
-            onPress={() => {
-              if (completedSetCount > 0) {
-                Alert.alert(
-                  'Active Raid',
-                  'Workout in progress. Do you want to return to home screen?',
-                  [
-                    { text: 'Keep Training', style: 'cancel' },
-                    { text: 'Leave', style: 'destructive', onPress: onBackToLanding },
-                  ]
-                );
-              } else if (onBackToLanding) {
-                onBackToLanding();
-              }
-            }}
-          >
+          <Pressable style={styles.backBtn} onPress={handleBackPress}>
             <Text style={styles.backBtnText}>← Back</Text>
           </Pressable>
 
@@ -2179,6 +2497,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           restTargetEndTimeMs && restTimerPinned ? styles.scrollContentWithPinnedTimer : null,
         ]}
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={!isHoldingDragTarget && !draggingBlockId && !draggingSegment}
         onScroll={(e) => setScrollOffsetY(e.nativeEvent.contentOffset.y)}
         scrollEventThrottle={16}
       >
@@ -2188,8 +2507,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           </View>
         )}
 
-        {/* 3. Sleek Pre-Flight Readiness Bar (Before First Set: workoutMachine.phase === 'Idle') */}
-        {phase === 'Idle' && (
+        {/* 3. Sleek Pre-Flight Readiness Bar (Hidden while on Select Training Discipline landing page) */}
+        {phase === 'Idle' && activeCategory !== null && (
           <View style={styles.preflightCompactCard} testID="workout-preflight-card">
             <View style={styles.preflightPillsRow}>
               <TouchableOpacity
@@ -2324,49 +2643,59 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           onOpenTrainingHistory={() => setShowTrainingHistory(true)}
         />
 
-        {/* 6 & 7. ORDERED WORKOUT SEGMENTS (User-Reorderable: Gym, Cardio, Sport, Recovery) */}
-        {orderedSegments.map((segmentCategory, segIdx) => {
-          const canMoveSegUp = segIdx > 0;
-          const canMoveSegDown = segIdx < orderedSegments.length - 1;
-          const clampRpeStep = (val: number): number => {
-            const clamped = Math.max(6.0, Math.min(10.0, val));
-            return Math.round(clamped * 2) / 2;
-          };
+        {/* 6 & 7. ORDERED WORKOUT SEGMENTS (Press-and-Hold Drag-to-Reorder: Gym, Cardio, Sport, Recovery) */}
+        {orderedSegments.map((segmentCategory) => {
+          const isSegmentDragged = draggingSegment === segmentCategory;
 
           if (segmentCategory === 'GYM') {
             return (
-              <View key="segment_GYM" style={styles.modalitySection}>
-                <View style={styles.sectionHeaderRow}>
+              <Animated.View
+                key="segment_GYM"
+                onLayout={(e) => {
+                  segmentHeightsRef.current.GYM = e.nativeEvent.layout.height;
+                }}
+                style={[
+                  styles.modalitySection,
+                  isSegmentDragged && {
+                    zIndex: 60,
+                    elevation: 14,
+                    borderColor: '#FDE68A',
+                    borderWidth: 1.5,
+                    borderRadius: 12,
+                    padding: 6,
+                    backgroundColor: '#18161C',
+                    transform: [{ translateY: segmentDragAnimY }, { scale: 1.02 }],
+                  },
+                ]}
+              >
+                <View
+                  style={styles.sectionHeaderRow}
+                  {...getSegmentPanHandlers('GYM')}
+                >
                   <View style={styles.sectionHeadingGroup}>
-                    <Text style={styles.sectionHeading}>🏋️ RESISTANCE SETS</Text>
                     {orderedSegments.length > 1 && (
-                      <View style={styles.segmentMoveGroup}>
-                        <TouchableOpacity
-                          style={[
-                            styles.segmentMoveBtn,
-                            !canMoveSegUp && styles.reorderBtnDisabled,
-                          ]}
-                          disabled={!canMoveSegUp}
-                          onPress={() => handleMoveSegment('GYM', -1)}
-                        >
-                          <Text style={styles.segmentMoveBtnText}>↑</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[
-                            styles.segmentMoveBtn,
-                            !canMoveSegDown && styles.reorderBtnDisabled,
-                          ]}
-                          disabled={!canMoveSegDown}
-                          onPress={() => handleMoveSegment('GYM', 1)}
-                        >
-                          <Text style={styles.segmentMoveBtnText}>↓</Text>
-                        </TouchableOpacity>
+                      <View style={styles.dragHandleBadge}>
+                        <Text style={styles.dragHandleIcon}>⠿</Text>
                       </View>
                     )}
+                    <Text style={styles.sectionHeading}>🏋️ RESISTANCE SETS</Text>
                   </View>
-                  <Text style={styles.sectionCountMeta}>
-                    {completedSetCount} set{completedSetCount === 1 ? '' : 's'} checked
-                  </Text>
+                  <View style={styles.sectionHeaderRightGroup}>
+                    <Text style={styles.sectionCountMeta}>
+                      {completedSetCount} set{completedSetCount === 1 ? '' : 's'} checked
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.removeSegmentHeaderBtn}
+                      onPress={() => {
+                        triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                        handleRemoveSecondarySegment('GYM');
+                      }}
+                      activeOpacity={0.75}
+                      testID="remove-segment-header-GYM"
+                    >
+                      <Text style={styles.removeSegmentHeaderBtnText}>✕ Remove</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {exerciseBlocks.map((block, bIdx) => {
@@ -2402,17 +2731,31 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                   });
 
                   const isMenuOpen = openBlockMenuId === block.blockId;
+                  const isBlockDragged = draggingBlockId === block.blockId;
                   let workingOrderCounter = 0;
                   let warmupOrderCounter = 0;
 
                   return (
                     <React.Fragment key={block.blockId}>
-                      <View
+                      <Animated.View
+                        onLayout={(e) => {
+                          blockHeightsRef.current[block.blockId] = e.nativeEvent.layout.height;
+                        }}
                         style={[
                           styles.exerciseCard,
                           isGrouped && { borderLeftColor: '#C69A45', borderLeftWidth: 4 },
                           isLinkedWithNext && styles.exerciseCardLinkedNext,
                           isLinkedWithPrev && styles.exerciseCardLinkedPrev,
+                          isBlockDragged && {
+                            zIndex: 50,
+                            elevation: 12,
+                            borderColor: '#FDE68A',
+                            borderWidth: 1.5,
+                            shadowColor: '#FDE68A',
+                            shadowOpacity: 0.35,
+                            shadowRadius: 10,
+                            transform: [{ translateY: blockDragAnimY }, { scale: 1.02 }],
+                          },
                         ]}
                       >
                         {/* Superset Pill Header */}
@@ -2424,8 +2767,17 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                           </View>
                         ) : null}
 
-                        {/* Clean Exercise Header: High-Contrast Title + Swap Pill on Left, `⋯` Action Menu on Right */}
+                        {/* Clean Exercise Header: Drag Handle + High-Contrast Title + Swap Pill on Left, `⋯` Action Menu on Right */}
                         <View style={styles.exerciseCardHeader}>
+                          {exerciseBlocks.length > 1 && (
+                            <View
+                              style={styles.dragHandleBadge}
+                              {...getBlockPanHandlers(block.blockId)}
+                            >
+                              <Text style={styles.dragHandleIcon}>⠿</Text>
+                            </View>
+                          )}
+
                           <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
                             <Pressable
                               style={styles.exerciseSelectorBtn}
@@ -2487,35 +2839,9 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                           </TouchableOpacity>
                         </View>
 
-                        {/* Compact `⋯` Exercise Action Drawer */}
+                        {/* Compact `⋯` Exercise Action Drawer (Set Designations & Removal Only — No Duplicate Buttons) */}
                         {isMenuOpen && (
                           <View style={styles.blockActionMenuDrawer}>
-                            {exerciseBlocks.length > 1 && (
-                              <>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.blockMenuActionPill,
-                                    bIdx === 0 && styles.reorderBtnDisabled,
-                                  ]}
-                                  disabled={bIdx === 0}
-                                  onPress={() => handleMoveExerciseBlock(bIdx, -1)}
-                                >
-                                  <Text style={styles.blockMenuActionText}>↑ Move Up</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.blockMenuActionPill,
-                                    bIdx === exerciseBlocks.length - 1 &&
-                                      styles.reorderBtnDisabled,
-                                  ]}
-                                  disabled={bIdx === exerciseBlocks.length - 1}
-                                  onPress={() => handleMoveExerciseBlock(bIdx, 1)}
-                                >
-                                  <Text style={styles.blockMenuActionText}>↓ Move Down</Text>
-                                </TouchableOpacity>
-                              </>
-                            )}
-
                             <TouchableOpacity
                               style={[
                                 styles.blockMenuActionPill,
@@ -2532,25 +2858,40 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                   isGrouped && styles.linkSupersetBtnTextActive,
                                 ]}
                               >
-                                {isGrouped ? '🔗 Unlink Superset' : '🔗 Link Superset'}
+                                {isGrouped ? '🔗 Unlink Superset (A1/A2)' : '🔗 Link Superset (A1/A2)'}
                               </Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
                               style={styles.blockMenuActionPill}
                               onPress={() => {
-                                setPlatesModalBlockId(block.blockId);
+                                handleSetOrAppendDesignation(block.blockId, 'WARMUP');
                                 setOpenBlockMenuId(null);
                               }}
                             >
-                              <Text style={styles.blockMenuActionText}>🧮 Plates / Warm-Up</Text>
+                              <Text style={styles.blockMenuActionText}>🌡️ Set / Add Warm-Up [W]</Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
                               style={styles.blockMenuActionPill}
-                              onPress={() => handleToggleBlockWeightUnit(block.blockId)}
+                              onPress={() => {
+                                handleSetOrAppendDesignation(block.blockId, 'DROP_SET');
+                                setOpenBlockMenuId(null);
+                              }}
                             >
-                              <Text style={styles.blockMenuActionText}>⚖️ Unit: {blockUnit}</Text>
+                              <Text style={styles.blockMenuActionText}>🔥 Set / Add Drop-Set [D]</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.blockMenuActionPill}
+                              onPress={() => {
+                                handleSetOrAppendDesignation(block.blockId, 'FAILURE');
+                                setOpenBlockMenuId(null);
+                              }}
+                            >
+                              <Text style={styles.blockMenuActionText}>
+                                ⚡ Set / Add Failure / AMRAP [F]
+                              </Text>
                             </TouchableOpacity>
 
                             {exerciseBlocks.length > 1 && (
@@ -2561,7 +2902,9 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                   setOpenBlockMenuId(null);
                                 }}
                               >
-                                <Text style={styles.blockMenuActionDangerText}>🗑️ Remove</Text>
+                                <Text style={styles.blockMenuActionDangerText}>
+                                  🗑️ Remove Exercise
+                                </Text>
                               </TouchableOpacity>
                             )}
                           </View>
@@ -2615,10 +2958,24 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                           <View style={styles.ergonomicsRightTools}>
                             <TouchableOpacity
                               style={styles.platesHelperBtn}
-                              onPress={() => setPlatesModalBlockId(block.blockId)}
+                              onPress={() =>
+                                setPlatesModalTarget({ blockId: block.blockId, mode: 'PLATES' })
+                              }
                               activeOpacity={0.75}
                             >
-                              <Text style={styles.platesHelperBtnText}>🧮 Plates / Warm-Up</Text>
+                              <Text style={styles.platesHelperBtnText}>
+                                🧮 Barbell Plates Visualizer
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.warmupHelperBtn}
+                              onPress={() =>
+                                setPlatesModalTarget({ blockId: block.blockId, mode: 'WARMUP' })
+                              }
+                              activeOpacity={0.75}
+                            >
+                              <Text style={styles.warmupHelperBtnText}>🌡️ Warm-Up Sets</Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
@@ -2784,16 +3141,11 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                 selectTextOnFocus
                               />
 
-                              {/* RPE Pill (Instant-Drag on First Press + Opens Vertical RPE Slider) */}
-                              <View
+                              {/* RPE Pill (Clean 1-Tap to Open Smooth Vertical RPE Slider) */}
+                              <TouchableOpacity
                                 style={styles.rpePillBtn}
-                                onStartShouldSetResponder={() => true}
-                                onMoveShouldSetResponder={() => true}
-                                onResponderGrant={(e) => {
-                                  rpeDragOriginRef.current = {
-                                    startY: e.nativeEvent.pageY,
-                                    startRpe: effectiveRowRpe,
-                                  };
+                                activeOpacity={0.75}
+                                onPress={() =>
                                   setRpeSliderTarget({
                                     mode: 'SET',
                                     blockId: block.blockId,
@@ -2802,23 +3154,11 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                     subtitle: `${
                                       exMeta?.name ?? block.exerciseName ?? 'Exercise'
                                     } • Set ${displayCode}`,
-                                  });
-                                }}
-                                onResponderMove={(e) => {
-                                  if (!rpeDragOriginRef.current) return;
-                                  const deltaY =
-                                    rpeDragOriginRef.current.startY - e.nativeEvent.pageY;
-                                  const nextRpe = clampRpeStep(
-                                    rpeDragOriginRef.current.startRpe + (deltaY / 180) * 4.0
-                                  );
-                                  handleSetRpeValue(block.blockId, row.id, nextRpe);
-                                  setRpeSliderTarget((prev) =>
-                                    prev ? { ...prev, currentRpe: nextRpe } : prev
-                                  );
-                                }}
+                                  })
+                                }
                               >
                                 <Text style={styles.rpePillText}>{effectiveRowRpe}</Text>
-                              </View>
+                              </TouchableOpacity>
 
                               {/* DONE Checkbox (1-Tap Auto-Fills Ghost Values if Empty!) */}
                               <Pressable
@@ -2859,7 +3199,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                         >
                           <Text style={styles.addSetRowText}>+ Add Set</Text>
                         </Pressable>
-                      </View>
+                      </Animated.View>
 
                       {/* Superset Connecting Bridge between linked exercises */}
                       {isLinkedWithNext ? (
@@ -2884,7 +3224,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                     <Text style={styles.addExerciseBlockText}>+ Add Exercise</Text>
                   </Pressable>
                 </View>
-              </View>
+              </Animated.View>
             );
           }
 
@@ -2929,36 +3269,51 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                 : '🏃 CARDIO TRAINING';
 
           return (
-            <View key={`segment_${modalityTarget}`} style={styles.modalitySection}>
-              <View style={styles.sectionHeaderRow}>
+            <Animated.View
+              key={`segment_${modalityTarget}`}
+              onLayout={(e) => {
+                segmentHeightsRef.current[modalityTarget] = e.nativeEvent.layout.height;
+              }}
+              style={[
+                styles.modalitySection,
+                isSegmentDragged && {
+                  zIndex: 60,
+                  elevation: 14,
+                  borderColor: '#FDE68A',
+                  borderWidth: 1.5,
+                  borderRadius: 12,
+                  padding: 6,
+                  backgroundColor: '#18161C',
+                  transform: [{ translateY: segmentDragAnimY }, { scale: 1.02 }],
+                },
+              ]}
+            >
+              <View
+                style={styles.sectionHeaderRow}
+                {...getSegmentPanHandlers(modalityTarget)}
+              >
                 <View style={styles.sectionHeadingGroup}>
-                  <Text style={styles.sectionHeading}>{sectionTitle}</Text>
                   {orderedSegments.length > 1 && (
-                    <View style={styles.segmentMoveGroup}>
-                      <TouchableOpacity
-                        style={[
-                          styles.segmentMoveBtn,
-                          !canMoveSegUp && styles.reorderBtnDisabled,
-                        ]}
-                        disabled={!canMoveSegUp}
-                        onPress={() => handleMoveSegment(modalityTarget, -1)}
-                      >
-                        <Text style={styles.segmentMoveBtnText}>↑</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.segmentMoveBtn,
-                          !canMoveSegDown && styles.reorderBtnDisabled,
-                        ]}
-                        disabled={!canMoveSegDown}
-                        onPress={() => handleMoveSegment(modalityTarget, 1)}
-                      >
-                        <Text style={styles.segmentMoveBtnText}>↓</Text>
-                      </TouchableOpacity>
+                    <View style={styles.dragHandleBadge}>
+                      <Text style={styles.dragHandleIcon}>⠿</Text>
                     </View>
                   )}
+                  <Text style={styles.sectionHeading}>{sectionTitle}</Text>
                 </View>
-                <Text style={styles.sectionCountMeta}>{entriesForModality.length} logged</Text>
+                <View style={styles.sectionHeaderRightGroup}>
+                  <Text style={styles.sectionCountMeta}>{entriesForModality.length} logged</Text>
+                  <TouchableOpacity
+                    style={styles.removeSegmentHeaderBtn}
+                    onPress={() => {
+                      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                      handleRemoveSecondarySegment(modalityTarget);
+                    }}
+                    activeOpacity={0.75}
+                    testID={`remove-segment-header-${modalityTarget}`}
+                  >
+                    <Text style={styles.removeSegmentHeaderBtnText}>✕ Remove</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <View style={styles.cardioCard}>
@@ -2992,7 +3347,14 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                 <View style={styles.cardioSelectRow}>
                   <Text style={styles.cardioQuickLabel}>Quick:</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-                    {modalityCatalog.slice(0, 10).map((c) => {
+                    {[
+                      ...recentActivityIds
+                        .map((id) => modalityCatalog.find((c) => c.id === id))
+                        .filter((c): c is NonNullable<typeof c> => Boolean(c)),
+                      ...modalityCatalog.filter((c) => !recentActivityIds.includes(c.id)),
+                    ]
+                      .slice(0, 10)
+                      .map((c) => {
                       const active = c.id === activeModalityId;
                       return (
                         <Pressable
@@ -3036,34 +3398,18 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 
                   <View style={styles.cardioInputGroup}>
                     <Text style={styles.cardioInputLabel}>Session RPE</Text>
-                    <View
+                    <TouchableOpacity
                       style={styles.cardioRpeBtn}
-                      onStartShouldSetResponder={() => true}
-                      onMoveShouldSetResponder={() => true}
-                      onResponderGrant={(e) => {
-                        rpeDragOriginRef.current = {
-                          startY: e.nativeEvent.pageY,
-                          startRpe: cardioRpe,
-                        };
+                      activeOpacity={0.75}
+                      onPress={() =>
                         setRpeSliderTarget({
                           mode: 'CARDIO',
                           currentRpe: cardioRpe,
-                        });
-                      }}
-                      onResponderMove={(e) => {
-                        if (!rpeDragOriginRef.current) return;
-                        const deltaY = rpeDragOriginRef.current.startY - e.nativeEvent.pageY;
-                        const nextRpe = clampRpeStep(
-                          rpeDragOriginRef.current.startRpe + (deltaY / 180) * 4.0
-                        );
-                        setCardioRpe(nextRpe);
-                        setRpeSliderTarget((prev) =>
-                          prev ? { ...prev, currentRpe: nextRpe } : prev
-                        );
-                      }}
+                        })
+                      }
                     >
                       <Text style={styles.cardioRpeText}>{cardioRpe.toFixed(1)}</Text>
-                    </View>
+                    </TouchableOpacity>
                   </View>
 
                   <View style={styles.cardioInputGroup}>
@@ -3126,21 +3472,23 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                   </View>
                 </View>
               ))}
-            </View>
+            </Animated.View>
           );
         })}
 
-        {/* 8. Finish Workout Action Button */}
-        <View style={styles.presetSaveContainer}>
-          <TouchableOpacity
-            style={styles.finishWorkoutBottomBtn}
-            onPress={handleFinishWorkout}
-            activeOpacity={0.7}
-            testID="finish-offline-workout-btn"
-          >
-            <Text style={styles.finishWorkoutBottomBtnText}>🏁 Finish Workout</Text>
-          </TouchableOpacity>
-        </View>
+        {/* 8. Finish Workout Action Button (Hidden while on Select Training Discipline landing page) */}
+        {activeCategory !== null ? (
+          <View style={styles.presetSaveContainer}>
+            <TouchableOpacity
+              style={styles.finishWorkoutBottomBtn}
+              onPress={handleFinishWorkout}
+              activeOpacity={0.7}
+              testID="finish-offline-workout-btn"
+            >
+              <Text style={styles.finishWorkoutBottomBtnText}>🏁 Finish Workout</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </ScrollView>
 
       {/* 9. Resistance Activity Picker Modal */}
@@ -3287,8 +3635,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 
       {/* 15. Inline Barbell Plate & Configurable Warm-Up Generator Modal */}
       {(() => {
-        const targetBlk = platesModalBlockId
-          ? exerciseBlocks.find((b) => b.blockId === platesModalBlockId) ?? null
+        const targetBlk = platesModalTarget
+          ? exerciseBlocks.find((b) => b.blockId === platesModalTarget.blockId) ?? null
           : null;
         if (!targetBlk) return null;
         const bUnit = resolveBlockUnit(targetBlk);
@@ -3319,6 +3667,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         return (
           <PlatesAndWarmupModal
             visible={Boolean(targetBlk)}
+            mode={platesModalTarget?.mode ?? 'PLATES'}
             exerciseName={exMeta?.name ?? targetBlk.exerciseName ?? targetBlk.exerciseId}
             equipmentType={exMeta?.equipmentType}
             unit={bUnit}
@@ -3330,7 +3679,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             onInsertWarmupSets={(sets) =>
               handleInsertWarmupSets(targetBlk.blockId, sets, bUnit)
             }
-            onClose={() => setPlatesModalBlockId(null)}
+            onClose={() => setPlatesModalTarget(null)}
           />
         );
       })()}
@@ -3898,6 +4247,7 @@ const styles = StyleSheet.create({
   },
   ergonomicsRightTools: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: 5,
     marginLeft: 'auto',
@@ -3914,6 +4264,37 @@ const styles = StyleSheet.create({
     color: '#7DD3FC',
     fontSize: 10,
     fontWeight: '800',
+  },
+  warmupHelperBtn: {
+    backgroundColor: '#292014',
+    borderColor: '#F59E0B',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  warmupHelperBtnText: {
+    color: '#FDE68A',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  sectionHeaderRightGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  removeSegmentHeaderBtn: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.16)',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  removeSegmentHeaderBtnText: {
+    color: '#FCA5A5',
+    fontSize: 10,
+    fontWeight: '900',
   },
   unitTogglePill: {
     backgroundColor: '#24222F',
@@ -3950,6 +4331,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
+  },
+  dragHandleBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: '#25232E',
+    borderColor: '#454154',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  dragHandleIcon: {
+    color: '#D1D5DB',
+    fontSize: 14,
+    fontWeight: '900',
+    lineHeight: 16,
   },
   colHeader: {
     color: '#8A8794',

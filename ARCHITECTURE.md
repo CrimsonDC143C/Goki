@@ -599,23 +599,21 @@ Gymify RPG targets diverse deployment targets including Standalone Android APKs,
 Following a live 5-minute mobile walkthrough audit of `v0.2.0`, 11 core workout ergonomics, RPG presentation, and dungeon balance improvements were engineered across `@gymify/game-engine` and `@gymify/mobile`:
 
 ### A. Workout Logger Ergonomics & State Hygiene (`OfflineWorkoutScreen.tsx`, `WorkoutLoggerScreen.tsx`, `WorkoutCategoryGateway.tsx`)
-* **Discipline Selection Gateway Default (`category: undefined / null`):**
-  * Both Offline and Live Dungeon workout loggers default to the **Select Training Discipline** screen first rather than assuming `GYM` with an open resistance table underneath.
-  * Once a primary discipline is chosen, `WorkoutCategoryGateway` collapses into a compact 1-row segmented discipline switcher (`[🏋️ Gym] [🏃 Cardio] [🥊 Sport] [🧘 Recovery] [+ Segment] [📋 Presets]`) without expanding the 4-card wall inline above active tables.
-* **User-Reorderable Workout Segments (`segmentOrder`):**
-  * Multi-modality hybrid workouts maintain an explicit `segmentOrder: WorkoutCategory[]` array (`GYM`, `CARDIO`, `SPORT`, `RECOVERY`).
-  * Athletes can reorder active workout segments freely via the gateway strip or section header `↑` / `↓` controls instead of locking Resistance at the top and Conditioning beneath.
-* **Strict Modality Partitioning & Smart Duplicate Merge:**
-  * Non-resistance catalogs are strictly partitioned by `workoutCategory` (`pureCardioExercises`, `sportExercises`, `recoveryExercises`) with independent per-modality selection state so `CARDIO` defaults to cycling/running and never bleeds `SPORT` items (`Badminton`, `Boxing`).
-  * Logging an identical Activity + HR Zone + RPE automatically merges `durationSeconds` into the existing entry, and each logged row provides inline `−5m` / `+5m` duration steppers.
-* **Auto-Start Workout Clock & Stale Draft Reset:**
-  * Session clocks hold at `00:00` until the first set is checked (`completedSetCount > 0`), the first conditioning segment is logged (`cardioEntries.length > 0`), or `⚔️ Engage Boss` is pressed.
-  * Opening an empty offline draft automatically resets `startedAtMs` to `Date.now()` to prevent multi-hour runaway timers from stale draft timestamps.
-* **De-Cluttered Exercise Card Header + `⋯` Action Drawer:**
-  * Each exercise card header displays a high-contrast Exercise Title + gold `⇄ Swap` pill on the left and a single `⋯` menu button on the right that toggles a compact action bar (`↑ Move Up`, `↓ Move Down`, `🔗 Link Superset`, `🧮 Plates / Warm-Up`, `⚖️ Unit`, `🗑️ Remove`), keeping `+ Add Set` at the bottom.
-* **First-Press Instant-Drag RPE Slider (`RpeVerticalSliderModal.tsx`):**
-  * Pressing and dragging vertically on any set or session RPE pill immediately opens the RPE modal and adjusts the RPE value on the very first press.
-  * The vertical slider sits on the left column with the RPE readout, RIR tooltip, quick-tap scale buttons, and a **green `✓ Confirm RPE` button** (`#10B981`) beside it on the right; tapping either the green confirm button or off-focus on the backdrop confirms and closes.
+* **Discipline Selection Gateway Default & Clean Back/Abandon Flow (`OfflineWorkoutScreen.tsx`, `WorkoutLoggerScreen.tsx`, `WorkoutCategoryGateway.tsx`):**
+  * Both Offline and Live Dungeon workout loggers always open on the **Select Training Discipline** selector screen (`selectedCategory = null`) whenever there is no active workout progress (`0` checked sets, `0` conditioning segments, and boss not engaged), hiding the bottom `🏁 Finish Workout` button and pre-flight boss card until a discipline is chosen.
+  * Tapping `← Back` on the selector screen exits directly to the Main Hub (`LandingScreen`); tapping `← Back` inside an unstarted discipline returns to `Select Training Discipline`; confirming `Abandon Raid` / `Abandon Workout` resets the session, triggers a feedback banner (`"🛡️ Raid Abandoned — Retreated to Sanctum"`), and navigates back to the Main Hub.
+* **Press-and-Hold Vertical Drag-to-Reorder & Direct Segment Removal (`OfflineWorkoutScreen.tsx`, `WorkoutLoggerScreen.tsx`, `WorkoutCategoryGateway.tsx`):**
+  * Long-pressing (~220ms) and dragging vertically on any exercise card's `⠿` drag handle or any workout segment's `⠿` header smoothly reorders individual exercises or entire workout segments (`GYM`, `CARDIO`, `SPORT`, `RECOVERY`) in real time with `ScrollView` scroll-locking and haptic ticks.
+  * Active segments can be removed directly from their top discipline pill (`✕` badge inside each active pill in the 4-pill bar), from the secondary segment chips, from the `Manage Workout Segments` modal, or via the `✕ Remove` button on each segment's section header.
+* **Separated `"Barbell Plates Visualizer"` & `"Warm-Up Sets"` Tools + `⋯` Set Designation Menu (`PlatesAndWarmupModal.tsx`):**
+  * Replaced the combined `🧮 Plates / Warm-Up` button on each exercise card with two dedicated buttons: **`🧮 Barbell Plates Visualizer`** (`mode: 'PLATES'`) and **`🌡️ Warm-Up Sets`** (`mode: 'WARMUP'`).
+  * Streamlined the `⋯` exercise menu to house only unique actions (`🔗 Link/Unlink Superset`, `🌡️ Set / Add Warm-Up [W]`, `🔥 Set / Add Drop-Set [D]`, `⚡ Set / Add Failure / AMRAP [F]`, and `🗑️ Remove Exercise`).
+* **Smooth Vertical RPE Slider (`RpeVerticalSliderModal.tsx`):**
+  * Tapping any set or session RPE pill opens the vertical RPE slider modal where dragging anywhere on the left track smoothly updates RPE (`6.0`–`10.0` in `0.5` increments) via cached track layout geometry, paired with a green `✓ Confirm RPE` button and backdrop tap-to-confirm.
+* **Training History & Recent "Quick" Exercises Memory Wipe (`GameContext.tsx`, `WipeTrainingHistoryModal.tsx`):**
+  * Executing a training history wipe (`pruneWorkoutHistory`) also clears `recentActivityIds` in state and persisted storage, resetting both the `ActivityPickerModal` recent list and the conditioning `Quick:` activity bar.
+* **Artisan Gathering Node Harvest Feedback (`GatheringNodeScreen.tsx`):**
+  * Harvesting a gathering node triggers immediate scale-bounce animation, haptic feedback, a floating `+1 Yield • +XP` badge over the node card, and a top loot toast banner.
 
 ### B. 9:16 Sanctum Receipt Conditioning Ledger (`ShareableWorkoutReceiptModal.tsx` & `training-history-tracker.ts`)
 * **`cardioEntries` Persistence:** `CompletedWorkoutRecord` persists all logged `CompletedCardioEntry` items (`workoutCategory`, `durationSeconds`, `averageHrZone`, `rpe`).

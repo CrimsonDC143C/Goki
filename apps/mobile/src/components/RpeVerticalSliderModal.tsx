@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -107,35 +108,58 @@ export const RpeVerticalSliderModal: React.FC<RpeVerticalSliderModalProps> = ({
   };
 
   const [selectedRpe, setSelectedRpe] = useState<number>(() => clampRpe(initialRpe || 8.0));
-  const [trackHeight, setTrackHeight] = useState<number>(250);
-  const dragOriginRef = React.useRef<{ pageY: number; startRpe: number } | null>(null);
+  const selectedRpeRef = useRef<number>(clampRpe(initialRpe || 8.0));
+  const trackHeightRef = useRef<number>(250);
+  const dragStartRpeRef = useRef<number>(clampRpe(initialRpe || 8.0));
 
   useEffect(() => {
     if (visible) {
-      setSelectedRpe(clampRpe(initialRpe || 8.0));
+      const initVal = clampRpe(initialRpe || 8.0);
+      selectedRpeRef.current = initVal;
+      dragStartRpeRef.current = initVal;
+      setSelectedRpe(initVal);
     }
   }, [visible, initialRpe]);
 
   const updateRpe = (nextVal: number) => {
     const snapped = clampRpe(nextVal);
-    setSelectedRpe((prev) => {
-      if (prev !== snapped) {
-        triggerSensoryCue('SET_MICRO_REWARD_TICK');
-      }
-      return snapped;
-    });
+    if (selectedRpeRef.current !== snapped) {
+      selectedRpeRef.current = snapped;
+      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+    }
+    setSelectedRpe(snapped);
   };
 
-  const handleTrackTouch = (locationY: number) => {
-    const height = Math.max(1, trackHeight);
-    // Top (y=0) is MAX_RPE (10.0), Bottom (y=height) is MIN_RPE (6.0)
-    const ratioFromTop = Math.max(0, Math.min(1, locationY / height));
-    const rawRpe = MAX_RPE - ratioFromTop * (MAX_RPE - MIN_RPE);
-    updateRpe(rawRpe);
-  };
+  const trackPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (evt) => {
+          const height = Math.max(1, trackHeightRef.current);
+          const locY = evt.nativeEvent.locationY;
+          if (typeof locY === 'number' && !Number.isNaN(locY)) {
+            const ratioFromTop = Math.max(0, Math.min(1, locY / height));
+            const tappedRpe = clampRpe(MAX_RPE - ratioFromTop * (MAX_RPE - MIN_RPE));
+            dragStartRpeRef.current = tappedRpe;
+            updateRpe(tappedRpe);
+          } else {
+            dragStartRpeRef.current = selectedRpeRef.current;
+          }
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const height = Math.max(1, trackHeightRef.current);
+          const nextRpe =
+            dragStartRpeRef.current - (gestureState.dy / height) * (MAX_RPE - MIN_RPE);
+          updateRpe(nextRpe);
+        },
+      }),
+    []
+  );
 
   const handleConfirm = () => {
-    onSelectRpe(selectedRpe);
+    onSelectRpe(selectedRpeRef.current);
     onClose();
   };
 
@@ -157,29 +181,11 @@ export const RpeVerticalSliderModal: React.FC<RpeVerticalSliderModalProps> = ({
       animationType="fade"
       onRequestClose={handleConfirm}
     >
-      {/* Tapping anywhere off-focus confirms the RPE adjustment and closes */}
-      <Pressable style={styles.overlay} onPress={handleConfirm}>
-        <Pressable
-          style={styles.card}
-          onPress={(e) => e.stopPropagation()}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderGrant={(e) => {
-            dragOriginRef.current = {
-              pageY: e.nativeEvent.pageY,
-              startRpe: selectedRpe,
-            };
-          }}
-          onResponderMove={(e) => {
-            if (!dragOriginRef.current) return;
-            const deltaY = dragOriginRef.current.pageY - e.nativeEvent.pageY;
-            const deltaRpe = (deltaY / Math.max(120, trackHeight)) * (MAX_RPE - MIN_RPE);
-            updateRpe(dragOriginRef.current.startRpe + deltaRpe);
-          }}
-          onResponderRelease={() => {
-            dragOriginRef.current = null;
-          }}
-        >
+      <View style={styles.overlay}>
+        {/* Tapping anywhere off-focus on the backdrop confirms the RPE adjustment and closes */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleConfirm} />
+
+        <View style={styles.card}>
           {/* Main Side-by-Side Body: Draggable Vertical Slider on Left, Info/Tooltip/Buttons/Confirm beside it on Right */}
           <View style={styles.sliderSection}>
             {/* Left column: Vertical Drag Slider + +/- Step Caps */}
@@ -194,14 +200,14 @@ export const RpeVerticalSliderModal: React.FC<RpeVerticalSliderModalProps> = ({
 
               <View
                 style={styles.verticalTrackTouchArea}
-                onLayout={(e) => setTrackHeight(e.nativeEvent.layout.height)}
-                onStartShouldSetResponder={() => true}
-                onMoveShouldSetResponder={() => true}
-                onResponderGrant={(e) => handleTrackTouch(e.nativeEvent.locationY)}
-                onResponderMove={(e) => handleTrackTouch(e.nativeEvent.locationY)}
+                onLayout={(e) => {
+                  trackHeightRef.current = Math.max(1, e.nativeEvent.layout.height);
+                }}
+                {...trackPanResponder.panHandlers}
               >
-                <View style={styles.verticalTrackBackdrop}>
+                <View pointerEvents="none" style={styles.verticalTrackBackdrop}>
                   <View
+                    pointerEvents="none"
                     style={[
                       styles.verticalTrackFill,
                       {
@@ -240,6 +246,7 @@ export const RpeVerticalSliderModal: React.FC<RpeVerticalSliderModalProps> = ({
                   ]}
                 >
                   <View
+                    pointerEvents="none"
                     style={[
                       styles.verticalThumbInner,
                       { backgroundColor: descriptor.color },
@@ -355,8 +362,8 @@ export const RpeVerticalSliderModal: React.FC<RpeVerticalSliderModalProps> = ({
               </TouchableOpacity>
             </View>
           </View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 };
