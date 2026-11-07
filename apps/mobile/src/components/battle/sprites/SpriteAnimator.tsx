@@ -385,8 +385,16 @@ const SpriteAnimatorComponent: React.FC<SpriteAnimatorProps> = (props) => {
     (props.rig ? ALL_SPRITE_CONFIGS[props.rig] : undefined) ??
     DEMON_BOSS_SPRITE_CONFIG;
   const isPortraitMode = typeof props.size === 'number' && props.size > 0;
+  const portraitCrop = resolvedConfig.portraitCrop ?? {
+    zoom: 2.15,
+    offsetX: 0,
+    offsetY: 5,
+  };
+  const basePortraitRatio = isPortraitMode
+    ? props.size! / Math.max(resolvedConfig.frameWidth, resolvedConfig.frameHeight)
+    : 1;
   const effectiveScale = isPortraitMode
-    ? (props.scale ?? (props.size! / Math.max(resolvedConfig.frameWidth, resolvedConfig.frameHeight)))
+    ? (props.scale ?? basePortraitRatio * portraitCrop.zoom)
     : (props.scale ?? 1);
   const effectiveFlip = props.flipX ?? props.flipHorizontal ?? false;
 
@@ -408,6 +416,8 @@ const SpriteAnimatorComponent: React.FC<SpriteAnimatorProps> = (props) => {
     const portraitSize = props.size!;
     const cellWidth = Math.max(1, Math.round(resolvedConfig.frameWidth * effectiveScale));
     const cellHeight = Math.max(1, Math.round(resolvedConfig.frameHeight * effectiveScale));
+    const translateX = Math.round((portraitCrop.offsetX ?? 0) * effectiveScale);
+    const translateY = Math.round((portraitCrop.offsetY ?? 0) * effectiveScale);
 
     return (
       <View
@@ -430,6 +440,7 @@ const SpriteAnimatorComponent: React.FC<SpriteAnimatorProps> = (props) => {
             alignItems: 'center',
             justifyContent: 'center',
             overflow: 'hidden',
+            transform: [{ translateX }, { translateY }],
           }}
         >
           {animator}

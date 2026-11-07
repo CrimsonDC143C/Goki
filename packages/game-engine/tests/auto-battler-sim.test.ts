@@ -351,5 +351,44 @@ describe('auto-battler-sim', () => {
       expect(simA.events[0]!.type).toBe('EXPEDITION_START');
       expect(simA.events[simA.events.length - 1]!.type).toBe('EXPEDITION_END');
     });
+
+    it('allows a solo hero with average stat level ~3 to beat Obsidian Catacombs solo and gates >50% of rewards behind boss completion', () => {
+      const firstDungeon = DEFAULT_DUNGEON_CATALOG[0]!;
+      expect(firstDungeon.dungeonSlug).toBe('obsidian_catacombs');
+
+      const soloLevel3Hero: CombatantCharacterInput = {
+        characterId: 'solo_avg_lv3',
+        name: 'Initiate Hero',
+        coreStats: {
+          strengthLevel: 3,
+          enduranceLevel: 3,
+          agilityLevel: 3,
+          dexterityLevel: 3,
+          constitutionLevel: 3,
+          wisdomLevel: 3,
+          spiritLevel: 3,
+        },
+      };
+
+      const soloRun = simulateDungeonRun({
+        dungeon: firstDungeon,
+        party: [soloLevel3Hero],
+        seed: 'solo-level-3-baseline',
+      });
+
+      expect(soloRun.outcome).toBe('VICTORY');
+      expect(soloRun.roomsCleared).toBe(4);
+      expect(soloRun.totalGoldEarned).toBe(350);
+      expect(soloRun.lootDrops.length).toBeGreaterThanOrEqual(2);
+
+      // Verify reward distribution across all catalog dungeons: >50% of gold is gated behind Boss + Completion Chest
+      for (const dungeon of DEFAULT_DUNGEON_CATALOG) {
+        const totalGold = dungeon.rooms.reduce((sum, r) => sum + (r.guaranteedGold ?? 0), 0);
+        const bossAndCompletionGold = dungeon.rooms
+          .slice(-2)
+          .reduce((sum, r) => sum + (r.guaranteedGold ?? 0), 0);
+        expect(bossAndCompletionGold).toBeGreaterThan(totalGold * 0.5);
+      }
+    });
   });
 });

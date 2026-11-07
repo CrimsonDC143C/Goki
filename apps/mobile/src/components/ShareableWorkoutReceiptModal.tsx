@@ -173,6 +173,64 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
     const displayTonnage = Math.round(convertKgToDisplayWeight(tonnageKg, unit));
     const prCount = (summary?.improvements ?? []).filter((i) => i.isAllTimePr).length;
     const improvementsCount = summary?.improvements.length ?? 0;
+
+    const rawCardio = workout.cardioEntries ?? [];
+    let totalCardioSeconds = 0;
+    let zoneSum = 0;
+    let zoneCount = 0;
+
+    const cardioRows = rawCardio
+      .filter((c) => c.durationSeconds > 0)
+      .map((c, idx) => {
+        totalCardioSeconds += c.durationSeconds;
+        if (typeof c.rpe === 'number' && c.rpe > 0) {
+          rpeSum += c.rpe;
+          rpeCount += 1;
+        }
+        if (typeof c.averageHrZone === 'number' && c.averageHrZone > 0) {
+          zoneSum += c.averageHrZone;
+          zoneCount += 1;
+        }
+        const mins = Math.max(1, Math.round(c.durationSeconds / 60));
+        const lowerName = (c.exerciseName || c.activityType || '').toLowerCase();
+        const isSport =
+          c.workoutCategory === 'SPORT' ||
+          lowerName.includes('boxing') ||
+          lowerName.includes('badminton') ||
+          lowerName.includes('basketball') ||
+          lowerName.includes('soccer') ||
+          lowerName.includes('tennis') ||
+          lowerName.includes('martial') ||
+          lowerName.includes('sparring') ||
+          lowerName.includes('sport');
+        const isRecovery =
+          c.workoutCategory === 'RECOVERY' ||
+          lowerName.includes('yoga') ||
+          lowerName.includes('mobility') ||
+          lowerName.includes('stretch') ||
+          lowerName.includes('recovery') ||
+          lowerName.includes('foam');
+        const icon = isSport ? '🥊' : isRecovery ? '🧘' : '🏃';
+        const tagLabel = isSport ? 'SPORT' : isRecovery ? 'RECOVERY' : 'CARDIO';
+        const detailText = `${mins}m${c.averageHrZone ? ` • Z${c.averageHrZone}` : ''}${
+          c.rpe ? ` @${c.rpe}` : ''
+        }`;
+        return {
+          key: `${c.exerciseId}_${idx}`,
+          icon,
+          tagLabel,
+          exerciseName: c.exerciseName || c.exerciseId,
+          mins,
+          detailText,
+        };
+      });
+
+    const effectiveDurationSeconds = Math.max(
+      workout.durationSeconds || 0,
+      totalCardioSeconds
+    );
+    const totalCardioMinutes = Math.round(totalCardioSeconds / 60);
+    const avgHrZone = zoneCount > 0 ? Math.round((zoneSum / zoneCount) * 10) / 10 : null;
     const meanRpe = rpeCount > 0 ? Math.round((rpeSum / rpeCount) * 10) / 10 : null;
     const streak = summary?.streakCount ?? streakFallback;
     const title =
@@ -183,7 +241,11 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
           ? 'Sport Combat Session'
           : workout.workoutCategory === 'RECOVERY'
             ? 'Sanctuary Mobility Ritual'
-            : 'Iron Guild Training Raid');
+            : liftRows.length === 0 && cardioRows.length > 0
+              ? cardioRows[0]?.tagLabel === 'SPORT'
+                ? 'Sport Combat Session'
+                : 'Conditioning Raid'
+              : 'Iron Guild Training Raid');
 
     const gymLabel =
       workout.gymName?.trim() ||
@@ -205,7 +267,7 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
     return {
       title,
       dateLabel: formatReceiptDate(workout.performedAtIso),
-      durationLabel: formatDurationCompact(workout.durationSeconds),
+      durationLabel: formatDurationCompact(effectiveDurationSeconds),
       gymLabel,
       unitSuffix,
       displayTonnage,
@@ -213,21 +275,39 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
       prCount,
       improvementsCount,
       meanRpe,
+      avgHrZone,
+      totalCardioMinutes,
       streak,
       liftRows,
+      cardioRows,
       statPills,
     };
   }, [workout, summary, rpgContext, streakFallback, unit]);
 
   if (!visible || !workout || !receiptData) return null;
 
+  const isConditioningOnly =
+    receiptData.liftRows.length === 0 && receiptData.cardioRows.length > 0;
+
   const buildSharePlainText = (): string => {
     const lines: string[] = [
       `⚔️ GYMIFY RPG • RAID RECEIPT`,
       `${receiptData.title} (${receiptData.dateLabel})`,
       `📍 ${receiptData.gymLabel} • ⏱️ ${receiptData.durationLabel} • 🔥 ${receiptData.streak}-Session Streak`,
-      `🏋️ Volume: ${receiptData.displayTonnage.toLocaleString()} ${receiptData.unitSuffix} (${receiptData.workingSetsTotal} hard sets)`,
     ];
+
+    if (receiptData.liftRows.length > 0) {
+      lines.push(
+        `🏋️ Volume: ${receiptData.displayTonnage.toLocaleString()} ${receiptData.unitSuffix} (${receiptData.workingSetsTotal} hard sets)`
+      );
+    }
+    if (receiptData.cardioRows.length > 0) {
+      lines.push(
+        `🫁 Conditioning: ${receiptData.totalCardioMinutes}m (${receiptData.cardioRows.length} segment${
+          receiptData.cardioRows.length === 1 ? '' : 's'
+        })`
+      );
+    }
 
     if (receiptData.prCount > 0) {
       lines.push(`🏆 Personal Records Broken: ${receiptData.prCount}`);
@@ -239,6 +319,14 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
       for (const row of receiptData.liftRows.slice(0, 5)) {
         const prTag = row.badgeText ? ` [${row.badgeText}]` : '';
         lines.push(`• ${row.workingSetCount}× ${row.exerciseName}: ${row.topSetText}${prTag}`);
+      }
+    }
+
+    if (receiptData.cardioRows.length > 0) {
+      lines.push('');
+      lines.push('CONDITIONING & SPORT:');
+      for (const crow of receiptData.cardioRows) {
+        lines.push(`• ${crow.icon} ${crow.exerciseName}: ${crow.detailText}`);
       }
     }
 
@@ -367,16 +455,26 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
               <View style={styles.telemetryDivider} />
               <View style={styles.telemetryCell}>
                 <Text style={styles.telemetryValue}>
-                  {receiptData.displayTonnage > 0
-                    ? `${receiptData.displayTonnage.toLocaleString()}${receiptData.unitSuffix}`
-                    : 'BW'}
+                  {isConditioningOnly
+                    ? `${receiptData.totalCardioMinutes}m`
+                    : receiptData.displayTonnage > 0
+                      ? `${receiptData.displayTonnage.toLocaleString()}${receiptData.unitSuffix}`
+                      : 'BW'}
                 </Text>
-                <Text style={styles.telemetryLabel}>TONNAGE</Text>
+                <Text style={styles.telemetryLabel}>
+                  {isConditioningOnly ? 'CONDITIONING' : 'TONNAGE'}
+                </Text>
               </View>
               <View style={styles.telemetryDivider} />
               <View style={styles.telemetryCell}>
-                <Text style={styles.telemetryValue}>{receiptData.workingSetsTotal}</Text>
-                <Text style={styles.telemetryLabel}>HARD SETS</Text>
+                <Text style={styles.telemetryValue}>
+                  {isConditioningOnly
+                    ? receiptData.cardioRows.length
+                    : receiptData.workingSetsTotal}
+                </Text>
+                <Text style={styles.telemetryLabel}>
+                  {isConditioningOnly ? 'SEGMENTS' : 'HARD SETS'}
+                </Text>
               </View>
               <View style={styles.telemetryDivider} />
               <View style={styles.telemetryCell}>
@@ -388,20 +486,32 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
                 >
                   {receiptData.prCount > 0
                     ? `🏆 ${receiptData.prCount}`
-                    : receiptData.meanRpe
-                      ? `@${receiptData.meanRpe}`
-                      : '✓'}
+                    : isConditioningOnly && receiptData.avgHrZone
+                      ? `Z${receiptData.avgHrZone}`
+                      : receiptData.meanRpe
+                        ? `@${receiptData.meanRpe}`
+                        : '✓'}
                 </Text>
                 <Text style={styles.telemetryLabel}>
-                  {receiptData.prCount > 0 ? 'NEW PRS' : 'MEAN RPE'}
+                  {receiptData.prCount > 0
+                    ? 'NEW PRS'
+                    : isConditioningOnly && receiptData.avgHrZone
+                      ? 'AVG HR ZONE'
+                      : 'MEAN RPE'}
                 </Text>
               </View>
             </View>
 
-            {/* 3. Top Lifts & Overload Ledger */}
+            {/* 3. Top Lifts & Conditioning Ledger */}
             <View style={styles.liftsSection}>
               <View style={styles.liftsHeaderRow}>
-                <Text style={styles.liftsSectionTitle}>IRON LEDGER • TOP WORKING SETS</Text>
+                <Text style={styles.liftsSectionTitle}>
+                  {isConditioningOnly
+                    ? 'CONDITIONING & SPORT LEDGER'
+                    : receiptData.cardioRows.length > 0
+                      ? 'HYBRID LEDGER • LIFTS & CONDITIONING'
+                      : 'IRON LEDGER • TOP WORKING SETS'}
+                </Text>
                 {rpgContext?.critTriggered ? (
                   <Text style={styles.critMiniTag}>💥 PR CRIT</Text>
                 ) : null}
@@ -412,50 +522,68 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
               >
-                {receiptData.liftRows.length === 0 ? (
+                {receiptData.liftRows.length === 0 && receiptData.cardioRows.length === 0 ? (
                   <View style={styles.cardioOnlyBox}>
                     <Text style={styles.cardioOnlyText}>
                       🫁 Conditioning &amp; Recovery Session Logged
                     </Text>
                   </View>
                 ) : (
-                  receiptData.liftRows.slice(0, 5).map((row) => (
-                    <View key={row.exerciseId} style={styles.liftRow}>
-                      <View style={styles.liftLeftCol}>
-                        <Text style={styles.liftNameText} numberOfLines={1}>
-                          <Text style={styles.liftSetCountPrefix}>{row.workingSetCount}× </Text>
-                          {row.exerciseName}
-                        </Text>
-                        {row.e1rmDisp > 0 ? (
-                          <Text style={styles.liftE1rmHint}>
-                            Est. 1RM: {row.e1rmDisp}
-                            {receiptData.unitSuffix}
+                  <>
+                    {receiptData.liftRows.slice(0, 5).map((row) => (
+                      <View key={row.exerciseId} style={styles.liftRow}>
+                        <View style={styles.liftLeftCol}>
+                          <Text style={styles.liftNameText} numberOfLines={1}>
+                            <Text style={styles.liftSetCountPrefix}>{row.workingSetCount}× </Text>
+                            {row.exerciseName}
                           </Text>
-                        ) : null}
-                      </View>
+                          {row.e1rmDisp > 0 ? (
+                            <Text style={styles.liftE1rmHint}>
+                              Est. 1RM: {row.e1rmDisp}
+                              {receiptData.unitSuffix}
+                            </Text>
+                          ) : null}
+                        </View>
 
-                      <View style={styles.liftRightCol}>
-                        <Text style={styles.liftTopSetText}>{row.topSetText}</Text>
-                        {row.badgeText ? (
-                          <View
-                            style={[
-                              styles.liftDeltaBadge,
-                              row.isAllTimePr && styles.liftPrBadge,
-                            ]}
-                          >
-                            <Text
+                        <View style={styles.liftRightCol}>
+                          <Text style={styles.liftTopSetText}>{row.topSetText}</Text>
+                          {row.badgeText ? (
+                            <View
                               style={[
-                                styles.liftDeltaBadgeText,
-                                row.isAllTimePr && styles.liftPrBadgeText,
+                                styles.liftDeltaBadge,
+                                row.isAllTimePr && styles.liftPrBadge,
                               ]}
                             >
-                              {row.badgeText}
-                            </Text>
-                          </View>
-                        ) : null}
+                              <Text
+                                style={[
+                                  styles.liftDeltaBadgeText,
+                                  row.isAllTimePr && styles.liftPrBadgeText,
+                                ]}
+                              >
+                                {row.badgeText}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
                       </View>
-                    </View>
-                  ))
+                    ))}
+
+                    {receiptData.cardioRows.map((crow) => (
+                      <View key={crow.key} style={styles.liftRow}>
+                        <View style={styles.liftLeftCol}>
+                          <Text style={styles.liftNameText} numberOfLines={1}>
+                            <Text style={styles.liftSetCountPrefix}>{crow.icon} </Text>
+                            {crow.exerciseName}
+                          </Text>
+                          <Text style={styles.liftE1rmHint}>{crow.tagLabel} SEGMENT</Text>
+                        </View>
+
+                        <View style={styles.liftRightCol}>
+                          <Text style={styles.liftTopSetText}>{crow.detailText}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </>
                 )}
 
                 {extraLiftCount > 0 ? (

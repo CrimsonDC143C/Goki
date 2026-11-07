@@ -133,6 +133,7 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
   const [activeTreeSlug, setActiveTreeSlug] = useState<string>('juggernaut');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  const [showCombatSummary, setShowCombatSummary] = useState<boolean>(false);
 
   // Sync initialStat changes
   useEffect(() => {
@@ -288,6 +289,16 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
 
           <Pressable
             style={styles.resetTalentsBtn}
+            onPress={() => setShowCombatSummary((prev) => !prev)}
+            testID="talent-toggle-bonuses-btn"
+          >
+            <Text style={styles.resetTalentsBtnText}>
+              📊 Bonuses {showCombatSummary ? '▴' : '▾'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            style={styles.resetTalentsBtn}
             onPress={() => {
               setErrorBanner(
                 'Talent Respec: Visit the Tavern Keeper in a major settlement to respec talent points.'
@@ -298,6 +309,27 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
             <Text style={styles.resetTalentsBtnText}>🔄 Reset</Text>
           </Pressable>
         </View>
+
+        {showCombatSummary && (
+          <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#273248' }}>
+            <Text style={styles.modLine}>
+              • Melee: +{Math.round(aggregatedTalents.meleePowerPct * 100)}% | Armor: +
+              {Math.round(aggregatedTalents.armorPct * 100)}% | Mitigation: +
+              {Math.round(aggregatedTalents.damageMitigationPct * 100)}%
+            </Text>
+            <Text style={styles.modLine}>
+              • Speed: +{Math.round(aggregatedTalents.attackSpeedPct * 100)}% | Dodge: +
+              {Math.round(aggregatedTalents.dodgeRatingBonus * 100)}% | Crit: +
+              {Math.round(aggregatedTalents.critChanceBonus * 100)}%
+            </Text>
+            <Text style={styles.modLine}>
+              • Skills:{' '}
+              {aggregatedTalents.unlockedSkills.length > 0
+                ? aggregatedTalents.unlockedSkills.map((s) => s.name).join(', ')
+                : 'None yet'}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Focus Protocol or Error Banner */}
@@ -711,35 +743,6 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
             );
           })()}
         </View>
-      )}
-
-      {/* 5. Aggregated Omni-Class Profile & Gear Link */}
-      <View style={styles.summaryCard}>
-        <Text style={styles.cardTitle}>Aggregated Omni-Class Combat Profile</Text>
-        <Text style={styles.modLine}>
-          • Melee Power: +{Math.round(aggregatedTalents.meleePowerPct * 100)}% | Armor: +
-          {Math.round(aggregatedTalents.armorPct * 100)}% | Mitigation: +
-          {Math.round(aggregatedTalents.damageMitigationPct * 100)}%
-        </Text>
-        <Text style={styles.modLine}>
-          • Attack Speed: +{Math.round(aggregatedTalents.attackSpeedPct * 100)}% | Dodge: +
-          {Math.round(aggregatedTalents.dodgeRatingBonus * 100)}% | Crit: +
-          {Math.round(aggregatedTalents.critChanceBonus * 100)}%
-        </Text>
-        <Text style={styles.modLine}>
-          • Active Skills Unlocked:{' '}
-          {aggregatedTalents.unlockedSkills.length > 0
-            ? aggregatedTalents.unlockedSkills.map((s) => s.name).join(', ')
-            : 'None yet'}
-        </Text>
-      </View>
-
-      {onOpenProfileGear && (
-        <Pressable style={styles.profileGearLinkCard} onPress={onOpenProfileGear}>
-          <Text style={styles.profileGearLinkText}>
-            🛡️ Manage 8-Slot Equipped Armaments &amp; Bag in Profile →
-          </Text>
-        </Pressable>
       )}
     </ScrollView>
   );

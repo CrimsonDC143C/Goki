@@ -37,11 +37,13 @@ const CATEGORY_BADGE_SVGS: Record<WorkoutCategory, string> = {
 export interface WorkoutCategoryGatewayProps {
   selectedCategory: WorkoutCategory | null;
   secondaryCategories: WorkoutCategory[];
+  segmentOrder?: WorkoutCategory[];
   presets: WorkoutPresetDefinition[];
   isOffline?: boolean;
   onSelectPrimaryCategory: (category: WorkoutCategory) => void;
   onAddSecondarySegment: (category: WorkoutCategory) => void;
   onRemoveSecondarySegment: (category: WorkoutCategory) => void;
+  onMoveSegment?: (category: WorkoutCategory, direction: -1 | 1) => void;
   onResetCategory: () => void;
   onLoadPreset: (preset: WorkoutPresetDefinition) => void;
   onOpenPresetDesigner?: () => void;
@@ -51,12 +53,13 @@ export interface WorkoutCategoryGatewayProps {
 export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
   selectedCategory,
   secondaryCategories,
+  segmentOrder,
   presets,
   isOffline = false,
   onSelectPrimaryCategory,
   onAddSecondarySegment,
   onRemoveSecondarySegment,
-  onResetCategory,
+  onMoveSegment,
   onLoadPreset,
   onOpenPresetDesigner,
   onOpenTrainingHistory,
@@ -187,37 +190,60 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
     );
   }
 
-  // If a category is selected, render the sleek compact top banner with Switch & Secondary segment controls
-  const activeCatMeta = WORKOUT_CATEGORIES.find((c) => c.key === selectedCategory) || WORKOUT_CATEGORIES[0]!;
-  const activeColor = CATEGORY_COLORS[selectedCategory];
+  // If a category is selected, render the sleek 1-row segmented discipline bar + Secondary segment controls
+  const orderedSegments: WorkoutCategory[] =
+    segmentOrder && segmentOrder.length > 0
+      ? segmentOrder
+      : [
+          selectedCategory,
+          ...secondaryCategories.filter((c) => c !== selectedCategory),
+        ];
 
   return (
     <View style={styles.compactHeaderBanner}>
       <View style={styles.compactMainRow}>
-        <TouchableOpacity
-          style={styles.switchCategoryBtn}
-          onPress={() => {
-            triggerSensoryCue('SET_MICRO_REWARD_TICK');
-            onResetCategory();
-          }}
-          activeOpacity={0.7}
+        {/* Compact 1-Row Segmented Discipline Strip (1-Tap Primary Switch without Inline 4-Card Wall) */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
         >
-          <Text style={styles.switchCategoryText}>‹ Switch</Text>
-        </TouchableOpacity>
-
-        <View style={[styles.activeCategoryPill, { borderColor: activeColor }]}>
-          {CATEGORY_BADGE_SVGS[activeCatMeta.key] ? (
-            <SvgXml xml={CATEGORY_BADGE_SVGS[activeCatMeta.key]} width={16} height={16} />
-          ) : (
-            <Text style={styles.activePillIcon}>{activeCatMeta.icon}</Text>
-          )}
-          <Text
-            style={[styles.activePillLabel, { color: activeColor }]}
-            numberOfLines={1}
-          >
-            {activeCatMeta.shortTitle}
-          </Text>
-        </View>
+          {WORKOUT_CATEGORIES.map((cat) => {
+            const isPrimary = cat.key === selectedCategory;
+            const isSecondary = secondaryCategories.includes(cat.key);
+            const color = CATEGORY_COLORS[cat.key];
+            return (
+              <TouchableOpacity
+                key={cat.key}
+                style={[
+                  styles.switchCategoryBtn,
+                  isPrimary && [
+                    styles.activeCategoryPill,
+                    { borderColor: color, backgroundColor: `${color}22`, flex: 0 },
+                  ],
+                  isSecondary && { borderColor: color, borderStyle: 'dashed' },
+                ]}
+                onPress={() => {
+                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                  onSelectPrimaryCategory(cat.key);
+                }}
+                activeOpacity={0.75}
+                testID={`discipline-pill-${cat.key}`}
+              >
+                <Text
+                  style={[
+                    styles.switchCategoryText,
+                    (isPrimary || isSecondary) && { color, fontWeight: '900' },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {cat.icon} {cat.shortTitle}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
 
         <View style={styles.headerRightActions}>
           <TouchableOpacity
@@ -225,7 +251,7 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
             onPress={() => setShowPresetsDrawer(true)}
             activeOpacity={0.7}
           >
-            <Text style={styles.presetsBtnText}>Presets</Text>
+            <Text style={styles.presetsBtnText}>📋 Presets</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -238,24 +264,63 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         </View>
       </View>
 
-      {/* Secondary Segments Bar (e.g. tacking on Zone 2 Cardio or Mobility Cooldown) */}
-      {secondaryCategories.length > 0 ? (
+      {/* Reorderable Active Segments Strip (Drag or Tap Arrows to Reorder Workout Segments) */}
+      {orderedSegments.length > 1 ? (
         <View style={styles.secondarySegmentsList}>
-          <Text style={styles.secondarySegmentsLabel}>Secondary Segments:</Text>
-          {secondaryCategories.map((secCat) => {
-            const secMeta = WORKOUT_CATEGORIES.find((c) => c.key === secCat);
-            const secColor = CATEGORY_COLORS[secCat];
+          <Text style={styles.secondarySegmentsLabel}>Segment Order (Drag / Reorder):</Text>
+          {orderedSegments.map((segCat, idx) => {
+            const segMeta = WORKOUT_CATEGORIES.find((c) => c.key === segCat);
+            const segColor = CATEGORY_COLORS[segCat];
+            const isPrimary = segCat === selectedCategory;
             return (
-              <View key={secCat} style={[styles.secSegmentPill, { borderColor: secColor }]}>
-                <Text style={styles.secSegmentText}>
-                  {secMeta?.icon} {secMeta?.shortTitle}
+              <View
+                key={segCat}
+                style={[styles.secSegmentPill, { borderColor: segColor }]}
+                onStartShouldSetResponder={() => Boolean(onMoveSegment)}
+                onMoveShouldSetResponder={() => Boolean(onMoveSegment)}
+                onResponderRelease={(e) => {
+                  if (!onMoveSegment) return;
+                  const dx = e.nativeEvent.locationX;
+                  if (dx < 0 && idx > 0) {
+                    onMoveSegment(segCat, -1);
+                  }
+                }}
+              >
+                {onMoveSegment && idx > 0 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                      onMoveSegment(segCat, -1);
+                    }}
+                    style={{ paddingHorizontal: 3 }}
+                    accessibilityLabel={`Move ${segMeta?.shortTitle} segment up`}
+                  >
+                    <Text style={{ color: '#E5E7EB', fontSize: 11, fontWeight: '900' }}>↑</Text>
+                  </TouchableOpacity>
+                )}
+                <Text style={[styles.secSegmentText, { color: segColor }]}>
+                  #{idx + 1} {segMeta?.icon} {segMeta?.shortTitle}
                 </Text>
-                <TouchableOpacity
-                  onPress={() => onRemoveSecondarySegment(secCat)}
-                  style={styles.secSegmentCloseBtn}
-                >
-                  <Text style={styles.secSegmentCloseText}>✕</Text>
-                </TouchableOpacity>
+                {onMoveSegment && idx < orderedSegments.length - 1 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                      onMoveSegment(segCat, 1);
+                    }}
+                    style={{ paddingHorizontal: 3 }}
+                    accessibilityLabel={`Move ${segMeta?.shortTitle} segment down`}
+                  >
+                    <Text style={{ color: '#E5E7EB', fontSize: 11, fontWeight: '900' }}>↓</Text>
+                  </TouchableOpacity>
+                )}
+                {!isPrimary && (
+                  <TouchableOpacity
+                    onPress={() => onRemoveSecondarySegment(segCat)}
+                    style={styles.secSegmentCloseBtn}
+                  >
+                    <Text style={styles.secSegmentCloseText}>✕</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             );
           })}

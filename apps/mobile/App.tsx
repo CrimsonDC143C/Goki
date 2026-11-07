@@ -91,12 +91,11 @@ const MainShell: React.FC<MainShellProps> = ({
     currentUser,
   } = useGame();
 
+  const insets = useSafeAreaInsets();
   const [talentFocusStat, setTalentFocusStat] = useState<HolisticStatType | StatType | undefined>(
     undefined
   );
   const [bugReportVisible, setBugReportVisible] = useState(false);
-  const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
-  const insets = useSafeAreaInsets();
 
   const focusLocked = isIntraWorkoutFocusLocked(workoutMachine.phase);
   const pendingTargetTab = workoutMachine.activeSession?.pendingFocusOverrideTarget as
@@ -104,10 +103,33 @@ const MainShell: React.FC<MainShellProps> = ({
     | null
     | undefined;
 
-  const currentLocation = LOCATIONS.find((l) => l.key === location) ?? LOCATIONS[0]!;
+  const resolvedLocationKey: GameLocation =
+    tab === 'WORKOUT'
+      ? 'RAID_SANCTUM'
+      : tab === 'GATHERING'
+        ? 'GATHERING_NODE'
+        : tab === 'DUNGEON'
+          ? 'DUNGEON'
+          : tab === 'GUILD'
+            ? 'GUILD_HALL'
+            : location || 'TAVERN';
+
+  const currentLocation = LOCATIONS.find((l) => l.key === resolvedLocationKey) ?? LOCATIONS[0]!;
 
   const handleTabPress = (nextTab: ActiveTab) => {
+    const nextLoc: GameLocation =
+      nextTab === 'WORKOUT'
+        ? 'RAID_SANCTUM'
+        : nextTab === 'GATHERING'
+          ? 'GATHERING_NODE'
+          : nextTab === 'DUNGEON'
+            ? 'DUNGEON'
+            : nextTab === 'GUILD'
+              ? 'GUILD_HALL'
+              : 'TAVERN';
+
     if (nextTab === 'WORKOUT') {
+      travelTo(nextLoc);
       onChangeTab('WORKOUT');
       return;
     }
@@ -116,6 +138,7 @@ const MainShell: React.FC<MainShellProps> = ({
       requestFocusOverride(nextTab);
       return;
     }
+    travelTo(nextLoc);
     onChangeTab(nextTab);
   };
 
@@ -190,28 +213,20 @@ const MainShell: React.FC<MainShellProps> = ({
               </Pressable>
             </View>
 
-            {/* Right Cluster: Gold + Current Location Dropdown */}
+            {/* Right Cluster: Gold + Cosmetic Location Identifier */}
             <View style={styles.hudRightCluster}>
               <View style={styles.hudGoldPill}>
                 <Text style={styles.goldText}>🪙 {gold}g</Text>
               </View>
 
-              <Pressable
-                style={[
-                  styles.hudLocationBtn,
-                  locationDropdownOpen && styles.hudLocationBtnActive,
-                ]}
-                onPress={() => setLocationDropdownOpen((prev) => !prev)}
-                accessibilityRole="button"
-                accessibilityLabel={`Current location: ${currentLocation.name}. Tap to travel.`}
+              <View
+                style={styles.hudLocationBtn}
+                accessibilityLabel={`Current location: ${currentLocation.name}`}
               >
                 <Text style={styles.hudLocationBtnText} numberOfLines={1}>
                   {currentLocation.icon} {currentLocation.name}
                 </Text>
-                <Text style={styles.hudLocationChevron}>
-                  {locationDropdownOpen ? '▲' : '▼'}
-                </Text>
-              </Pressable>
+              </View>
             </View>
           </View>
 
@@ -232,70 +247,6 @@ const MainShell: React.FC<MainShellProps> = ({
             </View>
           )}
         </View>
-
-        {/* Current Location Travel Dropdown Modal */}
-        <Modal
-          visible={locationDropdownOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setLocationDropdownOpen(false)}
-        >
-          <Pressable
-            style={[
-              styles.dropdownBackdrop,
-              { paddingTop: Math.max(insets.top + 62, 92) },
-            ]}
-            onPress={() => setLocationDropdownOpen(false)}
-          >
-            <View
-              style={styles.dropdownCard}
-              onStartShouldSetResponder={() => true}
-            >
-              <View style={styles.dropdownHeader}>
-                <Text style={styles.dropdownHeaderTitle}>🗺️ Realm Travel</Text>
-                <Text style={styles.dropdownHeaderSub}>Select destination to transit</Text>
-              </View>
-
-              {LOCATIONS.map((loc) => {
-                const isCurrent = location === loc.key;
-                return (
-                  <Pressable
-                    key={loc.key}
-                    style={({ pressed }) => [
-                      styles.dropdownItem,
-                      isCurrent && styles.dropdownItemActive,
-                      pressed && styles.dropdownItemPressed,
-                    ]}
-                    onPress={() => {
-                      travelTo(loc.key);
-                      setLocationDropdownOpen(false);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Travel to ${loc.name}`}
-                  >
-                    <Text style={styles.dropdownItemIcon}>{loc.icon}</Text>
-                    <View style={styles.dropdownItemCol}>
-                      <Text
-                        style={[
-                          styles.dropdownItemName,
-                          isCurrent && styles.dropdownItemNameActive,
-                        ]}
-                      >
-                        {loc.name}
-                      </Text>
-                      <Text style={styles.dropdownItemDesc}>{loc.desc}</Text>
-                    </View>
-                    {isCurrent && (
-                      <View style={styles.dropdownActiveBadge}>
-                        <Text style={styles.dropdownActiveCheck}>✓</Text>
-                      </View>
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
-          </Pressable>
-        </Modal>
 
         {/* Active Screen Viewport */}
         <View style={styles.screenBody}>

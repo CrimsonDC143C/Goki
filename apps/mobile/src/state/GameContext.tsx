@@ -643,106 +643,7 @@ const KNOWN_ITEM_METADATA: Record<
   ),
 };
 
-const STARTER_DUNGEON: DungeonDefinition = {
-  dungeonSlug: 'obsidian_catacombs',
-  dungeonName: 'Obsidian Catacombs (24h Expedition)',
-  maxSimulationSeconds: 240,
-  rooms: [
-    {
-      roomNumber: 1,
-      roomName: 'Crypt Gatehouse',
-      roomType: 'MOB_ENCOUNTER',
-      guaranteedGold: 50,
-      enemies: [
-        {
-          enemyId: 'skeleton_vanguard',
-          name: 'Skeletal Vanguard',
-          maxHp: 210,
-          attackPower: 22,
-          armor: 12,
-          attackIntervalSeconds: 1.8,
-        },
-        {
-          enemyId: 'crypt_archer',
-          name: 'Crypt Bone-Archer',
-          maxHp: 145,
-          attackPower: 25,
-          armor: 6,
-          attackIntervalSeconds: 1.5,
-        },
-      ],
-    },
-    {
-      roomNumber: 2,
-      roomName: 'Hall of Pendulum Blades',
-      roomType: 'HAZARD_EVENT',
-      guaranteedGold: 35,
-      hazardConfig: {
-        hazardName: 'Swinging Obsidian Blades',
-        baseDamage: 55,
-        staminaDrain: 18,
-      },
-    },
-    {
-      roomNumber: 3,
-      roomName: 'Sanctum of Bone Lord Malakor',
-      roomType: 'BOSS',
-      guaranteedGold: 180,
-      lootRolls: 2,
-      enemies: [
-        {
-          enemyId: 'bone_lord_malakor',
-          name: 'Bone Lord Malakor',
-          isBoss: true,
-          maxHp: 650,
-          attackPower: 40,
-          armor: 22,
-          attackIntervalSeconds: 1.6,
-          cleaveTargets: 2,
-        },
-      ],
-      lootTable: [
-        {
-          itemSlug: 'malakor_signet',
-          itemName: "Malakor's Signet Ring",
-          rarity: 'EPIC',
-          quantity: 1,
-          weight: 40,
-        },
-        {
-          itemSlug: 'obsidian_ingot',
-          itemName: 'Obsidian Steel Ingot',
-          rarity: 'UNCOMMON',
-          quantity: 3,
-          weight: 60,
-        },
-      ],
-    },
-    {
-      roomNumber: 4,
-      roomName: 'Sunken Reliquary Chest',
-      roomType: 'LOOT_CHEST',
-      guaranteedGold: 85,
-      lootRolls: 1,
-      lootTable: [
-        {
-          itemSlug: 'obsidian_ingot',
-          itemName: 'Obsidian Steel Ingot',
-          rarity: 'UNCOMMON',
-          quantity: 2,
-          weight: 70,
-        },
-        {
-          itemSlug: 'vitality_elixir',
-          itemName: 'Elixir of Peak Output',
-          rarity: 'RARE',
-          quantity: 1,
-          weight: 30,
-        },
-      ],
-    },
-  ],
-};
+const STARTER_DUNGEON: DungeonDefinition = DEFAULT_DUNGEON_CATALOG[0]!;
 
 const COMPANION_ROSTER: CombatantCharacterInput[] = [
   {
@@ -3775,6 +3676,16 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           'Routine Preset'
         : undefined,
       exercises: historyExercises,
+      cardioEntries: validCardio.map((c) => ({
+        id: c.id,
+        exerciseId: c.exerciseId,
+        exerciseName: c.exerciseName,
+        activityType: c.activityType,
+        workoutCategory: c.workoutCategory,
+        durationSeconds: c.durationSeconds,
+        averageHrZone: c.averageHrZone,
+        rpe: c.rpe ?? null,
+      })),
     };
 
     const nextHistory = [offlineRecord, ...workoutHistoryRef.current];
@@ -4702,9 +4613,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       tickIntervalMs: 250,
     });
 
-    if (replay.outcome === 'VICTORY') {
-      setGold((g) => g + Math.round(replay.totalGoldEarned / activeDungeonRun.party.length));
-      addDropsToInventory(replay.lootDrops);
+    if (replay.roomsCleared > 0) {
+      if (replay.totalGoldEarned > 0) {
+        setGold((g) => g + Math.round(replay.totalGoldEarned / activeDungeonRun.party.length));
+      }
+      if (replay.lootDrops.length > 0) {
+        addDropsToInventory(replay.lootDrops);
+      }
     }
 
     setActiveDungeonRun({

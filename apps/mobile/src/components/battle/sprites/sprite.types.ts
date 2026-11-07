@@ -10,6 +10,15 @@ export interface SpriteAnimationClip {
   loop: boolean;
 }
 
+export interface SpritePortraitCrop {
+  /** Multiplier applied on top of size/frameWidth when rendering in portrait avatar mode (default ~2.15) */
+  zoom: number;
+  /** Horizontal shift in 100x100 source pixels (positive shifts sprite right) */
+  offsetX?: number;
+  /** Vertical shift in 100x100 source pixels (positive shifts sprite down so head/torso is centered) */
+  offsetY?: number;
+}
+
 export interface SpriteSheetConfig {
   id: string;
   displayName: string;
@@ -19,6 +28,8 @@ export interface SpriteSheetConfig {
   footRow: number;
   /** 0-indexed frame where weapon slash or projectile release connects */
   attackImpactFrame?: number;
+  /** Optional focal crop for compact portrait frames (48x48 / 56x56) */
+  portraitCrop?: SpritePortraitCrop;
   clips: Record<AnimationState, SpriteAnimationClip>;
 }
 

@@ -136,6 +136,11 @@ export const GREATSWORD_SKELETON_SPRITE_CONFIG: SpriteSheetConfig = {
   frameHeight: 100,
   footRow: 59,
   attackImpactFrame: 5,
+  portraitCrop: {
+    zoom: 2.25,
+    offsetX: 2,
+    offsetY: 6,
+  },
   clips: {
     idle: { source: greatswordSkeletonIdle, frameCount: 6, frameDurationMs: 150, loop: true },
     walk: { source: greatswordSkeletonWalk, frameCount: 9, frameDurationMs: 130, loop: true },
@@ -152,6 +157,11 @@ export const DEMON_BOSS_SPRITE_CONFIG: SpriteSheetConfig = {
   frameHeight: 100,
   footRow: 59,
   attackImpactFrame: 5,
+  portraitCrop: {
+    zoom: 2.2,
+    offsetX: 0,
+    offsetY: 6,
+  },
   clips: {
     idle: { source: demonBossIdle, frameCount: 6, frameDurationMs: 150, loop: true },
     walk: { source: demonBossWalk, frameCount: 8, frameDurationMs: 130, loop: true },

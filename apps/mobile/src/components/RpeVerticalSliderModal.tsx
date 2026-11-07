@@ -107,7 +107,8 @@ export const RpeVerticalSliderModal: React.FC<RpeVerticalSliderModalProps> = ({
   };
 
   const [selectedRpe, setSelectedRpe] = useState<number>(() => clampRpe(initialRpe || 8.0));
-  const [trackHeight, setTrackHeight] = useState<number>(240);
+  const [trackHeight, setTrackHeight] = useState<number>(250);
+  const dragOriginRef = React.useRef<{ pageY: number; startRpe: number } | null>(null);
 
   useEffect(() => {
     if (visible) {
@@ -154,47 +155,41 @@ export const RpeVerticalSliderModal: React.FC<RpeVerticalSliderModalProps> = ({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onClose}
+      onRequestClose={handleConfirm}
     >
+      {/* Tapping anywhere off-focus confirms the RPE adjustment and closes */}
       <Pressable style={styles.overlay} onPress={handleConfirm}>
-        <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
-          {/* Header */}
-          <View style={styles.headerRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.eyebrow}>RATE OF PERCEIVED EXERTION</Text>
-              <Text style={styles.title}>{subtitle || 'Adjust Set RPE'}</Text>
-            </View>
-            <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-              <Text style={styles.closeBtnText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Current Value readout banner */}
-          <View style={[styles.readoutBanner, { borderColor: descriptor.color }]}>
-            <View style={styles.readoutLeft}>
-              <Text style={[styles.readoutNumber, { color: descriptor.color }]}>
-                {selectedRpe % 1 === 0 ? selectedRpe.toFixed(0) : selectedRpe.toFixed(1)}
-              </Text>
-              <Text style={styles.readoutUnit}>RPE</Text>
-            </View>
-            <View style={styles.readoutRight}>
-              <Text style={[styles.readoutTitle, { color: descriptor.color }]}>
-                {descriptor.title}
-              </Text>
-              <Text style={styles.readoutRir}>{descriptor.rirText}</Text>
-            </View>
-          </View>
-
-          {/* Main Vertical Slider Body */}
+        <Pressable
+          style={styles.card}
+          onPress={(e) => e.stopPropagation()}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderGrant={(e) => {
+            dragOriginRef.current = {
+              pageY: e.nativeEvent.pageY,
+              startRpe: selectedRpe,
+            };
+          }}
+          onResponderMove={(e) => {
+            if (!dragOriginRef.current) return;
+            const deltaY = dragOriginRef.current.pageY - e.nativeEvent.pageY;
+            const deltaRpe = (deltaY / Math.max(120, trackHeight)) * (MAX_RPE - MIN_RPE);
+            updateRpe(dragOriginRef.current.startRpe + deltaRpe);
+          }}
+          onResponderRelease={() => {
+            dragOriginRef.current = null;
+          }}
+        >
+          {/* Main Side-by-Side Body: Draggable Vertical Slider on Left, Info/Tooltip/Buttons/Confirm beside it on Right */}
           <View style={styles.sliderSection}>
-            {/* Left column: +/- Step Buttons + Vertical Track */}
+            {/* Left column: Vertical Drag Slider + +/- Step Caps */}
             <View style={styles.verticalTrackColumn}>
               <TouchableOpacity
                 style={styles.stepCapBtn}
                 onPress={() => updateRpe(selectedRpe + 0.5)}
                 activeOpacity={0.75}
               >
-                <Text style={styles.stepCapBtnText}>+0.5</Text>
+                <Text style={styles.stepCapBtnText}>▲ +0.5</Text>
               </TouchableOpacity>
 
               <View
@@ -258,79 +253,108 @@ export const RpeVerticalSliderModal: React.FC<RpeVerticalSliderModalProps> = ({
                 onPress={() => updateRpe(selectedRpe - 0.5)}
                 activeOpacity={0.75}
               >
-                <Text style={styles.stepCapBtnText}>−0.5</Text>
+                <Text style={styles.stepCapBtnText}>▼ −0.5</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Right column: Quick-Tap Vertical Scale Ladder (10.0 down to 6.0) */}
+            {/* Right column beside the slider: Tooltip Info Readout + Quick-Tap Scale + Green Confirm Button */}
             <View style={styles.scaleLadderColumn}>
-              {RPE_SLIDER_STEPS.map((step) => {
-                const isSelected = Math.abs(selectedRpe - step) < 0.01;
-                const stepDesc = getRpeDescriptor(step);
-                return (
-                  <TouchableOpacity
-                    key={step}
-                    style={[
-                      styles.ladderRowBtn,
-                      isSelected && [
-                        styles.ladderRowBtnActive,
-                        { borderColor: stepDesc.color },
-                      ],
-                    ]}
-                    onPress={() => {
-                      updateRpe(step);
-                    }}
-                    activeOpacity={0.75}
-                  >
-                    <Text
+              <View style={styles.headerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.eyebrow}>DRAG SLIDER OR TAP • RPE</Text>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {subtitle || 'Adjust Set RPE'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Current Value & RIR Tooltip Banner */}
+              <View style={[styles.readoutBanner, { borderColor: descriptor.color }]}>
+                <View style={styles.readoutLeft}>
+                  <Text style={[styles.readoutNumber, { color: descriptor.color }]}>
+                    {selectedRpe % 1 === 0 ? selectedRpe.toFixed(0) : selectedRpe.toFixed(1)}
+                  </Text>
+                  <Text style={styles.readoutUnit}>RPE</Text>
+                </View>
+                <View style={styles.readoutRight}>
+                  <Text style={[styles.readoutTitle, { color: descriptor.color }]}>
+                    {descriptor.title}
+                  </Text>
+                  <Text style={styles.readoutRir}>{descriptor.rirText}</Text>
+                </View>
+              </View>
+
+              {/* Quick-Tap Scale Ladder */}
+              <View style={{ gap: 3 }}>
+                {RPE_SLIDER_STEPS.map((step) => {
+                  const isSelected = Math.abs(selectedRpe - step) < 0.01;
+                  const stepDesc = getRpeDescriptor(step);
+                  return (
+                    <TouchableOpacity
+                      key={step}
                       style={[
-                        styles.ladderValueText,
-                        isSelected && { color: stepDesc.color, fontWeight: '900' },
+                        styles.ladderRowBtn,
+                        isSelected && [
+                          styles.ladderRowBtnActive,
+                          { borderColor: stepDesc.color },
+                        ],
                       ]}
+                      onPress={() => {
+                        updateRpe(step);
+                      }}
+                      activeOpacity={0.75}
                     >
-                      {step % 1 === 0 ? `${step}.0` : `${step}`}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.ladderHintText,
-                        isSelected && styles.ladderHintTextActive,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {step === 10.0
-                        ? 'Max / 0 RIR'
-                        : step === 9.5
-                          ? '0–0.5 RIR'
-                          : step === 9.0
-                            ? '1 RIR'
-                            : step === 8.5
-                              ? '1.5 RIR'
-                              : step === 8.0
-                                ? '2 RIR (Target)'
-                                : step === 7.5
-                                  ? '2.5 RIR'
-                                  : step === 7.0
-                                    ? '3 RIR'
-                                    : step === 6.5
-                                      ? '3.5 RIR'
-                                      : '4+ RIR'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+                      <Text
+                        style={[
+                          styles.ladderValueText,
+                          isSelected && { color: stepDesc.color, fontWeight: '900' },
+                        ]}
+                      >
+                        {step % 1 === 0 ? `${step}.0` : `${step}`}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.ladderHintText,
+                          isSelected && styles.ladderHintTextActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {step === 10.0
+                          ? 'Max / 0 RIR'
+                          : step === 9.5
+                            ? '0–0.5 RIR'
+                            : step === 9.0
+                              ? '1 RIR'
+                              : step === 8.5
+                                ? '1.5 RIR'
+                                : step === 8.0
+                                  ? '2 RIR (Target)'
+                                  : step === 7.5
+                                    ? '2.5 RIR'
+                                    : step === 7.0
+                                      ? '3 RIR'
+                                      : step === 6.5
+                                        ? '3.5 RIR'
+                                        : '4+ RIR'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Green Confirm Button */}
+              <TouchableOpacity
+                style={styles.confirmBtn}
+                onPress={handleConfirm}
+                activeOpacity={0.85}
+                testID="rpe-slider-confirm-btn"
+              >
+                <Text style={styles.confirmBtnText}>
+                  ✓ Confirm RPE {selectedRpe % 1 === 0 ? selectedRpe.toFixed(0) : selectedRpe.toFixed(1)}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
-
-          {/* Confirm Button */}
-          <TouchableOpacity
-            style={styles.confirmBtn}
-            onPress={handleConfirm}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.confirmBtnText}>
-              Set RPE {selectedRpe % 1 === 0 ? selectedRpe.toFixed(0) : selectedRpe.toFixed(1)}
-            </Text>
-          </TouchableOpacity>
         </Pressable>
       </Pressable>
     </Modal>
@@ -538,14 +562,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   confirmBtn: {
-    backgroundColor: CRIMSON_ONI.agedGold,
+    backgroundColor: '#10B981',
     borderRadius: 10,
     paddingVertical: 11,
+    marginTop: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
   confirmBtnText: {
-    color: '#121114',
+    color: '#06281E',
     fontSize: 13,
     fontWeight: '900',
   },

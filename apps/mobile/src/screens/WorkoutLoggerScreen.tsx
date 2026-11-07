@@ -287,17 +287,37 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   // PR Celebration Modal State
   const [celebrationBadge, setCelebrationBadge] = useState<UnlockableBadge | null>(null);
 
-  // Category & Modality Selection State
-  const [activeCategory, setActiveCategory] = useState<WorkoutCategory | null>('GYM');
+  // Category & Modality Selection State (defaults to null so Discipline Selection Screen opens first)
+  const [activeCategory, setActiveCategory] = useState<WorkoutCategory | null>(null);
   const [secondaryCategories, setSecondaryCategories] = useState<WorkoutCategory[]>([]);
+  const [segmentOrder, setSegmentOrder] = useState<WorkoutCategory[]>([]);
 
-  // Tabular Resistance Exercises State
+  // Tabular Resistance & Partitioned Conditioning Catalogs
   const resistanceCatalog = useMemo(
     () => exercises.filter((e) => e.category === 'RESISTANCE'),
     [exercises]
   );
   const cardioCatalog = useMemo(
     () => exercises.filter((e) => e.category === 'CARDIO' || e.category === 'RECOVERY_MOBILITY'),
+    [exercises]
+  );
+  const pureCardioCatalog = useMemo(
+    () => exercises.filter((e) => e.workoutCategory === 'CARDIO'),
+    [exercises]
+  );
+  const sportCatalog = useMemo(
+    () => exercises.filter((e) => e.workoutCategory === 'SPORT'),
+    [exercises]
+  );
+  const recoveryCatalog = useMemo(
+    () =>
+      exercises.filter(
+        (e) =>
+          e.workoutCategory === 'RECOVERY' ||
+          (e.category === 'RECOVERY_MOBILITY' &&
+            e.workoutCategory !== 'SPORT' &&
+            e.workoutCategory !== 'CARDIO')
+      ),
     [exercises]
   );
 
@@ -326,11 +346,15 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     ];
   });
 
-  // Cardio & Recovery Non-Resistance Log State
+  // Cardio & Recovery Non-Resistance Log State (Strictly Partitioned per Modality)
   const [cardioEntries, setCardioEntries] = useState<OfflineDraftCardioItem[]>([]);
-  const [selectedCardioId, setSelectedCardioId] = useState<string>(
-    () => cardioCatalog[0]?.id ?? 'zone2_run'
-  );
+  const [selectedIdByModality, setSelectedIdByModality] = useState<
+    Record<'CARDIO' | 'SPORT' | 'RECOVERY', string>
+  >(() => ({
+    CARDIO: pureCardioCatalog[0]?.id ?? 'outdoor_tempo_cycling',
+    SPORT: sportCatalog[0]?.id ?? 'badminton_session',
+    RECOVERY: recoveryCatalog[0]?.id ?? 'foam_roll_thoracic',
+  }));
   const [cardioMinutesStr, setCardioMinutesStr] = useState<string>('20');
   const [cardioZone, setCardioZone] = useState<HeartRateZone>(2);
   const [cardioRpe, setCardioRpe] = useState<number>(7.5);
@@ -349,7 +373,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 
   // Modals & UI View State
   const [openExercisePickerBlockId, setOpenExercisePickerBlockId] = useState<string | null>(null);
-  const [showCardioPicker, setShowCardioPicker] = useState<boolean>(false);
+  const [openBlockMenuId, setOpenBlockMenuId] = useState<string | null>(null);
+  const [activeModalityPickerTarget, setActiveModalityPickerTarget] = useState<
+    'CARDIO' | 'SPORT' | 'RECOVERY' | null
+  >(null);
   const [showPresetDesigner, setShowPresetDesigner] = useState<boolean>(false);
   const [showTrainingHistory, setShowTrainingHistory] = useState<boolean>(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -367,6 +394,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     | { mode: 'CARDIO'; currentRpe: number }
     | null
   >(null);
+  const rpeDragOriginRef = useRef<{ startY: number; startRpe: number } | null>(null);
   const [tooltipState, setTooltipState] = useState<{
     key: TrainingMetricTooltipKey;
     headline?: string | null;
@@ -383,11 +411,6 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     }, 1000);
     return () => clearInterval(interval);
   }, []);
-
-  const sessionElapsedSec = Math.max(
-    0,
-    Math.floor((nowMs - sessionStartTimeRef.current) / 1000)
-  );
 
   // Superset Labels Calculation
   const supersetLabels = useMemo(
@@ -410,6 +433,23 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   const phase = workoutMachine.phase;
   const activeGymId = activeSession?.arrivalBoon.gymId ?? selectedGym.id;
   const activeGymName = activeSession?.arrivalBoon.gymName ?? selectedGym.name;
+
+  const hasActiveSessionProgress =
+    phase !== 'Idle' || completedSetCount > 0 || cardioEntries.length > 0;
+
+  const sessionElapsedSec = hasActiveSessionProgress
+    ? Math.max(1, Math.floor((nowMs - sessionStartTimeRef.current) / 1000))
+    : 0;
+
+  const orderedSegments = useMemo<WorkoutCategory[]>(() => {
+    if (!activeCategory) return [];
+    const activeSet = new Set<WorkoutCategory>([activeCategory, ...secondaryCategories]);
+    const validOrdered = segmentOrder.filter((c) => activeSet.has(c));
+    for (const c of activeSet) {
+      if (!validOrdered.includes(c)) validOrdered.push(c);
+    }
+    return validOrdered;
+  }, [activeCategory, secondaryCategories, segmentOrder]);
 
   // Live Boss Current HP Math
   const maxBossHp = selectedBoss.maxHp;
@@ -475,14 +515,34 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   // Category Gateway Handlers
   const handleSelectPrimaryCategory = (category: WorkoutCategory) => {
     setActiveCategory(category);
+    setSegmentOrder((prev) =>
+      prev.includes(category) ? prev : [category, ...prev.filter((c) => c !== category)]
+    );
   };
 
   const handleAddSecondarySegment = (category: WorkoutCategory) => {
     setSecondaryCategories((prev) => Array.from(new Set([...prev, category])));
+    setSegmentOrder((prev) => {
+      const base = prev.length > 0 ? prev : activeCategory ? [activeCategory] : [];
+      return base.includes(category) ? base : [...base, category];
+    });
   };
 
   const handleRemoveSecondarySegment = (category: WorkoutCategory) => {
     setSecondaryCategories((prev) => prev.filter((c) => c !== category));
+    setSegmentOrder((prev) => prev.filter((c) => c !== category));
+  };
+
+  const handleMoveSegment = (category: WorkoutCategory, direction: -1 | 1) => {
+    const curOrder = [...orderedSegments];
+    const idx = curOrder.indexOf(category);
+    const targetIdx = idx + direction;
+    if (idx < 0 || targetIdx < 0 || targetIdx >= curOrder.length) return;
+    const [moved] = curOrder.splice(idx, 1);
+    if (!moved) return;
+    curOrder.splice(targetIdx, 0, moved);
+    setSegmentOrder(curOrder);
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
   const handleResetCategory = () => {
@@ -1165,14 +1225,27 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   };
 
   // Non-Resistance Segment Logging (Cardio / Sport / Flexibility)
-  const handleAddCardioEntry = () => {
+  const handleAddCardioEntry = (
+    targetModality: 'CARDIO' | 'SPORT' | 'RECOVERY' = 'CARDIO'
+  ) => {
     setValidationError(null);
-    const exMeta = cardioCatalog.find((e) => e.id === selectedCardioId) ?? cardioCatalog[0];
+    const catalog =
+      targetModality === 'SPORT'
+        ? sportCatalog
+        : targetModality === 'RECOVERY'
+          ? recoveryCatalog
+          : pureCardioCatalog;
+    const chosenId =
+      selectedIdByModality[targetModality] || catalog[0]?.id || 'outdoor_tempo_cycling';
+    const exMeta =
+      catalog.find((e) => e.id === chosenId) ??
+      exercises.find((e) => e.id === chosenId) ??
+      catalog[0];
     const mins = Number(cardioMinutesStr) || 0;
     const durationSeconds = Math.max(60, Math.round(mins * 60));
 
     if (durationSeconds <= 0) {
-      setValidationError('Enter valid duration before adding cardio segment.');
+      setValidationError('Enter valid duration before adding segment.');
       return;
     }
 
@@ -1180,26 +1253,53 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       handleStartHybridSession();
     }
 
+    const targetExerciseId = exMeta?.id ?? chosenId;
+    const targetExerciseName = exMeta?.name ?? chosenId;
+    const activityType: 'CARDIO' | 'RECOVERY_MOBILITY' =
+      exMeta?.category === 'RECOVERY_MOBILITY' || targetModality === 'RECOVERY'
+        ? 'RECOVERY_MOBILITY'
+        : 'CARDIO';
     const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const newCardioItem: OfflineDraftCardioItem = {
-      id: `cardio_${stamp}`,
-      exerciseId: exMeta?.id ?? selectedCardioId,
-      exerciseName: exMeta?.name ?? selectedCardioId,
-      activityType:
-        exMeta?.category === 'RECOVERY_MOBILITY' ? 'RECOVERY_MOBILITY' : 'CARDIO',
-      durationSeconds,
-      averageHrZone: cardioZone,
-      rpe: cardioRpe,
-    };
 
-    setCardioEntries((prev) => [...prev, newCardioItem]);
+    setCardioEntries((prev) => {
+      const existingIdx = prev.findIndex(
+        (c) =>
+          c.exerciseId === targetExerciseId &&
+          c.averageHrZone === cardioZone &&
+          (c.rpe ?? 7.5) === cardioRpe
+      );
+      if (existingIdx >= 0) {
+        return prev.map((c, idx) =>
+          idx === existingIdx
+            ? {
+                ...c,
+                durationSeconds: c.durationSeconds + durationSeconds,
+                workoutCategory: c.workoutCategory ?? targetModality,
+              }
+            : c
+        );
+      }
+      return [
+        ...prev,
+        {
+          id: `cardio_${stamp}`,
+          exerciseId: targetExerciseId,
+          exerciseName: targetExerciseName,
+          activityType,
+          workoutCategory: targetModality,
+          durationSeconds,
+          averageHrZone: cardioZone,
+          rpe: cardioRpe,
+        },
+      ];
+    });
 
     // Record segment in engine hybrid state
     recordHybridCardioSegment({
-      exerciseId: newCardioItem.exerciseId,
-      activityType: newCardioItem.activityType,
-      durationSeconds: newCardioItem.durationSeconds,
-      averageHrZone: newCardioItem.averageHrZone,
+      exerciseId: targetExerciseId,
+      activityType,
+      durationSeconds,
+      averageHrZone: cardioZone,
     });
 
     // Boss damage feedback for cardio segment
@@ -1212,7 +1312,21 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     setTimeout(() => setBossAnimState('idle'), 700);
     setTimeout(() => setLastDamageDealt(null), 1800);
 
-    recordRecentActivity(selectedCardioId);
+    recordRecentActivity(targetExerciseId);
+    triggerSensoryCue('SET_MICRO_REWARD_TICK');
+  };
+
+  const handleAdjustCardioDuration = (entryId: string, deltaSeconds: number) => {
+    setCardioEntries((prev) =>
+      prev.map((c) =>
+        c.id === entryId
+          ? {
+              ...c,
+              durationSeconds: Math.max(300, c.durationSeconds + deltaSeconds),
+            }
+          : c
+      )
+    );
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
@@ -1363,6 +1477,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       }
     }
 
+    const validCardio = cardioEntries.filter((c) => c.durationSeconds > 0);
+    const totalCardioSeconds = validCardio.reduce((sum, c) => sum + c.durationSeconds, 0);
+    const effectiveDurationSeconds = Math.max(sessionElapsedSec, totalCardioSeconds);
+
     const nowMs = Date.now();
     const currentWorkout: CompletedWorkoutRecord = {
       id: `online_hist_${nowMs}`,
@@ -1371,10 +1489,20 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       gymName: activeGymName,
       source: 'ONLINE',
       performedAtIso: new Date(nowMs).toISOString(),
-      durationSeconds: sessionElapsedSec,
+      durationSeconds: effectiveDurationSeconds,
       workoutCategory: activeCategory ?? 'GYM',
       workoutType: 'HYBRID',
       exercises: historyExercises,
+      cardioEntries: validCardio.map((c) => ({
+        id: c.id,
+        exerciseId: c.exerciseId,
+        exerciseName: c.exerciseName,
+        activityType: c.activityType,
+        workoutCategory: c.workoutCategory,
+        durationSeconds: c.durationSeconds,
+        averageHrZone: c.averageHrZone,
+        rpe: c.rpe ?? null,
+      })),
     };
 
     const summary = evaluatePostWorkoutSummary({
@@ -2183,621 +2311,824 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         <WorkoutCategoryGateway
           selectedCategory={activeCategory}
           secondaryCategories={secondaryCategories}
+          segmentOrder={orderedSegments}
           presets={presets}
           isOffline={false}
           onSelectPrimaryCategory={handleSelectPrimaryCategory}
           onAddSecondarySegment={handleAddSecondarySegment}
           onRemoveSecondarySegment={handleRemoveSecondarySegment}
+          onMoveSegment={handleMoveSegment}
           onResetCategory={handleResetCategory}
           onLoadPreset={handleLoadPreset}
           onOpenPresetDesigner={() => setShowPresetDesigner(true)}
           onOpenTrainingHistory={() => setShowTrainingHistory(true)}
         />
 
-        {/* 6. Resistance Training Tabular Spreadsheet Sheet */}
-        {showResistanceUI && (
-          <View style={styles.modalitySection}>
-            <View style={styles.sectionHeaderRow}>
-              <View style={styles.sectionHeadingGroup}>
-                <Text style={styles.sectionHeading}>RESISTANCE SETS</Text>
-              </View>
-              <Text style={styles.sectionCountMeta}>
-                {completedSetCount} set{completedSetCount === 1 ? '' : 's'} checked
-              </Text>
-            </View>
+        {/* 6 & 7. ORDERED WORKOUT SEGMENTS (User-Reorderable: Gym, Cardio, Sport, Recovery) */}
+        {orderedSegments.map((segmentCategory, segIdx) => {
+          const canMoveSegUp = segIdx > 0;
+          const canMoveSegDown = segIdx < orderedSegments.length - 1;
+          const clampRpeStep = (val: number): number => {
+            const clamped = Math.max(6.0, Math.min(10.0, val));
+            return Math.round(clamped * 2) / 2;
+          };
 
-            {exerciseBlocks.map((block, bIdx) => {
-              const exMeta = exercises.find((e) => e.id === block.exerciseId);
-              const supersetInfo = supersetLabels[block.blockId];
-              const isGrouped = !!block.supersetGroupId;
-              const nextBlock = exerciseBlocks[bIdx + 1];
-              const prevBlock = exerciseBlocks[bIdx - 1];
-              const isLinkedWithNext =
-                isGrouped &&
-                !!nextBlock?.supersetGroupId &&
-                nextBlock.supersetGroupId === block.supersetGroupId;
-              const isLinkedWithPrev =
-                isGrouped &&
-                !!prevBlock?.supersetGroupId &&
-                prevBlock.supersetGroupId === block.supersetGroupId;
-
-              const blockUnit = resolveBlockUnit(block);
-              const prRecord = historicalPRs[block.exerciseId];
-              const prevLookup = resolvePreviousExerciseSessionSets({
-                exerciseId: block.exerciseId,
-                workoutHistory,
-                activeGymId,
-              });
-              const overloadRec = calculateProgressiveOverloadTarget({
-                exerciseId: block.exerciseId,
-                workoutHistory,
-                activeGymId,
-                isCompound: exMeta ? exMeta.baseXpFactor >= 1.15 : true,
-                equipmentType: exMeta?.equipmentType,
-                historicalPR: prRecord ?? null,
-                unit: blockUnit,
-              });
-
-              let workingOrderCounter = 0;
-              let warmupOrderCounter = 0;
-
-              return (
-                <React.Fragment key={block.blockId}>
-                  <View
-                    style={[
-                      styles.exerciseCard,
-                      isGrouped && { borderLeftColor: '#C69A45', borderLeftWidth: 4 },
-                      isLinkedWithNext && styles.exerciseCardLinkedNext,
-                      isLinkedWithPrev && styles.exerciseCardLinkedPrev,
-                    ]}
-                  >
-                    {/* Superset Pill Header */}
-                    {supersetInfo ? (
-                      <View style={styles.supersetBanner}>
-                        <Text style={styles.supersetBannerText}>
-                          ⚡ SUPERSET {supersetInfo.supersetGroupId} ({supersetInfo.memberLabel})
-                        </Text>
-                      </View>
-                    ) : null}
-
-                    {/* Exercise Selector & Actions Header */}
-                    <View style={styles.exerciseCardHeader}>
-                      <View style={{ flex: 1, minWidth: 0, marginRight: 6 }}>
-                        <Pressable
-                          style={styles.exerciseSelectorBtn}
-                          onPress={() => setOpenExercisePickerBlockId(block.blockId)}
-                        >
-                          <Text style={styles.exerciseSelectorText} numberOfLines={1}>
-                            {exMeta?.name ?? block.exerciseName ?? block.exerciseId}
-                          </Text>
-                          <Text style={styles.exerciseSelectorCaret}>⇄ ▼</Text>
-                        </Pressable>
-
-                        <View style={styles.subMetaRow}>
-                          {prRecord && prRecord.bestE1RM > 0 ? (
-                            <View style={styles.e1rmInlineBadge}>
-                              <Text style={styles.prevSessionHintText}>
-                                🏆 Best:{' '}
-                                {formatCleanWeightNumber(
-                                  convertKgToDisplayWeight(prRecord.bestE1RM, blockUnit)
-                                )}
-                                {blockUnit === 'LBS' ? 'lb' : 'kg'} e1RM
-                              </Text>
-                              <MetricInfoBadge
-                                onPress={() => setTooltipState({ key: 'E1RM' })}
-                              />
-                            </View>
-                          ) : prevLookup.found && !prevLookup.matchedActiveGym && prevLookup.sourceGymName ? (
-                            <Text style={styles.prevSessionHintText} numberOfLines={1}>
-                              Prev from {prevLookup.sourceGymName}
-                            </Text>
-                          ) : null}
-                        </View>
-                      </View>
-
-                      <View style={styles.cardHeaderActions}>
-                        {exerciseBlocks.length > 1 && (
-                          <View style={styles.reorderGroup}>
-                            <TouchableOpacity
-                              style={[styles.reorderBtn, bIdx === 0 && styles.reorderBtnDisabled]}
-                              disabled={bIdx === 0}
-                              onPress={() => handleMoveExerciseBlock(bIdx, -1)}
-                            >
-                              <Text style={styles.reorderBtnText}>↑</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[
-                                styles.reorderBtn,
-                                bIdx === exerciseBlocks.length - 1 && styles.reorderBtnDisabled,
-                              ]}
-                              disabled={bIdx === exerciseBlocks.length - 1}
-                              onPress={() => handleMoveExerciseBlock(bIdx, 1)}
-                            >
-                              <Text style={styles.reorderBtnText}>↓</Text>
-                            </TouchableOpacity>
-                          </View>
-                        )}
-
+          if (segmentCategory === 'GYM') {
+            return (
+              <View key="segment_GYM" style={styles.modalitySection}>
+                <View style={styles.sectionHeaderRow}>
+                  <View style={styles.sectionHeadingGroup}>
+                    <Text style={styles.sectionHeading}>🏋️ RESISTANCE SETS</Text>
+                    {orderedSegments.length > 1 && (
+                      <View style={styles.segmentMoveGroup}>
                         <TouchableOpacity
-                          style={[styles.linkSupersetBtn, isGrouped && styles.linkSupersetBtnActive]}
-                          onPress={() => handleToggleSuperset(bIdx)}
+                          style={[
+                            styles.segmentMoveBtn,
+                            !canMoveSegUp && styles.reorderBtnDisabled,
+                          ]}
+                          disabled={!canMoveSegUp}
+                          onPress={() => handleMoveSegment('GYM', -1)}
                         >
-                          <Text
-                            style={[
-                              styles.linkSupersetBtnText,
-                              isGrouped && styles.linkSupersetBtnTextActive,
-                            ]}
-                          >
-                            {isGrouped ? '🔗 SS' : '🔗 Link'}
-                          </Text>
+                          <Text style={styles.segmentMoveBtnText}>↑</Text>
                         </TouchableOpacity>
-
-                        {exerciseBlocks.length > 1 && (
-                          <Pressable
-                            style={styles.removeBlockBtn}
-                            onPress={() => handleRemoveExerciseBlock(block.blockId)}
-                          >
-                            <Text style={styles.removeBlockBtnText}>✕</Text>
-                          </Pressable>
-                        )}
+                        <TouchableOpacity
+                          style={[
+                            styles.segmentMoveBtn,
+                            !canMoveSegDown && styles.reorderBtnDisabled,
+                          ]}
+                          disabled={!canMoveSegDown}
+                          onPress={() => handleMoveSegment('GYM', 1)}
+                        >
+                          <Text style={styles.segmentMoveBtnText}>↓</Text>
+                        </TouchableOpacity>
                       </View>
-                    </View>
+                    )}
+                  </View>
+                  <Text style={styles.sectionCountMeta}>
+                    {completedSetCount} set{completedSetCount === 1 ? '' : 's'} checked
+                  </Text>
+                </View>
 
-                    {/* Gym-Aware Sticky Per-Exercise Note */}
-                    <ExerciseStickyNoteRow
-                      exerciseId={block.exerciseId}
-                      activeGymId={activeGymId}
-                      activeGymName={activeGymName}
-                      preferences={exerciseGymPreferences}
-                      onSaveNote={saveExerciseStickyNote}
-                    />
+                {exerciseBlocks.map((block, bIdx) => {
+                  const exMeta = exercises.find((e) => e.id === block.exerciseId);
+                  const supersetInfo = supersetLabels[block.blockId];
+                  const isGrouped = !!block.supersetGroupId;
+                  const nextBlock = exerciseBlocks[bIdx + 1];
+                  const prevBlock = exerciseBlocks[bIdx - 1];
+                  const isLinkedWithNext =
+                    isGrouped &&
+                    !!nextBlock?.supersetGroupId &&
+                    nextBlock.supersetGroupId === block.supersetGroupId;
+                  const isLinkedWithPrev =
+                    isGrouped &&
+                    !!prevBlock?.supersetGroupId &&
+                    prevBlock.supersetGroupId === block.supersetGroupId;
 
-                    {/* Ergonomics Toolbar: Overload Target + Plates/Warm-Up + KG/LBS Toggle */}
-                    <View style={styles.ergonomicsStrip}>
-                      {overloadRec.available ? (
-                        <View style={styles.overloadPillGroup}>
+                  const blockUnit = resolveBlockUnit(block);
+                  const prRecord = historicalPRs[block.exerciseId];
+                  const prevLookup = resolvePreviousExerciseSessionSets({
+                    exerciseId: block.exerciseId,
+                    workoutHistory,
+                    activeGymId,
+                  });
+                  const overloadRec = calculateProgressiveOverloadTarget({
+                    exerciseId: block.exerciseId,
+                    workoutHistory,
+                    activeGymId,
+                    isCompound: exMeta ? exMeta.baseXpFactor >= 1.15 : true,
+                    equipmentType: exMeta?.equipmentType,
+                    historicalPR: prRecord ?? null,
+                    unit: blockUnit,
+                  });
+
+                  const isMenuOpen = openBlockMenuId === block.blockId;
+                  let workingOrderCounter = 0;
+                  let warmupOrderCounter = 0;
+
+                  return (
+                    <React.Fragment key={block.blockId}>
+                      <View
+                        style={[
+                          styles.exerciseCard,
+                          isGrouped && { borderLeftColor: '#C69A45', borderLeftWidth: 4 },
+                          isLinkedWithNext && styles.exerciseCardLinkedNext,
+                          isLinkedWithPrev && styles.exerciseCardLinkedPrev,
+                        ]}
+                      >
+                        {/* Superset Pill Header */}
+                        {supersetInfo ? (
+                          <View style={styles.supersetBanner}>
+                            <Text style={styles.supersetBannerText}>
+                              ⚡ SUPERSET {supersetInfo.supersetGroupId} ({supersetInfo.memberLabel})
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        {/* Clean Exercise Header: High-Contrast Title + Swap Pill on Left, `⋯` Action Menu on Right */}
+                        <View style={styles.exerciseCardHeader}>
+                          <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+                            <Pressable
+                              style={styles.exerciseSelectorBtn}
+                              onPress={() => setOpenExercisePickerBlockId(block.blockId)}
+                            >
+                              <Text style={styles.exerciseSelectorText} numberOfLines={1}>
+                                {exMeta?.name ?? block.exerciseName ?? block.exerciseId}
+                              </Text>
+                              <View style={styles.swapExercisePill}>
+                                <Text style={styles.swapExercisePillText}>⇄ Swap</Text>
+                              </View>
+                            </Pressable>
+
+                            <View style={styles.subMetaRow}>
+                              {prRecord && prRecord.bestE1RM > 0 ? (
+                                <View style={styles.e1rmInlineBadge}>
+                                  <Text style={styles.prevSessionHintText}>
+                                    🏆 Best:{' '}
+                                    {formatCleanWeightNumber(
+                                      convertKgToDisplayWeight(prRecord.bestE1RM, blockUnit)
+                                    )}
+                                    {blockUnit === 'LBS' ? 'lb' : 'kg'} e1RM
+                                  </Text>
+                                  <MetricInfoBadge
+                                    onPress={() => setTooltipState({ key: 'E1RM' })}
+                                  />
+                                </View>
+                              ) : prevLookup.found &&
+                                !prevLookup.matchedActiveGym &&
+                                prevLookup.sourceGymName ? (
+                                <Text style={styles.prevSessionHintText} numberOfLines={1}>
+                                  Prev from {prevLookup.sourceGymName}
+                                </Text>
+                              ) : null}
+                            </View>
+                          </View>
+
                           <TouchableOpacity
                             style={[
-                              styles.overloadTargetPill,
-                              overloadRec.triggersPrCrit && styles.overloadTargetPillCrit,
+                              styles.blockActionMenuTrigger,
+                              isMenuOpen && styles.blockActionMenuTriggerActive,
                             ]}
                             onPress={() =>
-                              handleApplyOverloadTarget(
-                                block.blockId,
-                                overloadRec.targetDisplayWeight,
-                                overloadRec.targetReps,
-                                overloadRec.targetRpe,
-                                blockUnit
+                              setOpenBlockMenuId((prev) =>
+                                prev === block.blockId ? null : block.blockId
                               )
                             }
                             activeOpacity={0.75}
-                          >
-                            <Text style={styles.overloadTargetText} numberOfLines={1}>
-                              {overloadRec.pillLabel}
-                            </Text>
-                          </TouchableOpacity>
-                          <MetricInfoBadge
-                            onPress={() =>
-                              setTooltipState({
-                                key: 'OVERLOAD_TARGET',
-                                headline: overloadRec.pillLabel,
-                                note: overloadRec.rationaleText,
-                              })
-                            }
-                          />
-                        </View>
-                      ) : null}
-
-                      <View style={styles.ergonomicsRightTools}>
-                        <TouchableOpacity
-                          style={styles.platesHelperBtn}
-                          onPress={() => setPlatesModalBlockId(block.blockId)}
-                          activeOpacity={0.75}
-                        >
-                          <Text style={styles.platesHelperBtnText}>🧮 Plates / Warm-Up</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[
-                            styles.unitTogglePill,
-                            blockUnit === 'LBS' && styles.unitTogglePillImperial,
-                          ]}
-                          onPress={() => handleToggleBlockWeightUnit(block.blockId)}
-                          activeOpacity={0.75}
-                        >
-                          <Text style={styles.unitTogglePillText}>{blockUnit}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    {/* 6-Column Table Headers: TYPE | PREV | KG/LBS | REPS | RPE | DONE */}
-                    <View style={styles.setTableHeader}>
-                      <View style={[styles.colHeaderWithInfo, { width: 36 }]}>
-                        <Text style={styles.colHeader}>SET</Text>
-                        <MetricInfoBadge
-                          onPress={() => setTooltipState({ key: 'SET_TYPES' })}
-                        />
-                      </View>
-                      <Text style={[styles.colHeader, { width: 58 }]}>PREV</Text>
-                      <Text style={[styles.colHeader, styles.colInput]}>{blockUnit}</Text>
-                      <Text style={[styles.colHeader, styles.colInput]}>REPS</Text>
-                      <View style={[styles.colHeaderWithInfo, { width: 44 }]}>
-                        <Text style={styles.colHeader}>RPE</Text>
-                        <MetricInfoBadge
-                          onPress={() => setTooltipState({ key: 'RPE' })}
-                        />
-                      </View>
-                      <Text style={[styles.colHeader, styles.colCheck]}>✓</Text>
-                      {block.sets.length > 1 && <View style={styles.colDeleteSpacer} />}
-                    </View>
-
-                    {/* Set Rows */}
-                    {block.sets.map((row) => {
-                      const rowSetType = row.setType || (row.isWarmup ? 'WARMUP' : 'NORMAL');
-                      const isWu = isWarmupSetType(rowSetType, row.isWarmup);
-                      const wIdx = workingOrderCounter;
-                      const wuIdx = warmupOrderCounter;
-                      if (isWu) warmupOrderCounter += 1;
-                      else workingOrderCounter += 1;
-
-                      const badgeDesc = SET_TYPE_DESCRIPTORS.find((d) => d.type === rowSetType);
-                      const tagColor = SET_TYPE_COLORS[rowSetType] || '#9CA3AF';
-                      const rawCode = badgeDesc?.shortCode || 'N';
-                      const displayCode = rawCode === 'N' ? String(wIdx + 1) : rawCode;
-
-                      const ghostRow = resolveGhostRowForSetOrder({
-                        lookup: prevLookup,
-                        setType: rowSetType,
-                        isWarmup: row.isWarmup,
-                        workingOrderIndex: wIdx,
-                        warmupOrderIndex: wuIdx,
-                      });
-
-                      const ghostDispWeightStr = ghostRow
-                        ? formatCleanWeightNumber(
-                            convertKgToDisplayWeight(ghostRow.weightKg, blockUnit)
-                          )
-                        : '';
-                      const ghostRepsStr = ghostRow ? String(ghostRow.reps) : '';
-                      const prevPill = ghostRow
-                        ? formatCompactPrevPill({
-                            weightKg: ghostRow.weightKg,
-                            reps: ghostRow.reps,
-                            unit: blockUnit,
-                            rpe: ghostRow.rpe,
-                          })
-                        : null;
-
-                      return (
-                        <View
-                          key={row.id}
-                          style={[
-                            styles.setRow,
-                            row.completed && styles.setRowCompleted,
-                            rowSetType === 'DROP_SET' && styles.dropSetRowIndent,
-                          ]}
-                        >
-                          {/* Cycling Set Type Pill [1 / W / D / F] */}
-                          <TouchableOpacity
-                            style={[styles.setTypeBtn, { borderColor: tagColor }]}
-                            onPress={() => handleCycleSetType(block.blockId, row.id)}
-                          >
-                            <Text style={[styles.setTypeBtnText, { color: tagColor }]}>
-                              {displayCode}
-                            </Text>
-                          </TouchableOpacity>
-
-                          {/* Per-Set `PREV` 1-Tap Copy Pill */}
-                          <TouchableOpacity
-                            style={[
-                              styles.prevSetPill,
-                              !prevPill && styles.prevSetPillEmpty,
-                            ]}
-                            disabled={!ghostRow}
-                            onPress={() => {
-                              if (ghostRow) {
-                                handleCopyPrevToRow(
-                                  block.blockId,
-                                  row.id,
-                                  ghostDispWeightStr,
-                                  ghostRepsStr,
-                                  ghostRow.rpe
-                                );
-                              }
-                            }}
-                            activeOpacity={0.7}
-                          >
-                            {prevPill ? (
-                              <>
-                                <Text style={styles.prevSetMainText} numberOfLines={1}>
-                                  {prevPill.mainText}
-                                </Text>
-                                {prevPill.rpeSubText ? (
-                                  <Text style={styles.prevSetSubText} numberOfLines={1}>
-                                    {prevPill.rpeSubText}
-                                  </Text>
-                                ) : null}
-                              </>
-                            ) : (
-                              <Text style={styles.prevSetEmptyText}>—</Text>
-                            )}
-                          </TouchableOpacity>
-
-                          {/* KG/LBS numeric TextInput with Ghost Placeholder */}
-                          <TextInput
-                            style={[
-                              styles.numericInput,
-                              row.completed && styles.numericInputCompleted,
-                            ]}
-                            value={row.weightKgStr}
-                            onChangeText={(val) =>
-                              handleUpdateSetField(block.blockId, row.id, 'weightKgStr', val)
-                            }
-                            keyboardType="decimal-pad"
-                            placeholder={ghostDispWeightStr || '0'}
-                            placeholderTextColor={
-                              ghostDispWeightStr ? 'rgba(253, 230, 138, 0.42)' : CRIMSON_ONI.ashMuted
-                            }
-                            selectTextOnFocus
-                          />
-
-                          {/* REPS numeric TextInput with Ghost Placeholder */}
-                          <TextInput
-                            style={[
-                              styles.numericInput,
-                              row.completed && styles.numericInputCompleted,
-                            ]}
-                            value={row.repsStr}
-                            onChangeText={(val) =>
-                              handleUpdateSetField(block.blockId, row.id, 'repsStr', val)
-                            }
-                            keyboardType="number-pad"
-                            placeholder={ghostRepsStr || '0'}
-                            placeholderTextColor={
-                              ghostRepsStr ? 'rgba(253, 230, 138, 0.42)' : CRIMSON_ONI.ashMuted
-                            }
-                            selectTextOnFocus
-                          />
-
-                          {/* RPE Pill (opens vertical RPE slider) */}
-                          <TouchableOpacity
-                            style={styles.rpePillBtn}
-                            onPress={() =>
-                              setRpeSliderTarget({
-                                mode: 'SET',
-                                blockId: block.blockId,
-                                setId: row.id,
-                                currentRpe: row.rpe ?? ghostRow?.rpe ?? 8.5,
-                                subtitle: `${
-                                  exercises.find((e) => e.id === block.exerciseId)?.name ??
-                                  block.exerciseName ??
-                                  'Exercise'
-                                } • Set ${displayCode}`,
-                              })
-                            }
-                          >
-                            <Text style={styles.rpePillText}>
-                              {row.rpe ? `${row.rpe}` : '8.5'}
-                            </Text>
-                          </TouchableOpacity>
-
-                          {/* DONE Checkbox (1-Tap Auto-Fills Ghost Values if Empty!) */}
-                          <Pressable
-                            style={[
-                              styles.checkBtn,
-                              row.completed && styles.checkBtnCompleted,
-                            ]}
-                            onPress={() => handleToggleSetCompleted(block.blockId, row.id)}
-                            testID="set-complete-btn"
+                            testID={`exercise-menu-btn-${block.blockId}`}
                           >
                             <Text
                               style={[
-                                styles.checkBtnText,
-                                row.completed && styles.checkBtnTextCompleted,
+                                styles.blockActionMenuTriggerText,
+                                isMenuOpen && styles.blockActionMenuTriggerTextActive,
                               ]}
                             >
-                              {row.completed ? '✓' : ''}
+                              ⋯
                             </Text>
-                          </Pressable>
-
-                          {/* Delete Set Row Button */}
-                          {block.sets.length > 1 && (
-                            <Pressable
-                              style={styles.deleteSetBtn}
-                              onPress={() => handleRemoveSetRow(block.blockId, row.id)}
-                            >
-                              <Text style={styles.deleteSetText}>✕</Text>
-                            </Pressable>
-                          )}
+                          </TouchableOpacity>
                         </View>
-                      );
-                    })}
 
-                    {/* + Add Set Footer Button */}
-                    <Pressable
-                      style={styles.addSetRowBtn}
-                      onPress={() => handleAddSetRow(block.blockId)}
-                    >
-                      <Text style={styles.addSetRowText}>+ Add Set</Text>
-                    </Pressable>
-                  </View>
+                        {/* Compact `⋯` Exercise Action Drawer */}
+                        {isMenuOpen && (
+                          <View style={styles.blockActionMenuDrawer}>
+                            {exerciseBlocks.length > 1 && (
+                              <>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.blockMenuActionPill,
+                                    bIdx === 0 && styles.reorderBtnDisabled,
+                                  ]}
+                                  disabled={bIdx === 0}
+                                  onPress={() => handleMoveExerciseBlock(bIdx, -1)}
+                                >
+                                  <Text style={styles.blockMenuActionText}>↑ Move Up</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.blockMenuActionPill,
+                                    bIdx === exerciseBlocks.length - 1 &&
+                                      styles.reorderBtnDisabled,
+                                  ]}
+                                  disabled={bIdx === exerciseBlocks.length - 1}
+                                  onPress={() => handleMoveExerciseBlock(bIdx, 1)}
+                                >
+                                  <Text style={styles.blockMenuActionText}>↓ Move Down</Text>
+                                </TouchableOpacity>
+                              </>
+                            )}
 
-                  {/* Superset Connecting Bridge between linked exercises */}
-                  {isLinkedWithNext ? (
-                    <View style={styles.supersetBridge}>
-                      <View style={styles.supersetBridgeLine} />
-                      <View style={styles.supersetBridgeBadge}>
-                        <Text style={styles.supersetBridgeText}>⚡ SUPERSET LINK</Text>
-                      </View>
-                      <View style={styles.supersetBridgeTrail} />
-                    </View>
-                  ) : null}
-                </React.Fragment>
-              );
-            })}
+                            <TouchableOpacity
+                              style={[
+                                styles.blockMenuActionPill,
+                                isGrouped && styles.linkSupersetBtnActive,
+                              ]}
+                              onPress={() => {
+                                handleToggleSuperset(bIdx);
+                                setOpenBlockMenuId(null);
+                              }}
+                            >
+                              <Text
+                                style={[
+                                  styles.blockMenuActionText,
+                                  isGrouped && styles.linkSupersetBtnTextActive,
+                                ]}
+                              >
+                                {isGrouped ? '🔗 Unlink Superset' : '🔗 Link Superset'}
+                              </Text>
+                            </TouchableOpacity>
 
-            {/* Bottom Action Row: + Add Exercise */}
-            <View style={styles.bottomExerciseActionRow}>
-              <Pressable
-                style={styles.addExerciseBlockBtn}
-                onPress={handleAddExerciseBlock}
-              >
-                <Text style={styles.addExerciseBlockText}>+ Add Exercise</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
+                            <TouchableOpacity
+                              style={styles.blockMenuActionPill}
+                              onPress={() => {
+                                setPlatesModalBlockId(block.blockId);
+                                setOpenBlockMenuId(null);
+                              }}
+                            >
+                              <Text style={styles.blockMenuActionText}>🧮 Plates / Warm-Up</Text>
+                            </TouchableOpacity>
 
-        {/* 7. Non-Resistance Modality Logging (Cardio / Sport / Flexibility) */}
-        {(showCardioUI || showSportUI || showRecoveryUI) && (
-          <View style={styles.modalitySection}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeading}>
-                {showSportUI
-                  ? 'SPORT TRAINING'
-                  : showRecoveryUI
-                  ? 'ACTIVE RECOVERY & MOBILITY'
-                  : 'CARDIO TRAINING'}
-              </Text>
-              <Text style={styles.sectionCountMeta}>{cardioEntries.length} logged</Text>
-            </View>
+                            <TouchableOpacity
+                              style={styles.blockMenuActionPill}
+                              onPress={() => handleToggleBlockWeightUnit(block.blockId)}
+                            >
+                              <Text style={styles.blockMenuActionText}>⚖️ Unit: {blockUnit}</Text>
+                            </TouchableOpacity>
 
-            <View style={styles.cardioCard}>
-              <View style={styles.cardioSelectHeader}>
-                <Text style={styles.cardioLabel}>Activity:</Text>
-                <TouchableOpacity
-                  style={styles.cardioBrowseBtn}
-                  onPress={() => setShowCardioPicker(true)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.cardioBrowseBtnText}>🔍 Browse / Add Modality</Text>
-                </TouchableOpacity>
-              </View>
+                            {exerciseBlocks.length > 1 && (
+                              <TouchableOpacity
+                                style={[styles.blockMenuActionPill, styles.blockMenuActionDanger]}
+                                onPress={() => {
+                                  handleRemoveExerciseBlock(block.blockId);
+                                  setOpenBlockMenuId(null);
+                                }}
+                              >
+                                <Text style={styles.blockMenuActionDangerText}>🗑️ Remove</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        )}
 
-              <TouchableOpacity
-                style={styles.cardioSelectedBanner}
-                onPress={() => setShowCardioPicker(true)}
-                activeOpacity={0.8}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardioSelectedName}>
-                    {cardioCatalog.find((c) => c.id === selectedCardioId)?.name ??
-                      selectedCardioId}
-                  </Text>
-                  <Text style={styles.cardioSelectedSub}>
-                    {cardioCatalog.find((c) => c.id === selectedCardioId)?.equipmentType ||
-                      'Activity'}{' '}
-                    • Tap to search or add custom
-                  </Text>
-                </View>
-                <Text style={styles.cardioSelectedChangeIcon}>🔍</Text>
-              </TouchableOpacity>
+                        {/* Gym-Aware Sticky Per-Exercise Note */}
+                        <ExerciseStickyNoteRow
+                          exerciseId={block.exerciseId}
+                          activeGymId={activeGymId}
+                          activeGymName={activeGymName}
+                          preferences={exerciseGymPreferences}
+                          onSaveNote={saveExerciseStickyNote}
+                        />
 
-              <View style={styles.cardioSelectRow}>
-                <Text style={styles.cardioQuickLabel}>Quick:</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
-                  {cardioCatalog.slice(0, 10).map((c) => {
-                    const active = c.id === selectedCardioId;
-                    return (
-                      <Pressable
-                        key={c.id}
-                        style={[styles.cardioPill, active && styles.cardioPillActive]}
-                        onPress={() => {
-                          setSelectedCardioId(c.id);
-                          recordRecentActivity(c.id);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.cardioPillText,
-                            active && styles.cardioPillTextActive,
-                          ]}
+                        {/* Ergonomics Toolbar: Overload Target + Plates/Warm-Up + KG/LBS Toggle */}
+                        <View style={styles.ergonomicsStrip}>
+                          {overloadRec.available ? (
+                            <View style={styles.overloadPillGroup}>
+                              <TouchableOpacity
+                                style={[
+                                  styles.overloadTargetPill,
+                                  overloadRec.triggersPrCrit && styles.overloadTargetPillCrit,
+                                ]}
+                                onPress={() =>
+                                  handleApplyOverloadTarget(
+                                    block.blockId,
+                                    overloadRec.targetDisplayWeight,
+                                    overloadRec.targetReps,
+                                    overloadRec.targetRpe,
+                                    blockUnit
+                                  )
+                                }
+                                activeOpacity={0.75}
+                              >
+                                <Text style={styles.overloadTargetText} numberOfLines={1}>
+                                  {overloadRec.pillLabel}
+                                </Text>
+                              </TouchableOpacity>
+                              <MetricInfoBadge
+                                onPress={() =>
+                                  setTooltipState({
+                                    key: 'OVERLOAD_TARGET',
+                                    headline: overloadRec.pillLabel,
+                                    note: overloadRec.rationaleText,
+                                  })
+                                }
+                              />
+                            </View>
+                          ) : null}
+
+                          <View style={styles.ergonomicsRightTools}>
+                            <TouchableOpacity
+                              style={styles.platesHelperBtn}
+                              onPress={() => setPlatesModalBlockId(block.blockId)}
+                              activeOpacity={0.75}
+                            >
+                              <Text style={styles.platesHelperBtnText}>🧮 Plates / Warm-Up</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[
+                                styles.unitTogglePill,
+                                blockUnit === 'LBS' && styles.unitTogglePillImperial,
+                              ]}
+                              onPress={() => handleToggleBlockWeightUnit(block.blockId)}
+                              activeOpacity={0.75}
+                            >
+                              <Text style={styles.unitTogglePillText}>{blockUnit}</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* 6-Column Table Headers: TYPE | PREV | KG/LBS | REPS | RPE | DONE */}
+                        <View style={styles.setTableHeader}>
+                          <View style={[styles.colHeaderWithInfo, { width: 36 }]}>
+                            <Text style={styles.colHeader}>SET</Text>
+                            <MetricInfoBadge
+                              onPress={() => setTooltipState({ key: 'SET_TYPES' })}
+                            />
+                          </View>
+                          <Text style={[styles.colHeader, { width: 58 }]}>PREV</Text>
+                          <Text style={[styles.colHeader, styles.colInput]}>{blockUnit}</Text>
+                          <Text style={[styles.colHeader, styles.colInput]}>REPS</Text>
+                          <View style={[styles.colHeaderWithInfo, { width: 44 }]}>
+                            <Text style={styles.colHeader}>RPE</Text>
+                            <MetricInfoBadge
+                              onPress={() => setTooltipState({ key: 'RPE' })}
+                            />
+                          </View>
+                          <Text style={[styles.colHeader, styles.colCheck]}>✓</Text>
+                          {block.sets.length > 1 && <View style={styles.colDeleteSpacer} />}
+                        </View>
+
+                        {/* Set Rows */}
+                        {block.sets.map((row) => {
+                          const rowSetType = row.setType || (row.isWarmup ? 'WARMUP' : 'NORMAL');
+                          const isWu = isWarmupSetType(rowSetType, row.isWarmup);
+                          const wIdx = workingOrderCounter;
+                          const wuIdx = warmupOrderCounter;
+                          if (isWu) warmupOrderCounter += 1;
+                          else workingOrderCounter += 1;
+
+                          const badgeDesc = SET_TYPE_DESCRIPTORS.find((d) => d.type === rowSetType);
+                          const tagColor = SET_TYPE_COLORS[rowSetType] || '#9CA3AF';
+                          const rawCode = badgeDesc?.shortCode || 'N';
+                          const displayCode = rawCode === 'N' ? String(wIdx + 1) : rawCode;
+
+                          const ghostRow = resolveGhostRowForSetOrder({
+                            lookup: prevLookup,
+                            setType: rowSetType,
+                            isWarmup: row.isWarmup,
+                            workingOrderIndex: wIdx,
+                            warmupOrderIndex: wuIdx,
+                          });
+
+                          const ghostDispWeightStr = ghostRow
+                            ? formatCleanWeightNumber(
+                                convertKgToDisplayWeight(ghostRow.weightKg, blockUnit)
+                              )
+                            : '';
+                          const ghostRepsStr = ghostRow ? String(ghostRow.reps) : '';
+                          const prevPill = ghostRow
+                            ? formatCompactPrevPill({
+                                weightKg: ghostRow.weightKg,
+                                reps: ghostRow.reps,
+                                unit: blockUnit,
+                                rpe: ghostRow.rpe,
+                              })
+                            : null;
+                          const effectiveRowRpe = row.rpe ?? ghostRow?.rpe ?? 8.5;
+
+                          return (
+                            <View
+                              key={row.id}
+                              style={[
+                                styles.setRow,
+                                row.completed && styles.setRowCompleted,
+                                rowSetType === 'DROP_SET' && styles.dropSetRowIndent,
+                              ]}
+                            >
+                              {/* Cycling Set Type Pill [1 / W / D / F] */}
+                              <TouchableOpacity
+                                style={[styles.setTypeBtn, { borderColor: tagColor }]}
+                                onPress={() => handleCycleSetType(block.blockId, row.id)}
+                              >
+                                <Text style={[styles.setTypeBtnText, { color: tagColor }]}>
+                                  {displayCode}
+                                </Text>
+                              </TouchableOpacity>
+
+                              {/* Per-Set `PREV` 1-Tap Copy Pill */}
+                              <TouchableOpacity
+                                style={[
+                                  styles.prevSetPill,
+                                  !prevPill && styles.prevSetPillEmpty,
+                                ]}
+                                disabled={!ghostRow}
+                                onPress={() => {
+                                  if (ghostRow) {
+                                    handleCopyPrevToRow(
+                                      block.blockId,
+                                      row.id,
+                                      ghostDispWeightStr,
+                                      ghostRepsStr,
+                                      ghostRow.rpe
+                                    );
+                                  }
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                {prevPill ? (
+                                  <>
+                                    <Text style={styles.prevSetMainText} numberOfLines={1}>
+                                      {prevPill.mainText}
+                                    </Text>
+                                    {prevPill.rpeSubText ? (
+                                      <Text style={styles.prevSetSubText} numberOfLines={1}>
+                                        {prevPill.rpeSubText}
+                                      </Text>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <Text style={styles.prevSetEmptyText}>—</Text>
+                                )}
+                              </TouchableOpacity>
+
+                              {/* KG/LBS numeric TextInput with Ghost Placeholder */}
+                              <TextInput
+                                style={[
+                                  styles.numericInput,
+                                  row.completed && styles.numericInputCompleted,
+                                ]}
+                                value={row.weightKgStr}
+                                onChangeText={(val) =>
+                                  handleUpdateSetField(block.blockId, row.id, 'weightKgStr', val)
+                                }
+                                keyboardType="decimal-pad"
+                                placeholder={ghostDispWeightStr || '0'}
+                                placeholderTextColor={
+                                  ghostDispWeightStr ? 'rgba(253, 230, 138, 0.42)' : CRIMSON_ONI.ashMuted
+                                }
+                                selectTextOnFocus
+                              />
+
+                              {/* REPS numeric TextInput with Ghost Placeholder */}
+                              <TextInput
+                                style={[
+                                  styles.numericInput,
+                                  row.completed && styles.numericInputCompleted,
+                                ]}
+                                value={row.repsStr}
+                                onChangeText={(val) =>
+                                  handleUpdateSetField(block.blockId, row.id, 'repsStr', val)
+                                }
+                                keyboardType="number-pad"
+                                placeholder={ghostRepsStr || '0'}
+                                placeholderTextColor={
+                                  ghostRepsStr ? 'rgba(253, 230, 138, 0.42)' : CRIMSON_ONI.ashMuted
+                                }
+                                selectTextOnFocus
+                              />
+
+                              {/* RPE Pill (Instant-Drag on First Press + Opens Vertical RPE Slider) */}
+                              <View
+                                style={styles.rpePillBtn}
+                                onStartShouldSetResponder={() => true}
+                                onMoveShouldSetResponder={() => true}
+                                onResponderGrant={(e) => {
+                                  rpeDragOriginRef.current = {
+                                    startY: e.nativeEvent.pageY,
+                                    startRpe: effectiveRowRpe,
+                                  };
+                                  setRpeSliderTarget({
+                                    mode: 'SET',
+                                    blockId: block.blockId,
+                                    setId: row.id,
+                                    currentRpe: effectiveRowRpe,
+                                    subtitle: `${
+                                      exMeta?.name ?? block.exerciseName ?? 'Exercise'
+                                    } • Set ${displayCode}`,
+                                  });
+                                }}
+                                onResponderMove={(e) => {
+                                  if (!rpeDragOriginRef.current) return;
+                                  const deltaY =
+                                    rpeDragOriginRef.current.startY - e.nativeEvent.pageY;
+                                  const nextRpe = clampRpeStep(
+                                    rpeDragOriginRef.current.startRpe + (deltaY / 180) * 4.0
+                                  );
+                                  handleSetRpeValue(block.blockId, row.id, nextRpe);
+                                  setRpeSliderTarget((prev) =>
+                                    prev ? { ...prev, currentRpe: nextRpe } : prev
+                                  );
+                                }}
+                              >
+                                <Text style={styles.rpePillText}>{effectiveRowRpe}</Text>
+                              </View>
+
+                              {/* DONE Checkbox (1-Tap Auto-Fills Ghost Values if Empty!) */}
+                              <Pressable
+                                style={[
+                                  styles.checkBtn,
+                                  row.completed && styles.checkBtnCompleted,
+                                ]}
+                                onPress={() => handleToggleSetCompleted(block.blockId, row.id)}
+                                testID="set-complete-btn"
+                              >
+                                <Text
+                                  style={[
+                                    styles.checkBtnText,
+                                    row.completed && styles.checkBtnTextCompleted,
+                                  ]}
+                                >
+                                  {row.completed ? '✓' : ''}
+                                </Text>
+                              </Pressable>
+
+                              {/* Delete Set Row Button */}
+                              {block.sets.length > 1 && (
+                                <Pressable
+                                  style={styles.deleteSetBtn}
+                                  onPress={() => handleRemoveSetRow(block.blockId, row.id)}
+                                >
+                                  <Text style={styles.deleteSetText}>✕</Text>
+                                </Pressable>
+                              )}
+                            </View>
+                          );
+                        })}
+
+                        {/* + Add Set Footer Button */}
+                        <Pressable
+                          style={styles.addSetRowBtn}
+                          onPress={() => handleAddSetRow(block.blockId)}
                         >
-                          {c.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
+                          <Text style={styles.addSetRowText}>+ Add Set</Text>
+                        </Pressable>
+                      </View>
+
+                      {/* Superset Connecting Bridge between linked exercises */}
+                      {isLinkedWithNext ? (
+                        <View style={styles.supersetBridge}>
+                          <View style={styles.supersetBridgeLine} />
+                          <View style={styles.supersetBridgeBadge}>
+                            <Text style={styles.supersetBridgeText}>⚡ SUPERSET LINK</Text>
+                          </View>
+                          <View style={styles.supersetBridgeTrail} />
+                        </View>
+                      ) : null}
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* Bottom Action Row: + Add Exercise */}
+                <View style={styles.bottomExerciseActionRow}>
+                  <Pressable
+                    style={styles.addExerciseBlockBtn}
+                    onPress={handleAddExerciseBlock}
+                  >
+                    <Text style={styles.addExerciseBlockText}>+ Add Exercise</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          }
+
+          // CARDIO / SPORT / RECOVERY MODALITY SECTION
+          const modalityTarget: 'CARDIO' | 'SPORT' | 'RECOVERY' =
+            segmentCategory === 'SPORT'
+              ? 'SPORT'
+              : segmentCategory === 'RECOVERY'
+                ? 'RECOVERY'
+                : 'CARDIO';
+          const modalityCatalog =
+            modalityTarget === 'SPORT'
+              ? sportCatalog
+              : modalityTarget === 'RECOVERY'
+                ? recoveryCatalog
+                : pureCardioCatalog;
+          const activeModalityId =
+            selectedIdByModality[modalityTarget] ||
+            modalityCatalog[0]?.id ||
+            'outdoor_tempo_cycling';
+          const selectedModalityMeta =
+            modalityCatalog.find((c) => c.id === activeModalityId) ??
+            exercises.find((c) => c.id === activeModalityId) ??
+            modalityCatalog[0];
+          const firstConditioningModality = orderedSegments.find((s) => s !== 'GYM');
+          const entriesForModality = cardioEntries.filter((entry) => {
+            if (entry.workoutCategory) {
+              return entry.workoutCategory === modalityTarget;
+            }
+            const exMatch = exercises.find((e) => e.id === entry.exerciseId);
+            if (exMatch?.workoutCategory) {
+              return exMatch.workoutCategory === modalityTarget;
+            }
+            return firstConditioningModality === modalityTarget;
+          });
+
+          const sectionTitle =
+            modalityTarget === 'SPORT'
+              ? '🥊 SPORT TRAINING'
+              : modalityTarget === 'RECOVERY'
+                ? '🧘 ACTIVE RECOVERY & MOBILITY'
+                : '🏃 CARDIO TRAINING';
+
+          return (
+            <View key={`segment_${modalityTarget}`} style={styles.modalitySection}>
+              <View style={styles.sectionHeaderRow}>
+                <View style={styles.sectionHeadingGroup}>
+                  <Text style={styles.sectionHeading}>{sectionTitle}</Text>
+                  {orderedSegments.length > 1 && (
+                    <View style={styles.segmentMoveGroup}>
+                      <TouchableOpacity
+                        style={[
+                          styles.segmentMoveBtn,
+                          !canMoveSegUp && styles.reorderBtnDisabled,
+                        ]}
+                        disabled={!canMoveSegUp}
+                        onPress={() => handleMoveSegment(modalityTarget, -1)}
+                      >
+                        <Text style={styles.segmentMoveBtnText}>↑</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.segmentMoveBtn,
+                          !canMoveSegDown && styles.reorderBtnDisabled,
+                        ]}
+                        disabled={!canMoveSegDown}
+                        onPress={() => handleMoveSegment(modalityTarget, 1)}
+                      >
+                        <Text style={styles.segmentMoveBtnText}>↓</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.sectionCountMeta}>{entriesForModality.length} logged</Text>
               </View>
 
-              {/* Duration & HR Zone Controls */}
-              <View style={styles.cardioFormRow}>
-                <View style={styles.cardioInputGroup}>
-                  <Text style={styles.cardioInputLabel}>Duration (mins)</Text>
-                  <TextInput
-                    style={styles.cardioNumericInput}
-                    value={cardioMinutesStr}
-                    onChangeText={(val) => setCardioMinutesStr(val.replace(/[^0-9]/g, ''))}
-                    keyboardType="number-pad"
-                    placeholder="20"
-                    placeholderTextColor={CRIMSON_ONI.ashMuted}
-                  />
-                </View>
-
-                <View style={styles.cardioInputGroup}>
-                  <Text style={styles.cardioInputLabel}>Session RPE</Text>
+              <View style={styles.cardioCard}>
+                <View style={styles.cardioSelectHeader}>
+                  <Text style={styles.cardioLabel}>Activity:</Text>
                   <TouchableOpacity
-                    style={styles.cardioRpeBtn}
-                    onPress={() =>
-                      setRpeSliderTarget({
-                        mode: 'CARDIO',
-                        currentRpe: cardioRpe,
-                      })
-                    }
+                    style={styles.cardioBrowseBtn}
+                    onPress={() => setActiveModalityPickerTarget(modalityTarget)}
+                    activeOpacity={0.7}
                   >
-                    <Text style={styles.cardioRpeText}>{cardioRpe.toFixed(1)}</Text>
+                    <Text style={styles.cardioBrowseBtnText}>🔍 Browse / Add Modality</Text>
                   </TouchableOpacity>
                 </View>
 
-                <View style={styles.cardioInputGroup}>
-                  <Text style={styles.cardioInputLabel}>HR Zone</Text>
-                  <View style={styles.zoneRow}>
-                    {HR_ZONES.map((z) => (
-                      <Pressable
-                        key={z}
-                        style={[styles.zoneBtn, cardioZone === z && styles.zoneBtnActive]}
-                        onPress={() => setCardioZone(z)}
-                      >
-                        <Text
-                          style={[
-                            styles.zoneText,
-                            cardioZone === z && styles.zoneTextActive,
-                          ]}
+                <TouchableOpacity
+                  style={styles.cardioSelectedBanner}
+                  onPress={() => setActiveModalityPickerTarget(modalityTarget)}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardioSelectedName}>
+                      {selectedModalityMeta?.name ?? activeModalityId}
+                    </Text>
+                    <Text style={styles.cardioSelectedSub}>
+                      {selectedModalityMeta?.equipmentType || 'Activity'} • Tap to search or add custom
+                    </Text>
+                  </View>
+                  <Text style={styles.cardioSelectedChangeIcon}>🔍</Text>
+                </TouchableOpacity>
+
+                <View style={styles.cardioSelectRow}>
+                  <Text style={styles.cardioQuickLabel}>Quick:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+                    {modalityCatalog.slice(0, 10).map((c) => {
+                      const active = c.id === activeModalityId;
+                      return (
+                        <Pressable
+                          key={c.id}
+                          style={[styles.cardioPill, active && styles.cardioPillActive]}
+                          onPress={() => {
+                            setSelectedIdByModality((prev) => ({
+                              ...prev,
+                              [modalityTarget]: c.id,
+                            }));
+                            recordRecentActivity(c.id);
+                          }}
                         >
-                          Z{z}
-                        </Text>
-                      </Pressable>
-                    ))}
+                          <Text
+                            style={[
+                              styles.cardioPillText,
+                              active && styles.cardioPillTextActive,
+                            ]}
+                          >
+                            {c.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
+                {/* Duration & HR Zone Controls */}
+                <View style={styles.cardioFormRow}>
+                  <View style={styles.cardioInputGroup}>
+                    <Text style={styles.cardioInputLabel}>Duration (mins)</Text>
+                    <TextInput
+                      style={styles.cardioNumericInput}
+                      value={cardioMinutesStr}
+                      onChangeText={(val) => setCardioMinutesStr(val.replace(/[^0-9]/g, ''))}
+                      keyboardType="number-pad"
+                      placeholder="20"
+                      placeholderTextColor={CRIMSON_ONI.ashMuted}
+                    />
+                  </View>
+
+                  <View style={styles.cardioInputGroup}>
+                    <Text style={styles.cardioInputLabel}>Session RPE</Text>
+                    <View
+                      style={styles.cardioRpeBtn}
+                      onStartShouldSetResponder={() => true}
+                      onMoveShouldSetResponder={() => true}
+                      onResponderGrant={(e) => {
+                        rpeDragOriginRef.current = {
+                          startY: e.nativeEvent.pageY,
+                          startRpe: cardioRpe,
+                        };
+                        setRpeSliderTarget({
+                          mode: 'CARDIO',
+                          currentRpe: cardioRpe,
+                        });
+                      }}
+                      onResponderMove={(e) => {
+                        if (!rpeDragOriginRef.current) return;
+                        const deltaY = rpeDragOriginRef.current.startY - e.nativeEvent.pageY;
+                        const nextRpe = clampRpeStep(
+                          rpeDragOriginRef.current.startRpe + (deltaY / 180) * 4.0
+                        );
+                        setCardioRpe(nextRpe);
+                        setRpeSliderTarget((prev) =>
+                          prev ? { ...prev, currentRpe: nextRpe } : prev
+                        );
+                      }}
+                    >
+                      <Text style={styles.cardioRpeText}>{cardioRpe.toFixed(1)}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.cardioInputGroup}>
+                    <Text style={styles.cardioInputLabel}>HR Zone</Text>
+                    <View style={styles.zoneRow}>
+                      {HR_ZONES.map((z) => (
+                        <Pressable
+                          key={z}
+                          style={[styles.zoneBtn, cardioZone === z && styles.zoneBtnActive]}
+                          onPress={() => setCardioZone(z)}
+                        >
+                          <Text
+                            style={[
+                              styles.zoneText,
+                              cardioZone === z && styles.zoneTextActive,
+                            ]}
+                          >
+                            Z{z}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
                   </View>
                 </View>
+
+                <TouchableOpacity
+                  style={styles.addCardioBtn}
+                  onPress={() => handleAddCardioEntry(modalityTarget)}
+                >
+                  <Text style={styles.addCardioBtnText}>+ Log Segment</Text>
+                </TouchableOpacity>
               </View>
 
-              <TouchableOpacity
-                style={styles.addCardioBtn}
-                onPress={handleAddCardioEntry}
-              >
-                <Text style={styles.addCardioBtnText}>+ Log Segment</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Logged Non-Resistance Items */}
-            {cardioEntries.map((item) => (
-              <View key={item.id} style={styles.cardioEntryRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardioEntryName}>{item.exerciseName}</Text>
-                  <Text style={styles.cardioEntryMeta}>
-                    {Math.round(item.durationSeconds / 60)} mins • Zone {item.averageHrZone}
-                    {item.rpe ? ` • RPE ${item.rpe}` : ''}
-                  </Text>
+              {/* Logged Non-Resistance Items (Merged + Inline Steppers) */}
+              {entriesForModality.map((item) => (
+                <View key={item.id} style={styles.cardioEntryRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardioEntryName}>{item.exerciseName}</Text>
+                    <Text style={styles.cardioEntryMeta}>
+                      {Math.round(item.durationSeconds / 60)} mins • Zone {item.averageHrZone}
+                      {item.rpe ? ` • RPE ${item.rpe}` : ''}
+                    </Text>
+                  </View>
+                  <View style={styles.cardioEntryStepperRow}>
+                    <TouchableOpacity
+                      style={styles.cardioDurationStepBtn}
+                      onPress={() => handleAdjustCardioDuration(item.id, -300)}
+                    >
+                      <Text style={styles.cardioDurationStepText}>−5m</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.cardioDurationStepBtn}
+                      onPress={() => handleAdjustCardioDuration(item.id, 300)}
+                    >
+                      <Text style={styles.cardioDurationStepText}>+5m</Text>
+                    </TouchableOpacity>
+                    <Pressable onPress={() => handleRemoveCardioEntry(item.id)}>
+                      <Text style={styles.cardioEntryDelete}>✕</Text>
+                    </Pressable>
+                  </View>
                 </View>
-                <Pressable onPress={() => handleRemoveCardioEntry(item.id)}>
-                  <Text style={styles.cardioEntryDelete}>✕</Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        )}
+              ))}
+            </View>
+          );
+        })}
 
         {/* 8. Finish Workout Action Button */}
         <View style={styles.presetSaveContainer}>
@@ -2832,26 +3163,26 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 
       {/* 10. Cardio / Sport / Recovery Activity Picker Modal */}
       <ActivityPickerModal
-        visible={showCardioPicker}
-        onClose={() => setShowCardioPicker(false)}
+        visible={activeModalityPickerTarget !== null}
+        onClose={() => setActiveModalityPickerTarget(null)}
         onSelectExercise={(item) => {
-          setSelectedCardioId(item.id);
+          const target = activeModalityPickerTarget ?? 'CARDIO';
+          setSelectedIdByModality((prev) => ({
+            ...prev,
+            [target]: item.id,
+          }));
           recordRecentActivity(item.id);
         }}
-        currentExerciseId={selectedCardioId}
-        targetWorkoutCategory={
-          activeCategory === 'SPORT'
-            ? 'SPORT'
-            : activeCategory === 'RECOVERY'
-            ? 'RECOVERY'
-            : 'CARDIO'
+        currentExerciseId={
+          activeModalityPickerTarget ? selectedIdByModality[activeModalityPickerTarget] : null
         }
+        targetWorkoutCategory={activeModalityPickerTarget ?? 'CARDIO'}
         title={
-          activeCategory === 'SPORT'
+          activeModalityPickerTarget === 'SPORT'
             ? 'Select Sport Modality'
-            : activeCategory === 'RECOVERY'
-            ? 'Select Recovery & Mobility'
-            : 'Select Cardio Training'
+            : activeModalityPickerTarget === 'RECOVERY'
+              ? 'Select Recovery & Mobility'
+              : 'Select Cardio Training'
         }
       />
 
@@ -3771,6 +4102,114 @@ const styles = StyleSheet.create({
   addSetRowText: {
     color: '#C69A45',
     fontSize: 12,
+    fontWeight: '800',
+  },
+  segmentMoveGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  segmentMoveBtn: {
+    width: 22,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#4A4333',
+    backgroundColor: '#252119',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentMoveBtnText: {
+    color: '#FDE68A',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  swapExercisePill: {
+    backgroundColor: '#2D2316',
+    borderColor: '#C69A45',
+    borderWidth: 1,
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 8,
+  },
+  swapExercisePillText: {
+    color: '#FDE68A',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  blockActionMenuTrigger: {
+    width: 34,
+    height: 32,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4A4656',
+    backgroundColor: '#25232C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockActionMenuTriggerActive: {
+    backgroundColor: '#362A18',
+    borderColor: '#C69A45',
+  },
+  blockActionMenuTriggerText: {
+    color: '#E5E7EB',
+    fontSize: 16,
+    fontWeight: '900',
+    lineHeight: 18,
+  },
+  blockActionMenuTriggerTextActive: {
+    color: '#FDE68A',
+  },
+  blockActionMenuDrawer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    backgroundColor: '#16151B',
+    borderColor: '#34313E',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+  },
+  blockMenuActionPill: {
+    backgroundColor: '#24222D',
+    borderColor: '#433F52',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  blockMenuActionText: {
+    color: '#E5E7EB',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  blockMenuActionDanger: {
+    backgroundColor: '#2D1A1E',
+    borderColor: '#7F1D1D',
+  },
+  blockMenuActionDangerText: {
+    color: '#FCA5A5',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  cardioEntryStepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  cardioDurationStepBtn: {
+    backgroundColor: '#26232E',
+    borderColor: '#433F52',
+    borderWidth: 1,
+    borderRadius: 5,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  cardioDurationStepText: {
+    color: '#FDE68A',
+    fontSize: 10,
     fontWeight: '800',
   },
   supersetBridge: {

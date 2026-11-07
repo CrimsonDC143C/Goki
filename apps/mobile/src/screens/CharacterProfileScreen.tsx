@@ -829,14 +829,6 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             </Text>
           </Pressable>
 
-          <Pressable
-            style={styles.utilityBtn}
-            onPress={() => setBugReportModalVisible(true)}
-            testID="profile-open-bug-report-btn"
-          >
-            <Text style={styles.utilityBtnText}>🐛 Bug</Text>
-          </Pressable>
-
           {isDevToolsEnabled && (
             <Pressable
               style={[styles.utilityBtn, styles.utilityBtnGold]}

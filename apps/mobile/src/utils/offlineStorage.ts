@@ -40,6 +40,7 @@ export interface OfflineDraftCardioItem {
   exerciseId: string;
   exerciseName: string;
   activityType: string;
+  workoutCategory?: WorkoutCategory;
   durationSeconds: number;
   averageHrZone: HeartRateZone;
   rpe?: number | null;
@@ -52,6 +53,7 @@ export interface OfflineWorkoutDraft {
   gymName?: string | null;
   category?: WorkoutCategory;
   secondaryCategories?: WorkoutCategory[];
+  segmentOrder?: WorkoutCategory[];
   sourcePresetId?: string | null;
   sessionRpe?: number | null;
   exerciseBlocks: OfflineDraftExerciseBlock[];
@@ -141,7 +143,7 @@ let writeChain: Promise<void> = Promise.resolve();
 
 export function createDefaultOfflineDraft(
   nowMs: number = Date.now(),
-  category: WorkoutCategory = 'GYM',
+  category?: WorkoutCategory,
   sourcePresetId?: string | null
 ): OfflineWorkoutDraft {
   return {
@@ -149,6 +151,7 @@ export function createDefaultOfflineDraft(
     startedAtMs: nowMs,
     category,
     secondaryCategories: [],
+    segmentOrder: category ? [category] : [],
     sourcePresetId: sourcePresetId ?? null,
     exerciseBlocks:
       category === 'GYM'
@@ -171,44 +174,7 @@ export function createDefaultOfflineDraft(
             },
           ]
         : [],
-    cardioEntries:
-      category === 'CARDIO'
-        ? [
-            {
-              id: `cardio_${nowMs}_1`,
-              exerciseId: 'outdoor_cycling_tempo',
-              exerciseName: 'Outdoor Cycling - Tempo / Threshold',
-              activityType: 'CYCLING',
-              durationSeconds: 1800,
-              averageHrZone: 3,
-              rpe: 7.5,
-            },
-          ]
-        : category === 'SPORT'
-          ? [
-              {
-                id: `sport_${nowMs}_1`,
-                exerciseId: 'badminton_singles',
-                exerciseName: 'Badminton - Singles Match Play',
-                activityType: 'BADMINTON',
-                durationSeconds: 3600,
-                averageHrZone: 4,
-                rpe: 8.5,
-              },
-            ]
-          : category === 'RECOVERY'
-            ? [
-                {
-                  id: `recovery_${nowMs}_1`,
-                  exerciseId: 'foam_rolling_mobility',
-                  exerciseName: 'Full-Body Foam Rolling & Dynamic Mobility',
-                  activityType: 'RECOVERY',
-                  durationSeconds: 1200,
-                  averageHrZone: 1,
-                  rpe: 5,
-                },
-              ]
-            : [],
+    cardioEntries: [],
     notes: '',
   };
 }

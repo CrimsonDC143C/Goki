@@ -538,7 +538,7 @@ The Prisma schema (`packages/database/prisma/schema.prisma`) defines the persist
   * Provides an optional user note input, a **"Transmit Crash Scroll to Developers"** button, and a **"Reload & Resume"** button.
   * On application startup, checks for `@gymify_pending_crash_report` from prior sessions and displays a non-intrusive prompt allowing the athlete to transmit the crash scroll.
 * **`BugReportModal.tsx`:**
-  * Accessible from the top RPG Character HUD and the `CharacterProfileScreen` badge strip.
+  * Accessible from the single global `🐛` button in the top RPG Character HUD (`App.tsx`), eliminating duplicate bug buttons on `CharacterProfileScreen`.
   * Allows selecting categories (`Feature Suggestion`, `UI / Display`, `Workout Sync`, `Wearable Telemetry`, `Combat & Dungeon`, `Other`), entering titles and descriptions, and toggling diagnostic logs inclusion.
   * Dynamically pivots modal UI when **💡 Feature Suggestion** is selected: sets severity to `INFO`, adjusts placeholders for gameplay/mechanic proposals, and styles the submission button with a positive emerald theme.
   * Contains an expandable **"View Recent Logs & Telemetry"** accordion with a **"Copy JSON"** button allowing athletes and QA testers to inspect or export their diagnostic bundle directly.
@@ -591,4 +591,46 @@ Gymify RPG targets diverse deployment targets including Standalone Android APKs,
   * An ambient HUD pill (`UpdateBanner`) informs the athlete: `"✨ Update Downloaded — Will install after workout"`.
   * Athletes have the option to trigger `"Reload Now (Draft Saved)"`, which securely commits drafts before restarting.
   * When the session transitions to `Idle` or concludes `LootReview`, the update is automatically applied.
+
+---
+
+## 10. Mobile Walkthrough UI/UX Ergonomics & Dungeon Balance Architecture (`v0.2.0`)
+
+Following a live 5-minute mobile walkthrough audit of `v0.2.0`, 11 core workout ergonomics, RPG presentation, and dungeon balance improvements were engineered across `@gymify/game-engine` and `@gymify/mobile`:
+
+### A. Workout Logger Ergonomics & State Hygiene (`OfflineWorkoutScreen.tsx`, `WorkoutLoggerScreen.tsx`, `WorkoutCategoryGateway.tsx`)
+* **Discipline Selection Gateway Default (`category: undefined / null`):**
+  * Both Offline and Live Dungeon workout loggers default to the **Select Training Discipline** screen first rather than assuming `GYM` with an open resistance table underneath.
+  * Once a primary discipline is chosen, `WorkoutCategoryGateway` collapses into a compact 1-row segmented discipline switcher (`[🏋️ Gym] [🏃 Cardio] [🥊 Sport] [🧘 Recovery] [+ Segment] [📋 Presets]`) without expanding the 4-card wall inline above active tables.
+* **User-Reorderable Workout Segments (`segmentOrder`):**
+  * Multi-modality hybrid workouts maintain an explicit `segmentOrder: WorkoutCategory[]` array (`GYM`, `CARDIO`, `SPORT`, `RECOVERY`).
+  * Athletes can reorder active workout segments freely via the gateway strip or section header `↑` / `↓` controls instead of locking Resistance at the top and Conditioning beneath.
+* **Strict Modality Partitioning & Smart Duplicate Merge:**
+  * Non-resistance catalogs are strictly partitioned by `workoutCategory` (`pureCardioExercises`, `sportExercises`, `recoveryExercises`) with independent per-modality selection state so `CARDIO` defaults to cycling/running and never bleeds `SPORT` items (`Badminton`, `Boxing`).
+  * Logging an identical Activity + HR Zone + RPE automatically merges `durationSeconds` into the existing entry, and each logged row provides inline `−5m` / `+5m` duration steppers.
+* **Auto-Start Workout Clock & Stale Draft Reset:**
+  * Session clocks hold at `00:00` until the first set is checked (`completedSetCount > 0`), the first conditioning segment is logged (`cardioEntries.length > 0`), or `⚔️ Engage Boss` is pressed.
+  * Opening an empty offline draft automatically resets `startedAtMs` to `Date.now()` to prevent multi-hour runaway timers from stale draft timestamps.
+* **De-Cluttered Exercise Card Header + `⋯` Action Drawer:**
+  * Each exercise card header displays a high-contrast Exercise Title + gold `⇄ Swap` pill on the left and a single `⋯` menu button on the right that toggles a compact action bar (`↑ Move Up`, `↓ Move Down`, `🔗 Link Superset`, `🧮 Plates / Warm-Up`, `⚖️ Unit`, `🗑️ Remove`), keeping `+ Add Set` at the bottom.
+* **First-Press Instant-Drag RPE Slider (`RpeVerticalSliderModal.tsx`):**
+  * Pressing and dragging vertically on any set or session RPE pill immediately opens the RPE modal and adjusts the RPE value on the very first press.
+  * The vertical slider sits on the left column with the RPE readout, RIR tooltip, quick-tap scale buttons, and a **green `✓ Confirm RPE` button** (`#10B981`) beside it on the right; tapping either the green confirm button or off-focus on the backdrop confirms and closes.
+
+### B. 9:16 Sanctum Receipt Conditioning Ledger (`ShareableWorkoutReceiptModal.tsx` & `training-history-tracker.ts`)
+* **`cardioEntries` Persistence:** `CompletedWorkoutRecord` persists all logged `CompletedCardioEntry` items (`workoutCategory`, `durationSeconds`, `averageHrZone`, `rpe`).
+* **Smart Duration & Conditioning Telemetry:** Receipt duration resolves to `Math.max(workout.durationSeconds, totalCardioSeconds)`, renders all Cardio/Sport/Recovery entries (`🏃` / `🥊` / `🧘`) in the receipt ledger and plain-text share summary, and dynamically adapts the 4-cell Hero Telemetry Strip (`DURATION`, `CONDITIONING`, `SEGMENTS`, `AVG HR ZONE`) for pure conditioning sessions.
+
+### C. HUD, Guild Hall, Boss Portraits, Talent Tree & Auto-Battler Balance
+* **Cosmetic Top-Right Location Badge (`App.tsx`):** Converted the top-right HUD location badge into a non-interactive cosmetic indicator synced to the active tab (`🍺 Tavern`, `🛡️ Guild Hall`, `⛏️ Gathering Nodes`, `🏰 Dungeon`, `🐉 Raid Sanctum`), and consolidated Bug Reporting into the single global top-left `🐛` HUD button.
+* **Dynamic Guild Raid Hero Identity & Centered Boss Portrait Crops (`GuildHallScreen.tsx`, `SpriteAnimator.tsx`, `spriteManifest.ts`):**
+  * Guild Raid contribution rows bind `player_hero` to `${characterName} (You)` with gold highlighting.
+  * `SpriteSheetConfig` supports per-rig `portraitCrop` (`zoom`, `offsetX`, `offsetY`) so 48×48 and 56×56 boss portraits zoom and center on the head/upper torso of Ignisrax and Vaelgor.
+* **Inline Guild Bounty & Rank Trial Progress (`GuildHallScreen.tsx`):** Bounty and trial cards display live inline requirement pills (`🏋️ 1/3 Workouts`), progress bars, and a 3-state button (`🔒 X/Y` locked, `✨ Claim` glowing gold, `✓ Claimed` completed).
+* **Collapsible Talent Tree Combat Bonuses (`TalentBuilderScreen.tsx`):** Replaced the bottom `Aggregated Omni-Class Combat Profile` card and equipment link with a collapsible `📊 Bonuses ▾` pill in the top stat summary bar so the Talent Tree and Node Inspector fit cleanly on screen.
+* **Tier-1 Solo Dungeon Calibration, Partial Salvage & Crimson Defeat Modal (`auto-battler-sim.ts`, `AutoBattlerArena.tsx`, `GameContext.tsx`):**
+  * Rebalanced `DEFAULT_DUNGEON_CATALOG` so a solo hero with average stat level ~3 can clear Tier 1 (`Obsidian Catacombs`, `COPPER`) solo, scaling `IRON`–`GOLD` expeditions smoothly from that baseline.
+  * Pre-boss rooms award partial salvage (~21–32% of total gold + minor drops) even on a mid-expedition wipe, while >65% of expedition gold and major gear drops are gated behind defeating the Boss and claiming the final Reliquary chest.
+  * When an expedition ends in `WIPE` or `TIMEOUT`, `AutoBattlerArena` renders a distinct crimson defeat modal (`💀 EXPEDITION WIPED (Room X/Y)`, readiness tip, partial salvage summary, and `"🛡️ Retreat to Sanctum"` / `"📦 Recover Salvage & Retreat"`).
+
 

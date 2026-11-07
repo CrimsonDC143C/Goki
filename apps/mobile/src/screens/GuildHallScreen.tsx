@@ -21,11 +21,14 @@ const RANK_LADDER = [
 
 export const GuildHallScreen: React.FC = () => {
   const {
+    characterName,
+    stats,
     adventurerRank,
     adventurerReputation,
     guildName,
     guildReputation,
     workoutsLoggedCount,
+    lastGatheringDrop,
     bounties,
     raids,
     isLiveSyncConnected,
@@ -35,6 +38,61 @@ export const GuildHallScreen: React.FC = () => {
   } = useGame();
 
   const [notice, setNotice] = useState<string | null>(null);
+
+  const combinedStatLevel =
+    (stats?.STRENGTH?.level ?? 1) +
+    (stats?.ENDURANCE?.level ?? 1) +
+    (stats?.AGILITY?.level ?? 1);
+
+  const getBountyProgress = (slug: string, completed: boolean) => {
+    if (completed) {
+      return {
+        isReady: false,
+        progressPct: 100,
+        pills: ['✓ Completed'],
+        buttonLabel: '✓ Claimed',
+      };
+    }
+
+    if (slug === 'trial_of_iron') {
+      const doneWorkouts = Math.min(3, workoutsLoggedCount);
+      const isReady = workoutsLoggedCount >= 3;
+      const pct = Math.round((doneWorkouts / 3) * 100);
+      return {
+        isReady,
+        progressPct: pct,
+        pills: [`🏋️ ${doneWorkouts}/3 Workouts`],
+        buttonLabel: isReady ? '✨ Claim' : `🔒 ${doneWorkouts}/3`,
+      };
+    }
+
+    if (slug === 'trial_of_bronze') {
+      const hasIron = adventurerRank !== 'COPPER';
+      const statClamped = Math.min(15, combinedStatLevel);
+      const isReady = hasIron && combinedStatLevel >= 15;
+      const pct = Math.round((((hasIron ? 1 : 0) + statClamped / 15) / 2) * 100);
+      return {
+        isReady,
+        progressPct: pct,
+        pills: [
+          `${hasIron ? '✓' : '🔒'} IRON Rank`,
+          `⚡ ${statClamped}/15 Core Stats`,
+        ],
+        buttonLabel: isReady ? '✨ Claim' : `🔒 ${statClamped}/15`,
+      };
+    }
+
+    // Standard bounty (e.g., weekly_zone2_patrol)
+    const activityCount = workoutsLoggedCount + (lastGatheringDrop ? 1 : 0);
+    const done = Math.min(1, activityCount);
+    const isReady = done >= 1;
+    return {
+      isReady,
+      progressPct: isReady ? 100 : 0,
+      pills: [`🏃 ${done}/1 Workout or Gathering`],
+      buttonLabel: isReady ? '✨ Claim' : '🔒 0/1',
+    };
+  };
 
   // Subscribe to real-time WebSocket rooms for all active weekly raid bosses
   const raidRooms = useMemo(() => raids.map((r) => `raid:${r.id}`), [raids]);
@@ -74,33 +132,84 @@ export const GuildHallScreen: React.FC = () => {
 
       {/* Guild Bounties & Rank-Up Trials */}
       <Text style={styles.sectionTitle}>Guild Bounties & Rank-Up Trials</Text>
-      {bounties.map((b) => (
-        <View key={b.slug} style={styles.bountyCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.bountyTitle}>
-              {b.isRankUpTrial ? '🏅 ' : '📜 '}
-              {b.title}
-            </Text>
-            <Text style={styles.bountyDesc}>{b.description}</Text>
-            <Text style={styles.rewardMeta}>
-              +{b.goldReward} Gold • +{b.reputationReward} Guild Reputation
-            </Text>
-          </View>
-          <Pressable
-            style={[styles.claimBtn, b.completed && styles.claimBtnDone]}
-            disabled={b.completed}
-            onPress={() => {
-              const res = completeGuildBounty(b.slug);
-              if (!res.ok) setNotice(res.error ?? null);
-              else setNotice(`Completed '${b.title}'!`);
-            }}
+      {bounties.map((b) => {
+        const prog = getBountyProgress(b.slug, b.completed);
+        return (
+          <View
+            key={b.slug}
+            style={[
+              styles.bountyCard,
+              prog.isReady && !b.completed && styles.bountyCardReady,
+            ]}
           >
-            <Text style={[styles.claimBtnText, b.completed && styles.claimBtnTextDone]}>
-              {b.completed ? 'Claimed' : 'Complete'}
-            </Text>
-          </Pressable>
-        </View>
-      ))}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bountyTitle}>
+                {b.isRankUpTrial ? '🏅 ' : '📜 '}
+                {b.title}
+              </Text>
+              <Text style={styles.bountyDesc}>{b.description}</Text>
+
+              {/* Inline Progress Bar & Requirement Pills */}
+              <View style={styles.bountyProgressRow}>
+                {prog.pills.map((pill) => (
+                  <View
+                    key={pill}
+                    style={[
+                      styles.bountyProgressPill,
+                      (b.completed || prog.isReady) && styles.bountyProgressPillReady,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.bountyProgressPillText,
+                        (b.completed || prog.isReady) && styles.bountyProgressPillTextReady,
+                      ]}
+                    >
+                      {pill}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.bountyProgressTrack}>
+                <View
+                  style={[
+                    styles.bountyProgressFill,
+                    { width: `${prog.progressPct}%` },
+                    b.completed && styles.bountyProgressFillDone,
+                  ]}
+                />
+              </View>
+
+              <Text style={styles.rewardMeta}>
+                +{b.goldReward} Gold • +{b.reputationReward} Guild Reputation
+              </Text>
+            </View>
+            <Pressable
+              style={[
+                styles.claimBtn,
+                !prog.isReady && !b.completed && styles.claimBtnLocked,
+                b.completed && styles.claimBtnDone,
+              ]}
+              disabled={b.completed || !prog.isReady}
+              onPress={() => {
+                const res = completeGuildBounty(b.slug);
+                if (!res.ok) setNotice(res.error ?? null);
+                else setNotice(`Completed '${b.title}'!`);
+              }}
+            >
+              <Text
+                style={[
+                  styles.claimBtnText,
+                  !prog.isReady && !b.completed && styles.claimBtnTextLocked,
+                  b.completed && styles.claimBtnTextDone,
+                ]}
+              >
+                {prog.buttonLabel}
+              </Text>
+            </Pressable>
+          </View>
+        );
+      })}
 
       {/* Social Guild Banner */}
       <View style={styles.sectionHeaderRow}>
@@ -180,9 +289,20 @@ export const GuildHallScreen: React.FC = () => {
               {raid.participants.map((p) => {
                 const total =
                   p.combatDamageDealt + p.workoutEnergyDamage + p.supportScore;
+                const isPlayerHero = p.characterId === 'player_hero';
+                const displayName = isPlayerHero
+                  ? `${characterName || 'Hero'} (You)`
+                  : p.name;
                 return (
                   <View key={p.characterId} style={styles.contribRow}>
-                    <Text style={styles.contribName}>{p.name}</Text>
+                    <Text
+                      style={[
+                        styles.contribName,
+                        isPlayerHero && styles.contribNameYou,
+                      ]}
+                    >
+                      {displayName}
+                    </Text>
                     <Text style={styles.contribVal}>
                       {total.toLocaleString()} pts (⚡ {p.workoutEnergyDamage.toLocaleString()}{' '}
                       workout)
@@ -384,6 +504,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     gap: 10,
   },
+  bountyCardReady: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(253, 230, 138, 0.05)',
+  },
   bountyTitle: {
     color: COLORS.textPrimary,
     fontSize: 13,
@@ -394,23 +518,75 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 2,
   },
+  bountyProgressRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  bountyProgressPill: {
+    backgroundColor: COLORS.bgDeep,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  bountyProgressPillReady: {
+    borderColor: COLORS.gold,
+    backgroundColor: COLORS.goldDim,
+  },
+  bountyProgressPillText: {
+    color: COLORS.textSecondary,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  bountyProgressPillTextReady: {
+    color: COLORS.gold,
+  },
+  bountyProgressTrack: {
+    height: 5,
+    backgroundColor: COLORS.bgDeep,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 6,
+  },
+  bountyProgressFill: {
+    height: '100%',
+    backgroundColor: COLORS.gold,
+    borderRadius: 4,
+  },
+  bountyProgressFillDone: {
+    backgroundColor: COLORS.success,
+  },
   rewardMeta: {
     color: COLORS.gold,
     fontSize: 11,
     fontWeight: '700',
-    marginTop: 4,
+    marginTop: 5,
   },
   claimBtn: {
     backgroundColor: COLORS.gold,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 7,
+    minWidth: 78,
+    alignItems: 'center',
+  },
+  claimBtnLocked: {
+    backgroundColor: '#18181B',
+    borderColor: '#3F3F46',
+    borderWidth: 1,
   },
   claimBtnDone: {
     backgroundColor: '#1E293B',
     borderColor: '#334155',
     borderWidth: 1,
     opacity: 1,
+  },
+  claimBtnTextLocked: {
+    color: '#A1A1AA',
+    fontWeight: '700',
   },
   claimBtnTextDone: {
     color: '#A1A1AA',
@@ -419,6 +595,10 @@ const styles = StyleSheet.create({
   claimBtnText: {
     color: COLORS.bgDeep,
     fontSize: 11,
+    fontWeight: '800',
+  },
+  contribNameYou: {
+    color: COLORS.gold,
     fontWeight: '800',
   },
   guildHeaderCard: {

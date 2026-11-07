@@ -24,6 +24,16 @@ export interface CompletedExerciseEntry {
   sets: CompletedSetEntry[];
 }
 
+export interface CompletedCardioEntry {
+  exerciseId: string;
+  exerciseName: string;
+  activityType?: string;
+  workoutCategory?: WorkoutCategory;
+  durationSeconds: number;
+  averageHrZone?: number;
+  rpe?: number | null;
+}
+
 export interface CompletedWorkoutRecord {
   id: string;
   /** Silent identifier attaching the historical workout to the character it was completed on. */
@@ -39,6 +49,7 @@ export interface CompletedWorkoutRecord {
   workoutType?: string;
   presetName?: string | null;
   exercises: CompletedExerciseEntry[];
+  cardioEntries?: CompletedCardioEntry[];
 }
 
 export interface TrainingHistoryMatrixColumn {

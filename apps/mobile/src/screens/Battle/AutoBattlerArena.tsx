@@ -1562,7 +1562,15 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
             onRequestClose={() => setFanfareModalVisible(false)}
           >
             <View style={styles.fanfareModalBackdrop}>
-              <View style={styles.fanfareModalCard}>
+              <View
+                style={[
+                  styles.fanfareModalCard,
+                  replay.outcome !== 'VICTORY' && {
+                    borderColor: '#DC2626',
+                    backgroundColor: '#160F13',
+                  },
+                ]}
+              >
                 <Pressable
                   style={styles.fanfareCloseCornerBtn}
                   onPress={() => setFanfareModalVisible(false)}
@@ -1572,25 +1580,105 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                   <Text style={styles.fanfareCloseCornerBtnText}>✕</Text>
                 </Pressable>
 
-                <SvgXml
-                  xml={LOOT_CHEST_SVGS.MYTHIC}
-                  width={96}
-                  height={80}
-                  style={styles.fanfareChestSvg}
-                />
+                {replay.outcome === 'VICTORY' ? (
+                  <SvgXml
+                    xml={LOOT_CHEST_SVGS.MYTHIC}
+                    width={96}
+                    height={80}
+                    style={styles.fanfareChestSvg}
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: 68,
+                      height: 68,
+                      borderRadius: 34,
+                      backgroundColor: 'rgba(220, 38, 38, 0.16)',
+                      borderWidth: 1.5,
+                      borderColor: '#EF4444',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginBottom: 8,
+                    }}
+                  >
+                    <Text style={{ fontSize: 32 }}>💀</Text>
+                  </View>
+                )}
 
-                <Text style={styles.fanfareOutcome}>
-                  {replay.outcome === 'VICTORY' ? '🏆 EXPEDITION VICTORY' : 'EXPEDITION COMPLETE'}
+                <Text
+                  style={[
+                    styles.fanfareOutcome,
+                    replay.outcome !== 'VICTORY' && { color: '#F87171' },
+                  ]}
+                >
+                  {replay.outcome === 'VICTORY'
+                    ? '🏆 EXPEDITION VICTORY'
+                    : replay.outcome === 'TIMEOUT'
+                      ? `⏳ EXPEDITION TIMED OUT (Room ${Math.min(
+                          replay.totalRooms,
+                          replay.roomsCleared + 1
+                        )}/${replay.totalRooms})`
+                      : `💀 EXPEDITION WIPED (Room ${Math.min(
+                          replay.totalRooms,
+                          replay.roomsCleared + 1
+                        )}/${replay.totalRooms})`}
                 </Text>
                 <Text style={styles.fanfareDungeonName}>{dungeon.dungeonName}</Text>
 
-                <View style={styles.fanfareGoldPill}>
-                  <Text style={styles.fanfareGoldText}>+{replay.totalGoldEarned} Gold</Text>
-                </View>
+                {replay.outcome !== 'VICTORY' && (
+                  <View
+                    style={{
+                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(239, 68, 68, 0.35)',
+                      borderRadius: 8,
+                      paddingHorizontal: 10,
+                      paddingVertical: 7,
+                      marginTop: 6,
+                      marginBottom: 4,
+                      width: '100%',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: '#FCA5A5',
+                        fontSize: 11,
+                        fontWeight: '600',
+                        textAlign: 'center',
+                      }}
+                    >
+                      💡 Log real-world workouts for Live Combat Buffs, upgrade armaments, or
+                      recruit Guild allies to overcome the Boss.
+                    </Text>
+                  </View>
+                )}
+
+                {(replay.outcome === 'VICTORY' || replay.totalGoldEarned > 0) && (
+                  <View
+                    style={[
+                      styles.fanfareGoldPill,
+                      replay.outcome !== 'VICTORY' && {
+                        borderColor: '#9CA3AF',
+                        backgroundColor: 'rgba(156, 163, 175, 0.12)',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.fanfareGoldText,
+                        replay.outcome !== 'VICTORY' && { color: '#E5E7EB' },
+                      ]}
+                    >
+                      +{replay.totalGoldEarned} {replay.outcome === 'VICTORY' ? 'Gold' : 'Salvaged Gold'}
+                    </Text>
+                  </View>
+                )}
 
                 <View style={styles.fanfareSectionHeader}>
                   <Text style={styles.fanfareSectionTitle}>
-                    EXPEDITION SPOILS ({revealedIndices.length}/{replay.lootDrops.length})
+                    {replay.outcome === 'VICTORY'
+                      ? `EXPEDITION SPOILS (${revealedIndices.length}/${replay.lootDrops.length})`
+                      : `PARTIAL DELVE SALVAGE (${replay.roomsCleared}/${replay.totalRooms} ROOMS CLEARED)`}
                   </Text>
                   {replay.lootDrops.length > 1 && revealedIndices.length < replay.lootDrops.length && (
                     <Pressable
@@ -1605,7 +1693,11 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
 
                 {replay.lootDrops.length === 0 ? (
                   <Text style={styles.fanfareEmptySpoils}>
-                    No item spoils recovered on this delve.
+                    {replay.outcome === 'VICTORY'
+                      ? 'No item spoils recovered on this delve.'
+                      : replay.roomsCleared === 0
+                        ? 'Fell in Room 1 before securing any room salvage. Defeat the Boss to unlock major expedition spoils!'
+                        : 'No item salvage dropped in cleared rooms. Defeat the Boss to unlock 65%+ of expedition rewards!'}
                   </Text>
                 ) : (
                   <ScrollView
@@ -1740,15 +1832,31 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                 )}
 
                 <Pressable
-                  style={styles.fanfareClaimBtn}
+                  style={[
+                    styles.fanfareClaimBtn,
+                    replay.outcome !== 'VICTORY' && {
+                      backgroundColor: '#27272A',
+                      borderWidth: 1,
+                      borderColor: '#EF4444',
+                    },
+                  ]}
                   onPress={() => {
                     setFanfareModalVisible(false);
                     onDismiss?.();
                   }}
                   testID="claim-expedition-spoils-btn"
                 >
-                  <Text style={styles.fanfareClaimBtnText}>
-                    ✨ Claim Spoils & Complete Expedition
+                  <Text
+                    style={[
+                      styles.fanfareClaimBtnText,
+                      replay.outcome !== 'VICTORY' && { color: '#FCA5A5' },
+                    ]}
+                  >
+                    {replay.outcome === 'VICTORY'
+                      ? '✨ Claim Spoils & Complete Expedition'
+                      : replay.roomsCleared > 0
+                        ? '📦 Recover Salvage & Retreat'
+                        : '🛡️ Retreat to Sanctum'}
                   </Text>
                 </Pressable>
               </View>
