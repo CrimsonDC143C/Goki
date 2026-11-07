@@ -116,7 +116,7 @@ export const ExerciseStickyNoteRow: React.FC<ExerciseStickyNoteRowProps> = ({
         activeOpacity={0.7}
       >
         <Text style={styles.emptyPinText} numberOfLines={1}>
-          📌 + Add {isSpecificGym ? `${shortGymLabel} ` : ''}setup note (seat, cable pin, cues)
+          📌 Gym-Specific Notes (seat height, pin placement, cues...)
         </Text>
       </TouchableOpacity>
     );

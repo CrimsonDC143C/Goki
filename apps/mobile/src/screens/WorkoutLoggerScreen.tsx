@@ -61,6 +61,7 @@ import {
 } from '../components/MetricInfoTooltipModal';
 import { PlatesAndWarmupModal } from '../components/PlatesAndWarmupModal';
 import { ExerciseStickyNoteRow } from '../components/ExerciseStickyNoteRow';
+import { RpeVerticalSliderModal } from '../components/RpeVerticalSliderModal';
 import { ShareableWorkoutReceiptModal } from '../components/ShareableWorkoutReceiptModal';
 import { TrainingHistoryScreen } from './TrainingHistoryScreen';
 import { useGame, ExerciseCatalogItem } from '../state/GameContext';
@@ -361,6 +362,11 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   const [editingPresetDraft, setEditingPresetDraft] = useState<WorkoutPresetDefinition | null>(null);
   const [presetSavedInSession, setPresetSavedInSession] = useState<boolean>(false);
   const [platesModalBlockId, setPlatesModalBlockId] = useState<string | null>(null);
+  const [rpeSliderTarget, setRpeSliderTarget] = useState<
+    | { mode: 'SET'; blockId: string; setId: string; currentRpe: number; subtitle?: string }
+    | { mode: 'CARDIO'; currentRpe: number }
+    | null
+  >(null);
   const [tooltipState, setTooltipState] = useState<{
     key: TrainingMetricTooltipKey;
     headline?: string | null;
@@ -826,15 +832,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
-  const handleCycleSetRpe = (
-    blockId: string,
-    setId: string,
-    currentRpe: number | null | undefined
-  ) => {
-    const effective = currentRpe ?? 8.0;
-    const nextIdx = (RPE_OPTIONS.indexOf(effective as 8.0) + 1) % RPE_OPTIONS.length;
-    const nextRpe = RPE_OPTIONS[nextIdx] ?? 8.0;
-
+  const handleSetRpeValue = (blockId: string, setId: string, nextRpe: number) => {
     setExerciseBlocks((prev) =>
       prev.map((b) =>
         b.blockId === blockId
@@ -2561,10 +2559,22 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                             selectTextOnFocus
                           />
 
-                          {/* Cycling RPE Pill */}
+                          {/* RPE Pill (opens vertical RPE slider) */}
                           <TouchableOpacity
                             style={styles.rpePillBtn}
-                            onPress={() => handleCycleSetRpe(block.blockId, row.id, row.rpe)}
+                            onPress={() =>
+                              setRpeSliderTarget({
+                                mode: 'SET',
+                                blockId: block.blockId,
+                                setId: row.id,
+                                currentRpe: row.rpe ?? ghostRow?.rpe ?? 8.5,
+                                subtitle: `${
+                                  exercises.find((e) => e.id === block.exerciseId)?.name ??
+                                  block.exerciseName ??
+                                  'Exercise'
+                                } • Set ${displayCode}`,
+                              })
+                            }
                           >
                             <Text style={styles.rpePillText}>
                               {row.rpe ? `${row.rpe}` : '8.5'}
@@ -2729,11 +2739,12 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                   <Text style={styles.cardioInputLabel}>Session RPE</Text>
                   <TouchableOpacity
                     style={styles.cardioRpeBtn}
-                    onPress={() => {
-                      const idx =
-                        (RPE_OPTIONS.indexOf(cardioRpe as 7.5) + 1) % RPE_OPTIONS.length;
-                      setCardioRpe(RPE_OPTIONS[idx] ?? 7.5);
-                    }}
+                    onPress={() =>
+                      setRpeSliderTarget({
+                        mode: 'CARDIO',
+                        currentRpe: cardioRpe,
+                      })
+                    }
                   >
                     <Text style={styles.cardioRpeText}>{cardioRpe.toFixed(1)}</Text>
                   </TouchableOpacity>
@@ -2999,6 +3010,26 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         contextualHeadline={tooltipState?.headline ?? null}
         contextualNote={tooltipState?.note ?? null}
         onClose={() => setTooltipState(null)}
+      />
+
+      {/* 17. Vertical RPE Slider Modal */}
+      <RpeVerticalSliderModal
+        visible={rpeSliderTarget !== null}
+        initialRpe={rpeSliderTarget?.currentRpe ?? 8.5}
+        subtitle={
+          rpeSliderTarget?.mode === 'CARDIO'
+            ? 'Adjust Cardio Session RPE'
+            : rpeSliderTarget?.subtitle
+        }
+        onSelectRpe={(nextRpe) => {
+          if (!rpeSliderTarget) return;
+          if (rpeSliderTarget.mode === 'SET') {
+            handleSetRpeValue(rpeSliderTarget.blockId, rpeSliderTarget.setId, nextRpe);
+          } else {
+            setCardioRpe(nextRpe);
+          }
+        }}
+        onClose={() => setRpeSliderTarget(null)}
       />
 
       {renderShareableReceiptModal()}
