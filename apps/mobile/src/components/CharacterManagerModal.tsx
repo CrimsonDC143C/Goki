@@ -319,7 +319,6 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
           <Text style={[styles.presetTitle, { color: selectedPreset.accentColor }]}>
             {selectedPreset.title}
           </Text>
-          <Text style={styles.presetSubtitle}>{selectedPreset.subtitle}</Text>
         </View>
       </View>
 
