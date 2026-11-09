@@ -39,7 +39,7 @@ const BAR_PRESETS: readonly { barKg: number; labelKg: string; labelLbs: string }
   { barKg: 20, labelKg: '20kg Bar', labelLbs: '45lb Bar' },
   { barKg: 15, labelKg: '15kg Bar', labelLbs: '35lb Bar' },
   { barKg: 10, labelKg: '10kg EZ/Smith', labelLbs: '25lb EZ/Smith' },
-  { barKg: 0, labelKg: '0kg Landmine/Pin', labelLbs: '0lb Landmine/Pin' },
+  { barKg: 0, labelKg: '0kg Landmine/Peg', labelLbs: '0lb Landmine/Peg' },
 ];
 
 const WARMUP_COUNT_OPTIONS: readonly {
@@ -98,9 +98,9 @@ export const PlatesAndWarmupModal: React.FC<PlatesAndWarmupModalProps> = ({
         workingWeightKg: effectiveTargetKg,
         presetCount: warmupPresetCount,
         unit,
-        barWeightKg,
+        barWeightKg: 0,
       }),
-    [barWeightKg, effectiveTargetKg, unit, warmupPresetCount]
+    [effectiveTargetKg, unit, warmupPresetCount]
   );
 
   const unitSuffix = unit === 'LBS' ? 'lb' : 'kg';
@@ -115,7 +115,7 @@ export const PlatesAndWarmupModal: React.FC<PlatesAndWarmupModalProps> = ({
           <View style={styles.headerRow}>
             <View style={{ flex: 1, marginRight: 8 }}>
               <Text style={styles.eyebrow}>
-                {mode === 'WARMUP' ? '🌡️ WARM-UP SETS' : '🧮 BARBELL PLATES VISUALIZER'}
+                {mode === 'WARMUP' ? '🌡️ WARM-UP SETS' : '🧮 PLATES VISUALIZER'}
               </Text>
               <Text style={styles.title} numberOfLines={1}>
                 {exerciseName}
@@ -126,7 +126,7 @@ export const PlatesAndWarmupModal: React.FC<PlatesAndWarmupModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          {/* Working Target Weight Input + Bar Selector */}
+          {/* Working Target Weight Input */}
           <View style={styles.targetRow}>
             <Text style={styles.targetLabel}>Working Set Target ({unit}):</Text>
             <TextInput
@@ -140,23 +140,25 @@ export const PlatesAndWarmupModal: React.FC<PlatesAndWarmupModalProps> = ({
             />
           </View>
 
-          <View style={styles.barSelectorRow}>
-            {BAR_PRESETS.map((bp) => {
-              const active = Math.abs(barWeightKg - bp.barKg) < 0.5;
-              return (
-                <TouchableOpacity
-                  key={bp.barKg}
-                  style={[styles.barPill, active && styles.barPillActive]}
-                  onPress={() => onSelectBarWeightKg(bp.barKg)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[styles.barPillText, active && styles.barPillTextActive]}>
-                    {unit === 'LBS' ? bp.labelLbs : bp.labelKg}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          {mode === 'PLATES' && (
+            <View style={styles.barSelectorRow}>
+              {BAR_PRESETS.map((bp) => {
+                const active = Math.abs(barWeightKg - bp.barKg) < 0.5;
+                return (
+                  <TouchableOpacity
+                    key={bp.barKg}
+                    style={[styles.barPill, active && styles.barPillActive]}
+                    onPress={() => onSelectBarWeightKg(bp.barKg)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.barPillText, active && styles.barPillTextActive]}>
+                      {unit === 'LBS' ? bp.labelLbs : bp.labelKg}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
 
           {/* Mode 1: Visual Plate Loader */}
           {mode === 'PLATES' && (

@@ -36,12 +36,17 @@ import {
   GeneratedWarmupSet,
   TrainingMetricTooltipKey,
   WeightUnit,
+  calculateBarbellPlatesPerSide,
   calculateProgressiveOverloadTarget,
+  classifyExercisePlateBehavior,
   convertDisplayWeightToKg,
   convertKgToDisplayWeight,
   formatCleanWeightNumber,
   formatCompactPrevPill,
   isWarmupSetType,
+  resolveActiveSetTargetWeightKg,
+  resolveExerciseDefaultBarWeightKg,
+  resolveExerciseMachineLoadMode,
   resolveExerciseWeightUnit,
   resolveGhostRowForSetOrder,
   resolvePreviousExerciseSessionSets,
@@ -255,6 +260,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     saveExerciseStickyNote,
     saveExerciseWeightUnit,
     saveExerciseBarWeightKg,
+    saveExerciseMachineLoadMode,
     defaultWeightUnit,
     warmupPresetCount,
     setWarmupPresetCount,
@@ -2730,6 +2736,39 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                     unit: blockUnit,
                   });
 
+                  const exerciseDisplayName =
+                    exMeta?.name ?? block.exerciseName ?? block.exerciseId;
+                  const plateCategory = classifyExercisePlateBehavior({
+                    exerciseId: block.exerciseId,
+                    exerciseName: exerciseDisplayName,
+                    equipmentType: exMeta?.equipmentType,
+                  });
+                  const machineLoadMode = resolveExerciseMachineLoadMode(
+                    exerciseGymPreferences,
+                    block.exerciseId,
+                    activeGymId
+                  );
+                  const effectiveBarKg = resolveExerciseDefaultBarWeightKg({
+                    prefs: exerciseGymPreferences,
+                    exerciseId: block.exerciseId,
+                    exerciseName: exerciseDisplayName,
+                    equipmentType: exMeta?.equipmentType,
+                  });
+                  const activeSetTarget = resolveActiveSetTargetWeightKg({
+                    sets: block.sets,
+                    prevLookup,
+                    unit: blockUnit,
+                    fallbackWeightKg: 0,
+                  });
+                  const inlinePlatePlan =
+                    plateCategory === 'MACHINE_STACK' && machineLoadMode === 'CABLE_STACK'
+                      ? null
+                      : calculateBarbellPlatesPerSide({
+                          targetWeightKg: activeSetTarget.targetWeightKg,
+                          barWeightKg: effectiveBarKg,
+                          unit: blockUnit,
+                        });
+
                   const isMenuOpen = openBlockMenuId === block.blockId;
                   const isBlockDragged = draggingBlockId === block.blockId;
                   let workingOrderCounter = 0;
@@ -2956,17 +2995,119 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                           ) : null}
 
                           <View style={styles.ergonomicsRightTools}>
-                            <TouchableOpacity
-                              style={styles.platesHelperBtn}
-                              onPress={() =>
-                                setPlatesModalTarget({ blockId: block.blockId, mode: 'PLATES' })
-                              }
-                              activeOpacity={0.75}
-                            >
-                              <Text style={styles.platesHelperBtnText}>
-                                🧮 Barbell Plates Visualizer
-                              </Text>
-                            </TouchableOpacity>
+                            {/* Live Inline Plate Visualization (Synced to Next Uncompleted Set) */}
+                            <View style={styles.inlinePlateVisContainer}>
+                              {plateCategory === 'MACHINE_STACK' &&
+                              machineLoadMode === 'CABLE_STACK' ? (
+                                <View style={styles.inlinePlateNaBadge}>
+                                  <Text style={styles.inlinePlateNaText}>N/A</Text>
+                                </View>
+                              ) : inlinePlatePlan && inlinePlatePlan.plates.length > 0 ? (
+                                <View style={styles.inlinePlateRackRow}>
+                                  <View style={styles.inlineBarSleeveStub} />
+                                  {inlinePlatePlan.plates
+                                    .flatMap((item, pIdx) =>
+                                      Array.from({ length: Math.min(item.count, 5) }).map(
+                                        (_, cIdx) => ({
+                                          key: `${pIdx}_${cIdx}`,
+                                          plateWeight: item.plateWeight,
+                                          colorHex: item.colorHex,
+                                        })
+                                      )
+                                    )
+                                    .slice(0, 6)
+                                    .map((chip) => {
+                                      const isLightText =
+                                        chip.colorHex === '#F8FAFC' ||
+                                        chip.colorHex === '#EAB308';
+                                      return (
+                                        <View
+                                          key={chip.key}
+                                          style={[
+                                            styles.inlinePlateChip,
+                                            {
+                                              backgroundColor: chip.colorHex,
+                                              height: Math.max(
+                                                18,
+                                                Math.min(25, 15 + chip.plateWeight * 0.22)
+                                              ),
+                                            },
+                                          ]}
+                                        >
+                                          <Text
+                                            style={[
+                                              styles.inlinePlateChipText,
+                                              isLightText && { color: '#111827' },
+                                            ]}
+                                          >
+                                            {formatCleanWeightNumber(chip.plateWeight)}
+                                          </Text>
+                                        </View>
+                                      );
+                                    })}
+                                </View>
+                              ) : (
+                                <View style={styles.inlinePlateEmptyBadge}>
+                                  <Text style={styles.inlinePlateEmptyText}>
+                                    {inlinePlatePlan && inlinePlatePlan.barDisplayWeight > 0
+                                      ? `${formatCleanWeightNumber(
+                                          inlinePlatePlan.barDisplayWeight
+                                        )}${blockUnit === 'LBS' ? 'lb' : 'kg'} Bar`
+                                      : `0${blockUnit === 'LBS' ? 'lb' : 'kg'}`}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+
+                            {plateCategory === 'MACHINE_STACK' ? (
+                              <TouchableOpacity
+                                style={[
+                                  styles.platesHelperBtn,
+                                  machineLoadMode === 'PLATE_LOADED'
+                                    ? styles.platesHelperBtnPlateLoaded
+                                    : styles.platesHelperBtnCableStack,
+                                ]}
+                                onPress={() => {
+                                  const nextMode =
+                                    machineLoadMode === 'CABLE_STACK'
+                                      ? 'PLATE_LOADED'
+                                      : 'CABLE_STACK';
+                                  saveExerciseMachineLoadMode?.({
+                                    exerciseId: block.exerciseId,
+                                    mode: nextMode,
+                                    activeGymId,
+                                    activeGymName,
+                                  });
+                                  triggerSensoryCue('SET_MICRO_REWARD_TICK');
+                                }}
+                                activeOpacity={0.75}
+                              >
+                                <Text
+                                  style={[
+                                    styles.platesHelperBtnText,
+                                    machineLoadMode === 'PLATE_LOADED'
+                                      ? styles.platesHelperBtnTextPlateLoaded
+                                      : styles.platesHelperBtnTextCableStack,
+                                  ]}
+                                >
+                                  {machineLoadMode === 'PLATE_LOADED'
+                                    ? '🏋️ Plate-Loaded'
+                                    : '⚙️ Cable Stack'}
+                                </Text>
+                              </TouchableOpacity>
+                            ) : (
+                              <TouchableOpacity
+                                style={styles.platesHelperBtn}
+                                onPress={() =>
+                                  setPlatesModalTarget({ blockId: block.blockId, mode: 'PLATES' })
+                                }
+                                activeOpacity={0.75}
+                              >
+                                <Text style={styles.platesHelperBtnText}>
+                                  🧮 Plates Visualizer
+                                </Text>
+                              </TouchableOpacity>
+                            )}
 
                             <TouchableOpacity
                               style={styles.warmupHelperBtn}
@@ -3641,28 +3782,24 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         if (!targetBlk) return null;
         const bUnit = resolveBlockUnit(targetBlk);
         const exMeta = exercises.find((e) => e.id === targetBlk.exerciseId);
-        const firstWorkRow = targetBlk.sets.find(
-          (s) => !isWarmupSetType(s.setType, s.isWarmup) && Number(s.weightKgStr) > 0
-        );
         const prevLookup = resolvePreviousExerciseSessionSets({
           exerciseId: targetBlk.exerciseId,
           workoutHistory,
           activeGymId,
         });
-        const initialWorkingKg = firstWorkRow
-          ? convertDisplayWeightToKg(Number(firstWorkRow.weightKgStr) || 0, bUnit)
-          : prevLookup.workingSets[0]?.weightKg ?? 60;
-
-        const savedBarKg = exerciseGymPreferences[targetBlk.exerciseId]?.barWeightKg;
-        const eqSlug = `${exMeta?.equipmentType || ''} ${targetBlk.exerciseId}`.toLowerCase();
-        const defaultBarKg =
-          savedBarKg !== undefined
-            ? savedBarKg
-            : eqSlug.includes('landmine')
-              ? 0
-              : eqSlug.includes('smith')
-                ? 10
-                : 20;
+        const activeTarget = resolveActiveSetTargetWeightKg({
+          sets: targetBlk.sets,
+          prevLookup,
+          unit: bUnit,
+          fallbackWeightKg: 60,
+        });
+        const initialWorkingKg = activeTarget.targetWeightKg;
+        const defaultBarKg = resolveExerciseDefaultBarWeightKg({
+          prefs: exerciseGymPreferences,
+          exerciseId: targetBlk.exerciseId,
+          exerciseName: exMeta?.name ?? targetBlk.exerciseName ?? targetBlk.exerciseId,
+          equipmentType: exMeta?.equipmentType,
+        });
 
         return (
           <PlatesAndWarmupModal
@@ -4214,12 +4351,10 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   ergonomicsStrip: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
     gap: 6,
-    marginBottom: 8,
+    marginTop: 2,
+    marginBottom: 10,
   },
   overloadPillGroup: {
     flexDirection: 'row',
@@ -4233,7 +4368,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
     flexShrink: 1,
   },
   overloadTargetPillCrit: {
@@ -4246,36 +4381,130 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   ergonomicsRightTools: {
+    width: '100%',
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 5,
-    marginLeft: 'auto',
+    justifyContent: 'flex-end',
+    gap: 6,
+    minHeight: 34,
+    paddingVertical: 2,
+  },
+  inlinePlateVisContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 2,
+  },
+  inlinePlateRackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2.5,
+    backgroundColor: '#16151C',
+    borderColor: '#32303F',
+    borderWidth: 1,
+    borderRadius: 7,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    minHeight: 30,
+  },
+  inlineBarSleeveStub: {
+    width: 7,
+    height: 5,
+    borderRadius: 1.5,
+    backgroundColor: '#94A3B8',
+    marginRight: 1,
+  },
+  inlinePlateChip: {
+    minWidth: 18,
+    paddingHorizontal: 3.5,
+    borderRadius: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.35)',
+  },
+  inlinePlateChipText: {
+    color: '#FFFFFF',
+    fontSize: 8.5,
+    fontWeight: '900',
+  },
+  inlinePlateNaBadge: {
+    backgroundColor: '#1B1A22',
+    borderColor: '#3B3848',
+    borderWidth: 1,
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    minHeight: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inlinePlateNaText: {
+    color: '#6B7280',
+    fontSize: 9.5,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  inlinePlateEmptyBadge: {
+    backgroundColor: '#181720',
+    borderColor: '#353242',
+    borderWidth: 1,
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    minHeight: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inlinePlateEmptyText: {
+    color: '#9CA3AF',
+    fontSize: 9.5,
+    fontWeight: '800',
   },
   platesHelperBtn: {
     backgroundColor: '#1D2430',
     borderColor: '#38BDF8',
     borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    borderRadius: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    minHeight: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  platesHelperBtnCableStack: {
+    backgroundColor: '#1F1E28',
+    borderColor: '#64748B',
+  },
+  platesHelperBtnPlateLoaded: {
+    backgroundColor: '#182A24',
+    borderColor: '#10B981',
   },
   platesHelperBtnText: {
     color: '#7DD3FC',
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: '800',
+  },
+  platesHelperBtnTextCableStack: {
+    color: '#CBD5E1',
+  },
+  platesHelperBtnTextPlateLoaded: {
+    color: '#6EE7B7',
   },
   warmupHelperBtn: {
     backgroundColor: '#292014',
     borderColor: '#F59E0B',
     borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    borderRadius: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    minHeight: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   warmupHelperBtnText: {
     color: '#FDE68A',
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: '800',
   },
   sectionHeaderRightGroup: {
@@ -4300,10 +4529,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#24222F',
     borderColor: '#4A4658',
     borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
-    minWidth: 34,
+    borderRadius: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minWidth: 36,
+    minHeight: 30,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   unitTogglePillImperial: {

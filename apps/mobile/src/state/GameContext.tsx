@@ -102,6 +102,7 @@ import {
   proceduralItemToLootDrop,
   aggregateEquippedItemModifiers,
   ExerciseGymPreferenceMap,
+  MachineLoadMode,
   WarmupPresetCount,
   WeightUnit,
   convertDisplayWeightToKg,
@@ -110,6 +111,7 @@ import {
   normalizeGymId,
   resolveExerciseWeightUnit,
   upsertExerciseBarWeightKg,
+  upsertExerciseMachineLoadMode,
   upsertExerciseStickyNote,
   upsertExerciseWeightUnit,
 } from '@gymify/game-engine';
@@ -517,6 +519,12 @@ interface GameContextValue {
     activeGymName?: string | null;
   }) => void;
   saveExerciseBarWeightKg: (exerciseId: string, barWeightKg: number) => void;
+  saveExerciseMachineLoadMode?: (params: {
+    exerciseId: string;
+    mode: MachineLoadMode;
+    activeGymId?: string | null;
+    activeGymName?: string | null;
+  }) => void;
   defaultWeightUnit: WeightUnit;
   setDefaultWeightUnit: (unit: WeightUnit) => void;
   warmupPresetCount: WarmupPresetCount;
@@ -1277,6 +1285,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const saveExerciseBarWeightKg = useCallback(
     (exerciseId: string, barWeightKg: number) => {
       const next = upsertExerciseBarWeightKg(exerciseGymPrefsRef.current, exerciseId, barWeightKg);
+      exerciseGymPrefsRef.current = next;
+      setExerciseGymPreferences(next);
+      persistBundleSnapshot({ exerciseGymPreferences: next });
+    },
+    [persistBundleSnapshot]
+  );
+
+  const saveExerciseMachineLoadMode = useCallback(
+    (params: {
+      exerciseId: string;
+      mode: MachineLoadMode;
+      activeGymId?: string | null;
+      activeGymName?: string | null;
+    }) => {
+      const next = upsertExerciseMachineLoadMode(exerciseGymPrefsRef.current, params);
       exerciseGymPrefsRef.current = next;
       setExerciseGymPreferences(next);
       persistBundleSnapshot({ exerciseGymPreferences: next });
@@ -5444,6 +5467,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveExerciseStickyNote,
     saveExerciseWeightUnit,
     saveExerciseBarWeightKg,
+    saveExerciseMachineLoadMode,
     defaultWeightUnit,
     setDefaultWeightUnit,
     warmupPresetCount,

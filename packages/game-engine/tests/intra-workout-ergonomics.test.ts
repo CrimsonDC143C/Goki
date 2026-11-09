@@ -4,6 +4,7 @@ import {
   calculateBarbellPlatesPerSide,
   calculateProgressiveOverloadTarget,
   calculateWeeklyMuscleVolumeLandmarks,
+  classifyExercisePlateBehavior,
   convertDisplayWeightToKg,
   convertKgToDisplayWeight,
   formatCompactPrevPill,
@@ -11,10 +12,14 @@ import {
   kgToLbs,
   lbsToKg,
   normalizeGymId,
+  resolveActiveSetTargetWeightKg,
+  resolveExerciseDefaultBarWeightKg,
+  resolveExerciseMachineLoadMode,
   resolveExerciseStickyNote,
   resolveExerciseWeightUnit,
   resolveGhostRowForSetOrder,
   resolvePreviousExerciseSessionSets,
+  upsertExerciseMachineLoadMode,
   upsertExerciseStickyNote,
   upsertExerciseWeightUnit,
   CompletedWorkoutRecord,
@@ -293,5 +298,100 @@ describe('intra-workout-ergonomics engine', () => {
     expect(chest.weeklyWorkingSets).toBe(11);
     expect(chest.zone).toBe('OPTIMAL_MAV');
     expect(TRAINING_METRIC_TOOLTIPS.MEV_MAV_MRV.title).toContain('MEV / MAV / MRV');
+  });
+
+  it('classifies MULTI_BAR vs MACHINE_STACK exercises, persists machine load toggles per gym, and tracks the next uncompleted set weight', () => {
+    expect(
+      classifyExercisePlateBehavior({
+        exerciseId: 'bench_press',
+        exerciseName: 'Barbell Bench Press',
+        equipmentType: 'BARBELL',
+      })
+    ).toBe('MULTI_BAR');
+
+    expect(
+      classifyExercisePlateBehavior({
+        exerciseId: 'smith_incline_bench_press',
+        exerciseName: 'Smith Machine Incline Bench Press',
+        equipmentType: 'SMITH_MACHINE',
+      })
+    ).toBe('MULTI_BAR');
+
+    expect(
+      classifyExercisePlateBehavior({
+        exerciseId: 'dual_cable_lat_pulldown',
+        exerciseName: 'Dual Cable Lat Pulldown',
+        equipmentType: 'DUAL_CABLE',
+      })
+    ).toBe('MACHINE_STACK');
+
+    expect(
+      classifyExercisePlateBehavior({
+        exerciseId: 'machine_chest_press',
+        exerciseName: 'Machine Chest Press',
+        equipmentType: 'MACHINE',
+      })
+    ).toBe('MACHINE_STACK');
+
+    let prefs = upsertExerciseMachineLoadMode(undefined, {
+      exerciseId: 'machine_chest_press',
+      mode: 'PLATE_LOADED',
+      activeGymId: 'gym_iron_sanctum',
+    });
+    expect(resolveExerciseMachineLoadMode(prefs, 'machine_chest_press', 'iron-sanctum')).toBe(
+      'PLATE_LOADED'
+    );
+    prefs = upsertExerciseMachineLoadMode(prefs, {
+      exerciseId: 'machine_chest_press',
+      mode: 'CABLE_STACK',
+      activeGymId: 'iron-sanctum',
+    });
+    expect(resolveExerciseMachineLoadMode(prefs, 'machine_chest_press', 'iron-sanctum')).toBe(
+      'CABLE_STACK'
+    );
+
+    expect(
+      resolveExerciseDefaultBarWeightKg({
+        exerciseId: 'machine_chest_press',
+        exerciseName: 'Machine Chest Press',
+        equipmentType: 'MACHINE',
+      })
+    ).toBe(0);
+    expect(
+      resolveExerciseDefaultBarWeightKg({
+        exerciseId: 'smith_incline_bench_press',
+        exerciseName: 'Smith Machine Incline Bench Press',
+        equipmentType: 'SMITH_MACHINE',
+      })
+    ).toBe(10);
+
+    const prevLookup = resolvePreviousExerciseSessionSets({
+      exerciseId: 'bench_press',
+      workoutHistory: [],
+    });
+
+    // Set 1 is uncompleted (135 lb), Set 2 is uncompleted (185 lb) => targets Set 1 (135 lb)
+    const activeBeforeSet1 = resolveActiveSetTargetWeightKg({
+      sets: [
+        { weightKgStr: '135', completed: false, setType: 'NORMAL' },
+        { weightKgStr: '185', completed: false, setType: 'NORMAL' },
+      ],
+      prevLookup,
+      unit: 'LBS',
+    });
+    expect(activeBeforeSet1.targetSetIndex).toBe(0);
+    expect(activeBeforeSet1.targetDisplayWeight).toBe(135);
+
+    // Once Set 1 is checked off, automatically advances to Set 2 (185 lb)
+    const activeAfterSet1 = resolveActiveSetTargetWeightKg({
+      sets: [
+        { weightKgStr: '135', completed: true, setType: 'NORMAL' },
+        { weightKgStr: '185', completed: false, setType: 'NORMAL' },
+      ],
+      prevLookup,
+      unit: 'LBS',
+    });
+    expect(activeAfterSet1.targetSetIndex).toBe(1);
+    expect(activeAfterSet1.targetDisplayWeight).toBe(185);
   });
 });

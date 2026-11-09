@@ -123,6 +123,9 @@ export function formatCompactPrevPill(params: {
 // 2. GYM-AWARE STICKY NOTES & PER-EXERCISE UNIT PREFERENCES
 // ============================================================================
 
+export type ExercisePlateBehaviorCategory = 'MULTI_BAR' | 'MACHINE_STACK';
+export type MachineLoadMode = 'CABLE_STACK' | 'PLATE_LOADED';
+
 export interface ExerciseGymPreference {
   exerciseId: string;
   /** Default note used when at an unknown gym or Open World */
@@ -137,6 +140,10 @@ export interface ExerciseGymPreference {
   unitByGymId?: Record<string, WeightUnit>;
   /** Remembered bar weight in kg for plate math on this exercise */
   barWeightKg?: number;
+  /** Preferred machine loading mode ('CABLE_STACK' | 'PLATE_LOADED') across all locations */
+  preferredMachineLoadMode?: MachineLoadMode;
+  /** Gym-specific machine loading mode override (e.g. Cable Stack vs. Plate-Loaded) */
+  machineLoadModeByGymId?: Record<string, MachineLoadMode>;
 }
 
 export type ExerciseGymPreferenceMap = Record<string, ExerciseGymPreference>;
@@ -385,6 +392,170 @@ export function upsertExerciseBarWeightKg(
   };
 }
 
+/**
+ * Classifies whether an exercise uses a multi-bar setup (Barbell / EZ-Bar / Smith / Landmine)
+ * that opens the `Plates Visualizer` bar-selector modal, or a Machine / Cable / Weight-Stack
+ * setup that acts as a direct 1-tap toggle (`⚙️ Cable Stack` ⇄ `🏋️ Plate-Loaded`).
+ */
+export function classifyExercisePlateBehavior(params: {
+  exerciseId?: string;
+  exerciseName?: string;
+  equipmentType?: string;
+}): ExercisePlateBehaviorCategory {
+  const eqUpper = (params.equipmentType || '').trim().toUpperCase();
+  const textLower = `${params.exerciseId || ''} ${params.exerciseName || ''}`.trim().toLowerCase();
+
+  // Explicit multi-bar keywords in exercise name/slug take priority (e.g. "Barbell Hack Squat", "Smith Machine ...", "EZ-Bar ...", "Landmine ...")
+  if (
+    textLower.includes('barbell') ||
+    textLower.includes('ez-bar') ||
+    textLower.includes('ez bar') ||
+    textLower.includes('curl bar') ||
+    textLower.includes('smith') ||
+    textLower.includes('landmine') ||
+    textLower.includes('trap bar') ||
+    textLower.includes('hex bar') ||
+    textLower.includes('safety bar') ||
+    textLower.includes('swiss bar') ||
+    textLower.includes('cambered bar') ||
+    textLower.includes('axle')
+  ) {
+    return 'MULTI_BAR';
+  }
+
+  if (
+    eqUpper === 'BARBELL' ||
+    eqUpper === 'SMITH_MACHINE' ||
+    eqUpper === 'LANDMINE'
+  ) {
+    return 'MULTI_BAR';
+  }
+
+  if (
+    eqUpper === 'MACHINE' ||
+    eqUpper === 'DUAL_CABLE' ||
+    eqUpper === 'CABLE' ||
+    eqUpper.includes('CABLE') ||
+    eqUpper.includes('MACHINE') ||
+    eqUpper === 'SLED'
+  ) {
+    return 'MACHINE_STACK';
+  }
+
+  if (
+    textLower.includes('cable') ||
+    textLower.includes('machine') ||
+    textLower.includes('pulldown') ||
+    textLower.includes('pull-down') ||
+    textLower.includes('pec deck') ||
+    textLower.includes('leg press') ||
+    textLower.includes('leg extension') ||
+    textLower.includes('leg curl') ||
+    textLower.includes('hamstring curl') ||
+    textLower.includes('hack squat') ||
+    textLower.includes('pendulum') ||
+    textLower.includes('belt squat') ||
+    textLower.includes('pushdown') ||
+    textLower.includes('pressdown') ||
+    textLower.includes('pulley') ||
+    textLower.includes('pin stack') ||
+    textLower.includes('weight stack') ||
+    textLower.includes('plate-loaded') ||
+    textLower.includes('plate loaded')
+  ) {
+    return 'MACHINE_STACK';
+  }
+
+  return 'MULTI_BAR';
+}
+
+/**
+ * Resolves the active machine loading mode ('CABLE_STACK' | 'PLATE_LOADED') for a machine/cable
+ * exercise at the current gym, defaulting to 'CABLE_STACK'.
+ */
+export function resolveExerciseMachineLoadMode(
+  prefs: ExerciseGymPreferenceMap | undefined,
+  exerciseId: string,
+  activeGymId?: string | null,
+  defaultMode: MachineLoadMode = 'CABLE_STACK'
+): MachineLoadMode {
+  const entry = prefs?.[exerciseId];
+  if (!entry) return defaultMode;
+  const normGymId = normalizeGymId(activeGymId);
+  if (normGymId && entry.machineLoadModeByGymId?.[normGymId]) {
+    return entry.machineLoadModeByGymId[normGymId]!;
+  }
+  return entry.preferredMachineLoadMode ?? defaultMode;
+}
+
+/**
+ * Immutably updates the machine loading mode ('CABLE_STACK' | 'PLATE_LOADED') for `[exerciseId + activeGymId]`.
+ */
+export function upsertExerciseMachineLoadMode(
+  prefs: ExerciseGymPreferenceMap | undefined,
+  params: {
+    exerciseId: string;
+    mode: MachineLoadMode;
+    activeGymId?: string | null;
+    activeGymName?: string | null;
+  }
+): ExerciseGymPreferenceMap {
+  const base = prefs ?? {};
+  const existing: ExerciseGymPreference = base[params.exerciseId] ?? {
+    exerciseId: params.exerciseId,
+  };
+  const normGymId = normalizeGymId(params.activeGymId);
+  const nextModeByGym = { ...(existing.machineLoadModeByGymId ?? {}) };
+  const nextGymNames = { ...(existing.gymNamesById ?? {}) };
+
+  if (normGymId && normGymId !== 'open-world') {
+    nextModeByGym[normGymId] = params.mode;
+    if (params.activeGymName?.trim()) {
+      nextGymNames[normGymId] = params.activeGymName.trim();
+    }
+  }
+
+  return {
+    ...base,
+    [params.exerciseId]: {
+      ...existing,
+      preferredMachineLoadMode: params.mode,
+      machineLoadModeByGymId: nextModeByGym,
+      gymNamesById: nextGymNames,
+    },
+  };
+}
+
+/**
+ * Resolves the effective bar weight in kg for plate calculations on an exercise.
+ * - Machine / Cable exercises in `PLATE_LOADED` mode use 0kg (direct plate loadout).
+ * - Multi-Bar exercises use the user's saved bar weight if present, or infer 0kg (Landmine),
+ *   10kg (Smith / EZ-Bar), or 20kg (Standard Olympic Barbell).
+ */
+export function resolveExerciseDefaultBarWeightKg(params: {
+  prefs?: ExerciseGymPreferenceMap;
+  exerciseId: string;
+  exerciseName?: string;
+  equipmentType?: string;
+}): number {
+  const category = classifyExercisePlateBehavior(params);
+  if (category === 'MACHINE_STACK') {
+    return 0;
+  }
+  const savedBarKg = params.prefs?.[params.exerciseId]?.barWeightKg;
+  if (savedBarKg !== undefined) {
+    return savedBarKg;
+  }
+  const slug = `${params.equipmentType || ''} ${params.exerciseId} ${params.exerciseName || ''}`
+    .trim()
+    .toLowerCase();
+  if (slug.includes('landmine')) return 0;
+  if (slug.includes('smith') || slug.includes('ez-bar') || slug.includes('ez bar') || slug.includes('curl bar')) {
+    return 10;
+  }
+  return 20;
+}
+
 // ============================================================================
 // 3. GYM-AWARE PER-SET `PREV` LOOKUP & 1-TAP GHOST FILL RESOLUTION
 // ============================================================================
@@ -579,6 +750,98 @@ export function resolveGhostRowForSetOrder(params: {
   // Extrapolate bonus working sets from the final working set of last session
   const last = pool[pool.length - 1]!;
   return { ...last, isExtrapolated: true };
+}
+
+export interface ActiveSetTargetLookupRow {
+  weightKgStr?: string;
+  completed?: boolean;
+  setType?: SetType;
+  isWarmup?: boolean;
+}
+
+export interface ResolvedActiveSetTarget {
+  /** 0-based index of the active target set in the block */
+  targetSetIndex: number;
+  /** Whether the targeted row is a warm-up set */
+  isWarmup: boolean;
+  /** Resolved target weight in canonical kilograms */
+  targetWeightKg: number;
+  /** Resolved target weight in the block's display unit */
+  targetDisplayWeight: number;
+}
+
+/**
+ * Resolves the target weight for the next uncompleted set in an exercise card:
+ * 1. Finds the first set row that has NOT been marked as completed (`!row.completed`),
+ *    falling back to the final set row if all sets are checked off.
+ * 2. Uses that row's entered weight (`weightKgStr`), or its ghost/placeholder weight
+ *    from `prevLookup` if not yet typed, falling back to any nearby non-zero row weight or `fallbackWeightKg`.
+ */
+export function resolveActiveSetTargetWeightKg(params: {
+  sets: readonly ActiveSetTargetLookupRow[];
+  prevLookup: PreviousExerciseSessionLookup;
+  unit: WeightUnit;
+  fallbackWeightKg?: number;
+}): ResolvedActiveSetTarget {
+  const { sets, prevLookup, unit, fallbackWeightKg = 0 } = params;
+  if (!sets || sets.length === 0) {
+    const safeFallback = Math.max(0, fallbackWeightKg);
+    return {
+      targetSetIndex: 0,
+      isWarmup: false,
+      targetWeightKg: safeFallback,
+      targetDisplayWeight: convertKgToDisplayWeight(safeFallback, unit),
+    };
+  }
+
+  let workingOrderCounter = 0;
+  let warmupOrderCounter = 0;
+
+  const resolvedRows = sets.map((row, idx) => {
+    const rowSetType: SetType = row.setType || (row.isWarmup ? 'WARMUP' : 'NORMAL');
+    const isWu = isWarmupSetType(rowSetType, row.isWarmup);
+    const wIdx = workingOrderCounter;
+    const wuIdx = warmupOrderCounter;
+    if (isWu) warmupOrderCounter += 1;
+    else workingOrderCounter += 1;
+
+    const ghostRow = resolveGhostRowForSetOrder({
+      lookup: prevLookup,
+      setType: rowSetType,
+      isWarmup: row.isWarmup,
+      workingOrderIndex: wIdx,
+      warmupOrderIndex: wuIdx,
+    });
+
+    const trimmed = (row.weightKgStr ?? '').trim();
+    const typedVal = Number(trimmed);
+    const hasTyped = trimmed.length > 0 && Number.isFinite(typedVal) && typedVal > 0;
+    const typedKg = hasTyped ? convertDisplayWeightToKg(typedVal, unit) : 0;
+    const ghostKg = ghostRow && ghostRow.weightKg > 0 ? ghostRow.weightKg : 0;
+
+    return {
+      idx,
+      completed: Boolean(row.completed),
+      isWarmup: isWu,
+      weightKg: typedKg > 0 ? typedKg : ghostKg,
+    };
+  });
+
+  const firstUncompleted = resolvedRows.find((r) => !r.completed);
+  const chosen = firstUncompleted ?? resolvedRows[resolvedRows.length - 1]!;
+
+  let effectiveKg = chosen.weightKg;
+  if (effectiveKg <= 0) {
+    const anyNonZero = resolvedRows.find((r) => r.weightKg > 0);
+    effectiveKg = anyNonZero ? anyNonZero.weightKg : Math.max(0, fallbackWeightKg);
+  }
+
+  return {
+    targetSetIndex: chosen.idx,
+    isWarmup: chosen.isWarmup,
+    targetWeightKg: effectiveKg,
+    targetDisplayWeight: convertKgToDisplayWeight(effectiveKg, unit),
+  };
 }
 
 // ============================================================================
