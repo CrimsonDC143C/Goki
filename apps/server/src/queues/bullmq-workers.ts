@@ -1,4 +1,4 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import {

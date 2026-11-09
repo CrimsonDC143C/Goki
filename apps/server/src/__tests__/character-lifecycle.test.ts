@@ -1,4 +1,4 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import { describe, expect, it } from 'vitest';
 import { buildServerApp } from '../app';
 import { SOFT_DELETE_RETENTION_MS } from '../routes/characters';
@@ -11,7 +11,7 @@ describe('Character Lifecycle & Restoration API', () => {
     const memoryTalentUnlocks: any[] = [];
     const testUser = {
       id: 'user_hero_123',
-      email: 'warlord@gymify.io',
+      email: 'warlord@gokirpg.com',
       username: 'warlord',
     };
 

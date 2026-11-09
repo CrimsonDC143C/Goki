@@ -22,7 +22,7 @@ import {
   xpRequiredForStatLevel,
   ITEM_TIER_CONFIG,
   ItemTier,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
 import { AttributeRadarChart } from '../components/AttributeRadarChart';
 import { BugReportModal } from '../components/BugReportModal';
@@ -318,9 +318,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
       : [];
     return (
       configuredAdmins.includes(email) ||
-      email === 'admin@gymify.rpg' ||
-      email === 'dev@gymify.rpg' ||
-      email.endsWith('@gymify.rpg')
+      email === 'admin@gokirpg.com' ||
+      email === 'dev@gokirpg.com' ||
+      email.endsWith('@gokirpg.com')
     );
   }, [currentUser?.email]);
 

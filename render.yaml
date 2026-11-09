@@ -1,22 +1,22 @@
 services:
   # Fastify Node API Web Service (Render Pro Workspace - Paid Always-On Instance)
   - type: web
-    name: gymify-server
+    name: goki-server
     runtime: node
     plan: starter
     buildCommand: npm install --include=dev && npx prisma generate --schema=./packages/database/prisma/schema.prisma && npm run build
-    startCommand: npx prisma db push --schema=./packages/database/prisma/schema.prisma && npm start --workspace=@gymify/server
+    startCommand: npx prisma db push --schema=./packages/database/prisma/schema.prisma && npm start --workspace=@goki/server
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
         fromDatabase:
-          name: gymify-postgres
+          name: goki-postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
           type: redis
-          name: gymify-redis
+          name: goki-redis
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
@@ -37,14 +37,14 @@ services:
 
   # Managed Redis 7 instance for BullMQ background workers and timers (Render Pro - Paid Always-On)
   - type: redis
-    name: gymify-redis
+    name: goki-redis
     plan: starter
     maxmemoryPolicy: noeviction
     ipAllowList: []
 
 databases:
   # Managed PostgreSQL 16 Database (Render Pro - Paid Always-On)
-  - name: gymify-postgres
-    databaseName: gymify_rpg
-    user: gymify
+  - name: goki-postgres
+    databaseName: goki
+    user: goki
     plan: basic-256mb

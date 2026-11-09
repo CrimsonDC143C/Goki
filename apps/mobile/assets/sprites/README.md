@@ -1,4 +1,4 @@
-# Gymify 2D Sprite Assets Directory
+# Goki 2D Sprite Assets Directory
 
 This directory holds drop-in 2D character portraits, combat sprites, item icons, and encounter artwork (`.png`, `.webp`, `.svg`).
 

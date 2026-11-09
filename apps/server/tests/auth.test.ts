@@ -1,9 +1,9 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import bcrypt from 'bcryptjs';
 import { describe, expect, it } from 'vitest';
 import { buildServerApp } from '../src/app';
 
-describe('@gymify/server JWT Authentication & Password Hashing', () => {
+describe('@goki/server JWT Authentication & Password Hashing', () => {
   it('registers a user, hashes password, and returns a signed JWT', async () => {
     const memoryUsers: any[] = [];
     const memoryCharacters: any[] = [];
@@ -58,7 +58,7 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
       method: 'POST',
       url: '/api/auth/register',
       payload: {
-        email: 'valkyrie@gymify.rpg',
+        email: 'valkyrie@gokirpg.com',
         username: 'valkyrie_warrior',
         password: 'securePassword123',
         characterName: 'Valkyrie the Bold',
@@ -69,7 +69,7 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
     const regData = regRes.json();
     expect(regData.token).toBeDefined();
     expect(typeof regData.token).toBe('string');
-    expect(regData.user.email).toBe('valkyrie@gymify.rpg');
+    expect(regData.user.email).toBe('valkyrie@gokirpg.com');
     expect(regData.user.username).toBe('valkyrie_warrior');
     expect(regData.character.name).toBe('Valkyrie the Bold');
 
@@ -82,7 +82,7 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
       method: 'POST',
       url: '/api/auth/register',
       payload: {
-        email: 'valkyrie@gymify.rpg',
+        email: 'valkyrie@gokirpg.com',
         username: 'valkyrie_warrior_different',
         password: 'securePassword123',
       },
@@ -108,7 +108,7 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
     const passwordHash = bcrypt.hashSync('correctHorseBattery99', 10);
     const storedUser = {
       id: 'user_horse_1',
-      email: 'horse@gymify.rpg',
+      email: 'horse@gokirpg.com',
       username: 'horse_rider',
       passwordHash,
       timezone: 'UTC',
@@ -150,7 +150,7 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
       method: 'POST',
       url: '/api/auth/login',
       payload: {
-        email: 'horse@gymify.rpg',
+        email: 'horse@gokirpg.com',
         password: 'wrongPassword',
       },
     });
@@ -162,7 +162,7 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
       method: 'POST',
       url: '/api/auth/login',
       payload: {
-        email: 'unknown@gymify.rpg',
+        email: 'unknown@gokirpg.com',
         password: 'correctHorseBattery99',
       },
     });
@@ -173,14 +173,14 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
       method: 'POST',
       url: '/api/auth/login',
       payload: {
-        email: 'horse@gymify.rpg',
+        email: 'horse@gokirpg.com',
         password: 'correctHorseBattery99',
       },
     });
     expect(loginRes.statusCode).toBe(200);
     const loginData = loginRes.json();
     expect(loginData.token).toBeDefined();
-    expect(loginData.user.email).toBe('horse@gymify.rpg');
+    expect(loginData.user.email).toBe('horse@gokirpg.com');
     expect(loginData.character.name).toBe('Shadowfax');
     expect(storedUser.lastLoginAt).not.toBeNull();
 
@@ -223,7 +223,7 @@ describe('@gymify/server JWT Authentication & Password Hashing', () => {
     const memoryCharacters: any[] = [];
     const testUser = {
       id: 'user_twomode_1',
-      email: 'dual@gymify.rpg',
+      email: 'dual@gokirpg.com',
       username: 'dual_champion',
       passwordHash: 'dummyHash',
       timezone: 'UTC',

@@ -2,7 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { HolisticStatType, StatType, isIntraWorkoutFocusLocked } from '@gymify/game-engine';
+import { HolisticStatType, StatType, isIntraWorkoutFocusLocked } from '@goki/game-engine';
 import { BugReportModal } from './src/components/BugReportModal';
 import { CharacterPortraitFrame } from './src/components/CharacterPortraitFrame';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -486,6 +486,40 @@ const AppRouter: React.FC = () => {
 };
 
 export default function App() {
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const doc = (globalThis as unknown as {
+        document?: {
+          title: string;
+          head?: { appendChild: (el: unknown) => void };
+          querySelector?: (sel: string) => { setAttribute: (k: string, v: string) => void } | null;
+          createElement?: (tag: string) => { setAttribute: (k: string, v: string) => void };
+        };
+      }).document;
+      if (doc) {
+        doc.title = 'Goki: Fitness RPG';
+        const upsertMeta = (attr: 'name' | 'property', key: string, content: string) => {
+          const existing = doc.querySelector?.(`meta[${attr}="${key}"]`);
+          if (existing) {
+            existing.setAttribute('content', content);
+          } else if (doc.createElement && doc.head) {
+            const meta = doc.createElement('meta');
+            meta.setAttribute(attr, key);
+            meta.setAttribute('content', content);
+            doc.head.appendChild(meta);
+          }
+        };
+        upsertMeta(
+          'name',
+          'description',
+          'Goki: Fitness RPG — Turn real-world workouts into holistic 7-stat character progression, boss raids, and hardware-verified Ironman rewards.'
+        );
+        upsertMeta('property', 'og:title', 'Goki: Fitness RPG');
+        upsertMeta('property', 'og:site_name', 'Goki');
+      }
+    }
+  }, []);
+
   return (
     <SafeAreaProvider>
       <ErrorBoundary>

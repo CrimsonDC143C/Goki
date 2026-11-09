@@ -1,4 +1,4 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 

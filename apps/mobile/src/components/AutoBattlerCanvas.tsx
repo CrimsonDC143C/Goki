@@ -1,5 +1,5 @@
 import React from 'react';
-import type { DungeonCombatReplayResult, DungeonDefinition } from '@gymify/game-engine';
+import type { DungeonCombatReplayResult, DungeonDefinition } from '@goki/game-engine';
 import { AutoBattlerArena } from '../screens/Battle/AutoBattlerArena';
 
 export interface AutoBattlerCanvasProps {

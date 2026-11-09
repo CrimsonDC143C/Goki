@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { WebSocketStatus, gymifyWebSocket } from '../api/websocketClient';
+import { WebSocketStatus, gokiWebSocket } from '../api/websocketClient';
 
 export interface UseWebSocketOptions {
   /**
@@ -22,8 +22,8 @@ export interface UseWebSocketOptions {
  * Manages room subscriptions, status observers, and message handlers.
  */
 export function useWebSocket(options?: UseWebSocketOptions) {
-  const [status, setStatus] = useState<WebSocketStatus>(gymifyWebSocket.getStatus());
-  const [isConnected, setIsConnected] = useState<boolean>(gymifyWebSocket.isConnected());
+  const [status, setStatus] = useState<WebSocketStatus>(gokiWebSocket.getStatus());
+  const [isConnected, setIsConnected] = useState<boolean>(gokiWebSocket.isConnected());
 
   const room = options?.room;
   const onMessage = options?.onMessage;
@@ -31,13 +31,13 @@ export function useWebSocket(options?: UseWebSocketOptions) {
 
   // Listen for connection status changes
   useEffect(() => {
-    const unbindStatus = gymifyWebSocket.onStatusChange((newStatus) => {
+    const unbindStatus = gokiWebSocket.onStatusChange((newStatus) => {
       setStatus(newStatus);
       setIsConnected(newStatus === 'connected');
     });
 
-    if (autoConnect && !gymifyWebSocket.isConnected()) {
-      void gymifyWebSocket.connect();
+    if (autoConnect && !gokiWebSocket.isConnected()) {
+      void gokiWebSocket.connect();
     }
 
     return () => {
@@ -52,12 +52,12 @@ export function useWebSocket(options?: UseWebSocketOptions) {
 
     const rooms = Array.isArray(room) ? room : [room];
     for (const r of rooms) {
-      gymifyWebSocket.subscribe(r);
+      gokiWebSocket.subscribe(r);
     }
 
     return () => {
       for (const r of rooms) {
-        gymifyWebSocket.unsubscribe(r);
+        gokiWebSocket.unsubscribe(r);
       }
     };
   }, [roomKey]);
@@ -65,15 +65,15 @@ export function useWebSocket(options?: UseWebSocketOptions) {
   // Attach optional message listener
   useEffect(() => {
     if (!onMessage) return;
-    const unbind = gymifyWebSocket.on('*', onMessage);
+    const unbind = gokiWebSocket.on('*', onMessage);
     return () => unbind();
   }, [onMessage]);
 
   return {
     status,
     isConnected,
-    subscribe: (r: string) => gymifyWebSocket.subscribe(r),
-    unsubscribe: (r: string) => gymifyWebSocket.unsubscribe(r),
-    send: (payload: Record<string, unknown>) => gymifyWebSocket.send(payload),
+    subscribe: (r: string) => gokiWebSocket.subscribe(r),
+    unsubscribe: (r: string) => gokiWebSocket.unsubscribe(r),
+    send: (payload: Record<string, unknown>) => gokiWebSocket.send(payload),
   };
 }

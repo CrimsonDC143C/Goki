@@ -4,7 +4,7 @@ import { SvgXml } from 'react-native-svg';
 import {
   calculateStatRadarGeometry,
   StatInputMap,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 
 export interface AttributeRadarChartProps {
   stats: StatInputMap;

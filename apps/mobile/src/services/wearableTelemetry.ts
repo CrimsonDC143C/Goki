@@ -1,4 +1,4 @@
-import { HeartRateSample, SleepStageSample, SleepStageType } from '@gymify/game-engine';
+import { HeartRateSample, SleepStageSample, SleepStageType } from '@goki/game-engine';
 import { Platform } from 'react-native';
 
 export type WearableTelemetrySource =

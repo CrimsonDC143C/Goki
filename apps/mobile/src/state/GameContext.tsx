@@ -114,7 +114,7 @@ import {
   upsertExerciseMachineLoadMode,
   upsertExerciseStickyNote,
   upsertExerciseWeightUnit,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import {
   OfflineDraftExerciseBlock,
   OfflineWorkoutDraft,
@@ -157,7 +157,7 @@ import {
   logoutAccount,
   registerAccount,
   resolveApiBaseUrl,
-  gymifyWebSocket,
+  gokiWebSocket,
 } from '../api';
 import { WearableTelemetrySource } from '../services/wearableTelemetry';
 
@@ -2639,7 +2639,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // 2. If no valid stored session, log in with default hero credentials
       const loginRes = await loginAccount({
-        email: 'hero@gymify.rpg',
+        email: 'hero@gokirpg.com',
         password: 'password123',
       });
 
@@ -2652,7 +2652,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // 3. Fallback: If user not yet seeded/registered on backend, register new hero account
       const regRes = await registerAccount({
-        email: 'hero@gymify.rpg',
+        email: 'hero@gokirpg.com',
         username: 'iron_adventurer',
         password: 'password123',
         characterName: 'Aric the Ironbound',
@@ -2681,21 +2681,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLiveSyncConnected, setIsLiveSyncConnected] = useState(false);
 
   useEffect(() => {
-    return gymifyWebSocket.onStatusChange((status) => {
+    return gokiWebSocket.onStatusChange((status) => {
       setIsLiveSyncConnected(status === 'connected');
     });
   }, []);
 
   useEffect(() => {
-    void gymifyWebSocket.setAuthToken(authToken);
+    void gokiWebSocket.setAuthToken(authToken);
     if (serverOnline) {
-      void gymifyWebSocket.connect();
+      void gokiWebSocket.connect();
     }
   }, [authToken, serverOnline]);
 
   useEffect(() => {
     // Listen for Real-Time Raid Boss HP drops and participant damage
-    const unbindRaid = gymifyWebSocket.on('RAID_HP_UPDATE', (event: any) => {
+    const unbindRaid = gokiWebSocket.on('RAID_HP_UPDATE', (event: any) => {
       if (!event.raidId) return;
       setRaids((prevRaids) =>
         prevRaids.map((r) => {
@@ -2725,7 +2725,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     // Listen for Real-Time Party Member arrivals in Co-op Dungeons
-    const unbindDungeonJoin = gymifyWebSocket.on('PARTY_MEMBER_JOINED', (event: any) => {
+    const unbindDungeonJoin = gokiWebSocket.on('PARTY_MEMBER_JOINED', (event: any) => {
       if (!event.participant) return;
       // Real-time party update notification
     });
@@ -2927,7 +2927,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * Synchronizes queued Offline Workouts silently against `POST /api/characters/:id/workouts`,
    * populating `pendingWorkoutReceipts` with zero intra-workout RPG popups.
    * When `evaluateLocallyIfOffline` is true (e.g. clicking "Enter World" while offline),
-   * evaluates queued payloads deterministically via `@gymify/game-engine` so receipts are ready
+   * evaluates queued payloads deterministically via `@goki/game-engine` so receipts are ready
    * immediately while retaining raw payloads for background DB replay when connectivity returns.
    */
   const syncOfflineWorkouts = useCallback(
@@ -3286,7 +3286,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           // Player clicked "Enter World" while server is unreachable:
-          // Evaluate deterministically via @gymify/game-engine so receipt chest opens seamlessly!
+          // Evaluate deterministically via @goki/game-engine so receipt chest opens seamlessly!
           const fatigueStep = recordWorkoutInFatigueState(runningFatigue, {
             performedAt,
             workoutType: queued.workoutType,

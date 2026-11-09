@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, AppState } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
-import { DynamicRestMode } from '@gymify/game-engine';
+import { DynamicRestMode } from '@goki/game-engine';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { scheduleRestTimerNotification, cancelRestTimerNotification } from '../utils/restNotifications';
 

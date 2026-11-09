@@ -10,7 +10,7 @@ import {
   ExerciseGymPreferenceMap,
   normalizeGymId,
   resolveExerciseStickyNote,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { CRIMSON_ONI } from '../theme';
 
 export interface ExerciseStickyNoteRowProps {

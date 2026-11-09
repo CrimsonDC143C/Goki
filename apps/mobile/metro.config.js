@@ -6,7 +6,7 @@ const monorepoRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
-// Watch all files in the monorepo (including @gymify/game-engine)
+// Watch all files in the monorepo (including @goki/game-engine)
 config.watchFolders = [monorepoRoot];
 
 // Resolve packages from both apps/mobile/node_modules and hoisted root node_modules

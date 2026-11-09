@@ -1,5 +1,5 @@
 /**
- * Core Domain Types for @gymify/game-engine
+ * Core Domain Types for @goki/game-engine
  */
 
 export type StatType = 'STRENGTH' | 'ENDURANCE' | 'AGILITY';

@@ -14,7 +14,7 @@ test.describe('E2E Authentication & Hub Navigation', () => {
             token,
             user: {
               id: 'usr_e2e_123',
-              email: body.email || 'e2e_hero@gymify.local',
+              email: body.email || 'e2e_hero@gokirpg.local',
               username: body.username || 'CrimsonE2E',
             },
             character: {
@@ -51,7 +51,7 @@ test.describe('E2E Authentication & Hub Navigation', () => {
     // 3. Fill in registration form
     const timestamp = Date.now();
     const testUsername = `Hero_${timestamp.toString().slice(-4)}`;
-    const testEmail = `hero_${timestamp}@gymify.local`;
+    const testEmail = `hero_${timestamp}@gokirpg.local`;
 
     await page.getByTestId('auth-username-input').fill(testUsername);
     await page.getByTestId('auth-email-input').fill(testEmail);
@@ -67,9 +67,9 @@ test.describe('E2E Authentication & Hub Navigation', () => {
     // 6. Assert token is persisted in storage
     const tokenInStorage = await page.evaluate(() => {
       return (
-        window.localStorage.getItem('gymify_auth_jwt_token_v1') ||
-        window.localStorage.getItem('gymify_jwt_auth_token_v1') ||
-        window.localStorage.getItem('gymify_jwt_token')
+        window.localStorage.getItem('goki_auth_jwt_token_v1') ||
+        window.localStorage.getItem('goki_jwt_auth_token_v1') ||
+        window.localStorage.getItem('goki_jwt_token')
       );
     });
 

@@ -26,7 +26,7 @@ import {
   ExerciseProgressionCardData,
   ExerciseSparklinePoint,
   SessionLogCardData,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { useGame } from '../state/GameContext';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { WeeklyVolumeLandmarksCard } from '../components/WeeklyVolumeLandmarksCard';

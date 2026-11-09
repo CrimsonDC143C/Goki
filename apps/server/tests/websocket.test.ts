@@ -1,4 +1,4 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { buildServerApp } from '../src/app';
@@ -136,7 +136,7 @@ describe('Fastify WebSocket Server & Integration Protocol', () => {
     // Sign a test JWT
     const token = app.jwt.sign({
       userId: 'athlete_hero_1',
-      email: 'hero@gymify.io',
+      email: 'hero@gokirpg.com',
       username: 'WarriorVal',
     });
 

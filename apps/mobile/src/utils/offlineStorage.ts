@@ -13,7 +13,7 @@ import {
   ExerciseGymPreferenceMap,
   WarmupPresetCount,
   WeightUnit,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 
 export interface OfflineDraftSetRow {
   id: string;
@@ -110,8 +110,8 @@ export interface PersistedOfflineBundle {
   warmupPresetCount?: WarmupPresetCount;
 }
 
-const STORAGE_KEY = 'gymify_offline_bundle_v1';
-const NATIVE_FILENAME = 'gymify_offline_bundle_v1.json';
+const STORAGE_KEY = 'goki_offline_bundle_v1';
+const NATIVE_FILENAME = 'goki_offline_bundle_v1.json';
 
 interface WebStorageGlobal {
   localStorage?: {

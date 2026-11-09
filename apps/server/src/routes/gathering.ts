@@ -1,10 +1,10 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import {
   calculateGatheringTick,
   calculateRequiredTimeForYield,
   MAX_GATHERING_DURATION_MS,
   MIN_GATHERING_DURATION_MS,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { GameTimerScheduler } from '../queues/bullmq-workers';

@@ -1,31 +1,31 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: gymify_rpg_postgres
+    container_name: goki_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: gymify_rpg
+      POSTGRES_DB: goki
     ports:
       - "5432:5432"
     volumes:
-      - gymify_pgdata:/var/lib/postgresql/data
+      - goki_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d gymify_rpg"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d goki"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: gymify_rpg_redis
+    container_name: goki_redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
     volumes:
-      - gymify_redisdata:/data
+      - goki_redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -33,5 +33,5 @@ services:
       retries: 10
 
 volumes:
-  gymify_pgdata:
-  gymify_redisdata:
+  goki_pgdata:
+  goki_redisdata:

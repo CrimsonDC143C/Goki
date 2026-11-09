@@ -22,7 +22,7 @@ export function resolveApiBaseUrl(): string {
           return `http://${lanHost}:4000`;
         }
         // In standalone native release/preview builds, localhost fails with ConnectException.
-        return 'https://gymify-server.onrender.com';
+        return 'https://goki-server.onrender.com';
       }
     }
     return envUrl.replace(/\/$/, '');
@@ -35,7 +35,7 @@ export function resolveApiBaseUrl(): string {
       return `http://${lanHost}:4000`;
     }
   }
-  return 'https://gymify-server.onrender.com';
+  return 'https://goki-server.onrender.com';
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();

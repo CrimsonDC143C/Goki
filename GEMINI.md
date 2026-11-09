@@ -1,4 +1,4 @@
-# Gymify RPG - Agent Execution & Delegation Policy
+# Goki - Agent Execution & Delegation Policy
 
 ## 1. Direct Execution as Strict Default
 The primary agent executes tasks directly (reading, creating, modifying files, running tests, and executing commands).
@@ -13,7 +13,7 @@ The primary agent must **NEVER** spawn subagents or delegate to `flash-worker` f
 ## 2. Explicit / High-Complexity Gate for Subagents
 Delegating to `flash-worker` via `invoke_subagent` is **STRICTLY GATED** and may ONLY be used when at least one of the following conditions is met:
 1. **Explicit Prompt Instruction:** The user explicitly requests subagent delegation by including `"use subagents"` or `"@delegate"` in their prompt.
-2. **High-Complexity Multi-Package Feature:** The feature spans 3 or more workspaces (`@gymify/game-engine`, `@gymify/database`, `@gymify/server`, `@gymify/mobile`) AND requires parallel multi-package implementation.
+2. **High-Complexity Multi-Package Feature:** The feature spans 3 or more workspaces (`@goki/game-engine`, `@goki/database`, `@goki/server`, `@goki/mobile`) AND requires parallel multi-package implementation.
 
 If neither condition is explicitly satisfied, the primary agent MUST perform the work directly.
 

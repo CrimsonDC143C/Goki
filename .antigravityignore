@@ -12,6 +12,6 @@ apps/mobile/assets/**/*.mp3
 apps/mobile/assets/**/*.wav
 apps/mobile/assets/sprites/index.ts
 apps/mobile/src/assets/v0Vault.ts
-**/gymify_offline_bundle*.json
+**/goki_offline_bundle*.json
 packages/database/prisma/*.db*
 package-lock.json

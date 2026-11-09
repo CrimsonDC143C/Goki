@@ -108,7 +108,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
         <View style={styles.brandHeader}>
           <View style={styles.brandBadgeRow}>
             <View style={styles.brandAccentLine} />
-            <Text style={styles.brandEyebrow}>GYMSCAPE</Text>
+            <Text style={styles.brandEyebrow}>GOKI</Text>
             <View style={styles.brandAccentLine} />
           </View>
           <Text style={styles.brandTitle}>WORLD OF VERETHOR</Text>

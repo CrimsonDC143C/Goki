@@ -19,7 +19,7 @@ import {
   MAX_GATHERING_DURATION_MS,
   MIN_GATHERING_DURATION_MS,
   LootDrop,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { Image as ExpoImage } from 'expo-image';
 import { GatheringNodeItem, useGame } from '../state/GameContext';
 import { getItemIconSource } from '../assets/itemArtRegistry';

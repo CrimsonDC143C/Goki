@@ -1,4 +1,4 @@
-import { BugReportCategory, BugReportSeverity, BugReportStatus, Prisma, PrismaClient } from '@gymify/database';
+import { BugReportCategory, BugReportSeverity, BugReportStatus, Prisma, PrismaClient } from '@goki/database';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { env } from '../config';

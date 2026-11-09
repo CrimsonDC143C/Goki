@@ -6,7 +6,7 @@ import {
   MuscleVolumeLandmarkStatus,
   VolumeLandmarkZone,
   calculateWeeklyMuscleVolumeLandmarks,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { MetricInfoBadge } from './MetricInfoTooltipModal';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 

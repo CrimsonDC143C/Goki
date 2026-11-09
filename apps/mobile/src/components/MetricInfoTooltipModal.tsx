@@ -10,7 +10,7 @@ import {
 import {
   TRAINING_METRIC_TOOLTIPS,
   TrainingMetricTooltipKey,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { CRIMSON_ONI } from '../theme';
 
 export interface MetricInfoBadgeProps {
@@ -97,7 +97,7 @@ export const MetricInfoTooltipModal: React.FC<MetricInfoTooltipModalProps> = ({
           </View>
 
           <View style={styles.rpgBox}>
-            <Text style={styles.rpgLabel}>⚔️ GYMIFY RPG IMPACT</Text>
+            <Text style={styles.rpgLabel}>⚔️ GOKI IMPACT</Text>
             <Text style={styles.rpgText}>{info.rpgTieIn}</Text>
           </View>
 

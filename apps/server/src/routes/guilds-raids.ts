@@ -1,5 +1,5 @@
-import { PrismaClient } from '@gymify/database';
-import { MS_PER_HOUR, aggregateTalentModifiers } from '@gymify/game-engine';
+import { PrismaClient } from '@goki/database';
+import { MS_PER_HOUR, aggregateTalentModifiers } from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { GameTimerScheduler } from '../queues/bullmq-workers';

@@ -1,5 +1,5 @@
 /**
- * @gymify/mobile — Phase 4 Entrypoint Placeholder
+ * @goki/mobile — Phase 4 Entrypoint Placeholder
  * Will host Expo React Native client with:
  * - Manual Honesty Workout Logger (Resistance & HR Zone Cardio)
  * - Multi-Class Stat-Bound Talent Tree Builder

@@ -1,5 +1,5 @@
 {
-  "name": "@gymify/database",
+  "name": "@goki/database",
   "version": "0.1.0",
   "private": true,
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@gymify/game-engine": "*",
+    "@goki/game-engine": "*",
     "@prisma/client": "^6.4.1"
   },
   "devDependencies": {

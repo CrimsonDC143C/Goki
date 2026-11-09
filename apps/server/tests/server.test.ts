@@ -1,9 +1,9 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import { describe, expect, it } from 'vitest';
 import { buildServerApp } from '../src/app';
 import { serializeBigInts } from '../src/config';
 
-describe('@gymify/server Fastify API & Serialization', () => {
+describe('@goki/server Fastify API & Serialization', () => {
   it('serializes BigInt Raid Boss HP & Date values safely for JSON responses', () => {
     const raw = {
       bossName: 'Ignisrax',

@@ -16,7 +16,7 @@ import {
   WORKOUT_CATEGORIES,
   WorkoutCategoryDescriptor,
   WorkoutPresetDefinition,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { MODALITY_BADGE_SVGS } from '../assets/v0Vault';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 

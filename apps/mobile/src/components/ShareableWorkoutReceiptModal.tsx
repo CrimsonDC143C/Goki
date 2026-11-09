@@ -19,7 +19,7 @@ import {
   convertKgToDisplayWeight,
   formatCleanWeightNumber,
   isWarmupSetType,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 
 export interface ShareableReceiptRpgContext {
@@ -291,7 +291,7 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
 
   const buildSharePlainText = (): string => {
     const lines: string[] = [
-      `⚔️ GYMIFY RPG • RAID RECEIPT`,
+      `⚔️ GOKI • RAID RECEIPT`,
       `${receiptData.title} (${receiptData.dateLabel})`,
       `📍 ${receiptData.gymLabel} • ⏱️ ${receiptData.durationLabel} • 🔥 ${receiptData.streak}-Session Streak`,
     ];
@@ -343,7 +343,7 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
     }
 
     lines.push('');
-    lines.push('Forged in Gymify RPG 🛡️');
+    lines.push('Forged in Goki 🛡️');
     return lines.join('\n');
   };
 
@@ -367,7 +367,7 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
       }
 
       const result = await Share.share({
-        title: `Gymify RPG — ${receiptData.title}`,
+        title: `Goki: Fitness RPG — ${receiptData.title}`,
         message: textPayload,
       });
       if (result.action === Share.sharedAction) {
@@ -417,7 +417,7 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
             {/* 1. Crest & Sanctum Header */}
             <View style={styles.crestHeader}>
               <View style={styles.eyebrowRow}>
-                <Text style={styles.crestEyebrow}>⚔️ GYMIFY RPG • RAID RECEIPT</Text>
+                <Text style={styles.crestEyebrow}>⚔️ GOKI • RAID RECEIPT</Text>
                 <Text style={styles.dateStamp}>{receiptData.dateLabel}</Text>
               </View>
 
@@ -631,7 +631,7 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
               )}
 
               <View style={styles.watermarkRow}>
-                <Text style={styles.watermarkLeft}>GYMIFY RPG</Text>
+                <Text style={styles.watermarkLeft}>GOKI</Text>
                 <Text style={styles.watermarkRight}>EVERY REP FORGES YOUR LEGEND</Text>
               </View>
             </View>

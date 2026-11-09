@@ -1,10 +1,10 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import {
   aggregateTalentModifiers,
   evaluateFatigueStateAtTime,
   getAvailableStrenuousXpMultiplier,
   getSystemicFatigueCombatPenalties,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';

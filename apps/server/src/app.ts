@@ -1,7 +1,7 @@
 import cors from '@fastify/cors';
 import fastifyJwt from '@fastify/jwt';
 import websocket from '@fastify/websocket';
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import Fastify, { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { env, serializeBigInts } from './config';
@@ -104,7 +104,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
 
   app.get('/health', async () => ({
     status: 'ok',
-    service: '@gymify/server',
+    service: '@goki/server',
     timestamp: new Date().toISOString(),
   }));
 

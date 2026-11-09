@@ -1,7 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-const AUTH_TOKEN_STORAGE_KEY = 'gymify_auth_jwt_token_v1';
+const AUTH_TOKEN_STORAGE_KEY = 'goki_auth_jwt_token_v1';
 
 // Web localStorage safe fallback interface
 interface WebStorageGlobal {

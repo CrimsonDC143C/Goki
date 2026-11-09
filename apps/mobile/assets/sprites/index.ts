@@ -1,7 +1,7 @@
 import { LOOT_CHEST_URIS } from '../../src/assets/v0Vault';
 
 /**
- * Gymify 2D Sprite Asset Manifest
+ * Goki 2D Sprite Asset Manifest
  * Supports drop-in PNG/WebP requires or data URIs with high-performance expo-image rendering.
  */
 

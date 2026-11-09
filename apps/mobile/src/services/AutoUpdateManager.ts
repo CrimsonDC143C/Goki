@@ -2,7 +2,7 @@ import { AppState, AppStateStatus, Platform } from 'react-native';
 import {
   isForceUpdateRequired,
   isUpdateAvailable,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { API_BASE_URL } from '../api/apiClient';
 import { diagnosticLogger } from './DiagnosticLogger';
 

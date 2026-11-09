@@ -8,7 +8,7 @@ import {
   verifyTelemetry,
 } from '../src/ironman-verifier';
 
-describe('Ironman Mode Telemetry Verifier (@gymify/game-engine)', () => {
+describe('Ironman Mode Telemetry Verifier (@goki/game-engine)', () => {
   it('correctly maps heart rates to zones based on estimated max HR', () => {
     // With 190 Max HR:
     expect(calculateHeartRateZone(95, 190)).toBe(1); // 50%

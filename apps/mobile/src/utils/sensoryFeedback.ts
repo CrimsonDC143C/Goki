@@ -1,6 +1,6 @@
 import { Platform, Vibration } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { SensoryCueType } from '@gymify/game-engine';
+import { SensoryCueType } from '@goki/game-engine';
 import { audioManager, SoundEffectKey } from '../services/AudioManager';
 
 export type ExtendedSensoryCue =

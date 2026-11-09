@@ -23,7 +23,7 @@ import {
   WorkoutPresetSetTemplate,
   DEFAULT_EXERCISE_CATALOG,
   SeedExerciseDefinition,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 import { ActivityPickerModal } from './ActivityPickerModal';
 import { ExerciseCatalogItem } from '../state/GameContext';

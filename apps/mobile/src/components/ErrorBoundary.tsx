@@ -230,7 +230,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             {transmissionStatus === 'sent' && (
               <View style={styles.feedbackBannerSuccess}>
                 <Text style={styles.feedbackTextSuccess}>
-                  ✅ Crash scroll transmitted to developers. Thank you for making Gymify RPG resilient!
+                  ✅ Crash scroll transmitted to developers. Thank you for making Goki resilient!
                 </Text>
               </View>
             )}
@@ -305,7 +305,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 </View>
 
                 <Text style={styles.modalBody}>
-                  Gymify caught an unexpected crash during your previous session. Diagnostic
+                  Goki caught an unexpected crash during your previous session. Diagnostic
                   breadcrumbs and sanitized state have been saved locally. Would you like to
                   transmit this report to help developers fix it?
                 </Text>

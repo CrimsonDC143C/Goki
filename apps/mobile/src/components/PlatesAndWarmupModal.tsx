@@ -17,7 +17,7 @@ import {
   convertKgToDisplayWeight,
   formatCleanWeightNumber,
   generateRampedWarmupSets,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { CRIMSON_ONI } from '../theme';
 
 export interface PlatesAndWarmupModalProps {

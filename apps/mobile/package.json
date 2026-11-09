@@ -1,11 +1,11 @@
 {
-  "name": "@gymify/mobile",
+  "name": "@goki/mobile",
   "version": "0.2.0",
   "private": true,
-  "description": "Expo React Native + Expo Web RPG client & 2D Auto-Battler replay viewer",
+  "description": "Goki: Fitness RPG — Expo React Native + Expo Web client & 2D Auto-Battler replay viewer",
   "main": "index.js",
   "scripts": {
-    "eas-build-pre-build": "cd ../../ && npm run build --workspace=@gymify/game-engine",
+    "eas-build-pre-build": "cd ../../ && npm run build --workspace=@goki/game-engine",
     "start": "expo start --lan",
     "tunnel": "expo start --tunnel",
     "android": "expo start --android",
@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "*",
-    "@gymify/game-engine": "*",
+    "@goki/game-engine": "*",
     "expo": "~58.0.22",
     "expo-audio": "~58.0.11",
     "expo-build-properties": "^58.0.12",

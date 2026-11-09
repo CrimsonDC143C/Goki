@@ -15,7 +15,7 @@ import type {
   DungeonCombatReplayResult,
   DungeonDefinition,
   DungeonWorkoutBuff,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { COLORS, CRIMSON_ONI, RARITY_COLORS } from '../../theme';
 import { audioManager } from '../../services/AudioManager';
 import { LOOT_CHEST_SVGS } from '../../assets/v0Vault';

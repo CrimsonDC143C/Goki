@@ -11,7 +11,7 @@ export default async function globalSetup(): Promise<void> {
     console.log(' Connected to PostgreSQL. Seeding exercises, talents, and raids...');
     await runSeed(prisma);
 
-    const testEmail = 'e2e-seed-hero@gymify.local';
+    const testEmail = 'e2e-seed-hero@gokirpg.local';
     const passwordHash = await bcrypt.hash('Password123!', 10);
 
     const user = await prisma.user.upsert({

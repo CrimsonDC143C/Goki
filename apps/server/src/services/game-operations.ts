@@ -1,4 +1,4 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import {
   CombatantCharacterInput,
   DungeonDefinition,
@@ -13,7 +13,7 @@ import {
   createSeededRng,
   evaluateFatigueStateAtTime,
   simulateDungeonRun,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 
 export interface GatheringLootTemplate extends LootDrop {
   weight: number;

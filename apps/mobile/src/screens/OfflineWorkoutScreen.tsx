@@ -46,7 +46,7 @@ import {
   resolveExerciseWeightUnit,
   resolveGhostRowForSetOrder,
   resolvePreviousExerciseSessionSets,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { useGame } from '../state/GameContext';
 import { CRIMSON_ONI } from '../theme';
 import { WorkoutCategoryGateway } from '../components/WorkoutCategoryGateway';

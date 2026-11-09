@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { isAdventurerRankSufficient, type DungeonDefinition } from '@gymify/game-engine';
+import { isAdventurerRankSufficient, type DungeonDefinition } from '@goki/game-engine';
 import { AutoBattlerArena } from './Battle/AutoBattlerArena';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useGame } from '../state/GameContext';

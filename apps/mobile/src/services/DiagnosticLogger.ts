@@ -5,7 +5,7 @@ import {
   BreadcrumbLevel,
   BreadcrumbRingBuffer,
   sanitizeDiagnosticData,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { apiFetch } from '../api/apiClient';
 import { AsyncStorage } from '../utils/asyncStorage';
 
@@ -44,8 +44,8 @@ export interface CrashReportPayload {
   source?: string;
 }
 
-export const CRASH_REPORT_STORAGE_KEY = '@gymify_pending_crash_report';
-export const BUG_REPORT_OUTBOX_STORAGE_KEY = '@gymify_bug_report_outbox';
+export const CRASH_REPORT_STORAGE_KEY = '@goki_pending_crash_report';
+export const BUG_REPORT_OUTBOX_STORAGE_KEY = '@goki_bug_report_outbox';
 
 function formatConsoleArg(a: unknown): string {
   if (typeof a === 'string') return a;
@@ -288,7 +288,7 @@ class DiagnosticLoggerService {
 
   /**
    * Submits a diagnostic bug report. If offline or the network call fails,
-   * it queues the report into AsyncStorage (@gymify_bug_report_outbox)
+   * it queues the report into AsyncStorage (@goki_bug_report_outbox)
    * to be flushed automatically when connectivity is restored.
    * Includes immediate retry with 8s timeout to handle satellite (Starlink) jitter.
    */

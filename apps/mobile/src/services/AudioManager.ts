@@ -77,7 +77,7 @@ const SOUND_PRESETS: Record<SoundEffectKey, SoundConfig> = {
   },
 };
 
-const MUTE_STORAGE_KEY = 'gymify_sfx_muted_v1';
+const MUTE_STORAGE_KEY = 'goki_sfx_muted_v1';
 
 class AudioManagerService {
   private static instance: AudioManagerService;

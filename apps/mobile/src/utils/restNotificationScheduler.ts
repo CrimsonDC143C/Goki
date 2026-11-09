@@ -1,9 +1,9 @@
 import * as Notifications from 'expo-notifications';
 import { AppState, Platform } from 'react-native';
-import { NextSetPreview } from '@gymify/game-engine';
+import { NextSetPreview } from '@goki/game-engine';
 
 export const STAMINA_REST_CHANNEL_ID = 'stamina-rest-channel';
-export const STAMINA_REST_NOTIFICATION_ID = 'gymify-stamina-recharged';
+export const STAMINA_REST_NOTIFICATION_ID = 'goki-stamina-recharged';
 
 export type RestNotificationPermissionState =
   | 'granted'
@@ -120,7 +120,7 @@ function clearWebFallbackTimer(): void {
 
 /**
  * Schedules (or atomically replaces) the local Stamina Recharged notification for `endsAtMs`.
- * Uses a fixed notification identifier (`gymify-stamina-recharged`) so rapid +15s/-15s/preset
+ * Uses a fixed notification identifier (`goki-stamina-recharged`) so rapid +15s/-15s/preset
  * adjustments overwrite cleanly without stacking duplicate alarms.
  */
 export async function scheduleStaminaRechargedNotification(params: {

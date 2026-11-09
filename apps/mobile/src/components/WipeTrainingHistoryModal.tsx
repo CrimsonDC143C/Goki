@@ -18,7 +18,7 @@ import {
   TrainingHistoryTimeWindow,
   WorkoutCategory,
   pruneTrainingHistory,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 
 export interface WipeTrainingHistoryModalProps {

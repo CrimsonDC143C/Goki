@@ -33,7 +33,7 @@ function hashSeed(seed: string): () => number {
 }
 
 export function createSeededRng(seed: string): SeededRng {
-  const seedFn = hashSeed(seed || 'gymify-default-seed');
+  const seedFn = hashSeed(seed || 'goki-default-seed');
   let a = seedFn();
 
   const next = (): number => {

@@ -17,7 +17,7 @@ import {
   isCharacterProgressionUnlocked,
   validateTalentAllocation,
   xpRequiredForStatLevel,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { useGame } from '../state/GameContext';
 import {
   HUD_SVGS,

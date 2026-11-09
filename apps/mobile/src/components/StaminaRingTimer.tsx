@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
-import { RestTimerState, RestAdviceProfile } from '@gymify/game-engine';
+import { RestTimerState, RestAdviceProfile } from '@goki/game-engine';
 import { COLORS } from '../theme';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 

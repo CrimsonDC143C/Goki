@@ -1,9 +1,9 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import {
   DEFAULT_TALENT_TREES,
   aggregateTalentModifiers,
   spendTalentPoint,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 

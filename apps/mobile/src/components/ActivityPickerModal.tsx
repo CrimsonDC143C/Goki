@@ -17,7 +17,7 @@ import {
   WorkoutCategory,
   StatType,
   getExerciseSubcategory,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { ExerciseCatalogItem, useGame } from '../state/GameContext';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
 

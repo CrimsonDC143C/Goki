@@ -1,6 +1,6 @@
-# Gymify RPG - Harvested Production Assets & Design Vault
+# Goki - Harvested Production Assets & Design Vault
 
-All assets in this directory were audited and harvested directly from the live `gymify-phi.vercel.app` production deployment. They are bundled locally into the mobile client package to guarantee zero-latency offline rendering, offline workout support, and design fidelity across iOS, Android, and Web.
+All assets in this directory were audited and harvested directly from the live `the v0 production design prototype` production deployment. They are bundled locally into the mobile client package to guarantee zero-latency offline rendering, offline workout support, and design fidelity across iOS, Android, and Web.
 
 ---
 

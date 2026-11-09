@@ -7,10 +7,10 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   DATABASE_URL: z
     .string()
-    .default('postgresql://postgres:postgres@localhost:5432/gymify_rpg?schema=public'),
+    .default('postgresql://postgres:postgres@localhost:5432/goki?schema=public'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
   CORS_ORIGIN: z.string().default('*'),
-  JWT_SECRET: z.string().default('gymify_jwt_super_secret_dev_secret_key_2026'),
+  JWT_SECRET: z.string().default('goki_jwt_super_secret_dev_secret_key_2026'),
   DIAGNOSTICS_WEBHOOK_URL: z.string().optional(),
   ADMIN_EMAILS: z.string().optional(),
   APP_LATEST_VERSION: z.string().default('0.2.0'),

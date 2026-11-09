@@ -1,4 +1,4 @@
-# Gymify Audio Assets Directory
+# Goki Audio Assets Directory
 
 This directory holds drop-in sound effect (SFX) and ambient music files (`.mp3`, `.wav`, `.m4a`).
 

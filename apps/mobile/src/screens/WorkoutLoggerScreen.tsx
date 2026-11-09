@@ -50,7 +50,7 @@ import {
   resolveExerciseWeightUnit,
   resolveGhostRowForSetOrder,
   resolvePreviousExerciseSessionSets,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import {
   OfflineDraftExerciseBlock,
   OfflineDraftSetRow,

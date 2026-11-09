@@ -1,7 +1,7 @@
 import { File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 
-const STORAGE_MAP_FILENAME = 'gymify_key_value_store_v1.json';
+const STORAGE_MAP_FILENAME = 'goki_key_value_store_v1.json';
 let inMemoryStore: Record<string, string> = {};
 let isStoreLoaded = false;
 let fileWriteChain: Promise<void> = Promise.resolve();
@@ -53,7 +53,7 @@ function persistNativeStore(): Promise<void> {
 }
 
 /**
- * Universal offline-first AsyncStorage compatibility layer for Gymify RPG.
+ * Universal offline-first AsyncStorage compatibility layer for Goki.
  * Automatically persists to localStorage on Web and expo-file-system on Native.
  */
 export const AsyncStorage = {

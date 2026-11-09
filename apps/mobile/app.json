@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "Gymify RPG",
-    "slug": "gymify-rpg",
+    "name": "Goki",
+    "slug": "goki",
+    "scheme": "gokirpg",
     "version": "0.2.0",
     "runtimeVersion": "0.1.0",
     "updates": {
@@ -10,6 +11,7 @@
       "fallbackToCacheTimeout": 0
     },
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "platforms": [
       "ios",
@@ -19,14 +21,17 @@
     "backgroundColor": "#0B0E14",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.gymify.rpg",
+      "bundleIdentifier": "com.gokirpg.app",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSHealthShareUsageDescription": "Gymify RPG requires access to your biometric Heart Rate telemetry to cryptographically verify workout effort and unlock Ironman Mode rewards.",
-        "NSHealthUpdateUsageDescription": "Gymify RPG writes verified workout sessions and biometric telemetry to Apple Health."
+        "CFBundleDisplayName": "Goki",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSHealthShareUsageDescription": "Goki reads your heart rate, steps, sleep recovery, and workout telemetry from Apple Health to verify training effort for Ironman Mode and award character XP and loot.",
+        "NSHealthUpdateUsageDescription": "Goki saves your completed training sessions and verified Ironman workout telemetry to Apple Health so your fitness history stays in sync."
       }
     },
     "android": {
-      "package": "com.gymify.rpg",
+      "package": "com.gokirpg.app",
       "permissions": [
         "android.permission.VIBRATE",
         "android.permission.POST_NOTIFICATIONS",
@@ -37,9 +42,13 @@
       ]
     },
     "web": {
+      "name": "Goki: Fitness RPG",
+      "shortName": "Goki",
+      "description": "Turn real-world workouts into holistic 7-stat character progression, boss raids, and hardware-verified Ironman rewards.",
       "bundler": "metro",
       "output": "single",
-      "backgroundColor": "#0B0E14"
+      "backgroundColor": "#0B0E14",
+      "themeColor": "#0B0E14"
     },
     "plugins": [
       "expo-status-bar",
@@ -47,6 +56,13 @@
         "expo-notifications",
         {
           "color": "#26A69A"
+        }
+      ],
+      [
+        "react-native-health",
+        {
+          "healthSharePermission": "Goki reads your heart rate, steps, sleep recovery, and workout telemetry from Apple Health to verify training effort for Ironman Mode and award character XP and loot.",
+          "healthUpdatePermission": "Goki saves your completed training sessions and verified Ironman workout telemetry to Apple Health so your fitness history stays in sync."
         }
       ],
       "react-native-health-connect",

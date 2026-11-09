@@ -1,4 +1,4 @@
-# Gymify RPG — Gamified Multiplayer Fitness Tracker
+# Goki: Fitness RPG — Gamified Multiplayer Fitness Tracker
 
 Cross-platform multiplayer RPG fitness tracker where real-world workouts translate directly into a holistic 7-stat character progression system (`STR`, `END`, `AGI`, `DEX`, `CON`, `WIS`, `SPR`), 10 stat-bound Talent Trees, automatic Tavern rest & Active Recovery buffs, 2-hour idle gathering/crafting professions, 24-hour solo/co-op auto-battler dungeons, 7-day public & guild boss raids, and hardware-verified Ironman Mode biometrics via Apple HealthKit & Google Health Connect.
 
@@ -7,7 +7,7 @@ Cross-platform multiplayer RPG fitness tracker where real-world workouts transla
 ## Monorepo Structure
 
 ```text
-Gymify RPG/
+goki/
 ├── docker-compose.yml          # Local PostgreSQL 16 + Redis 7 (for Prisma & BullMQ workers)
 ├── package.json                # Monorepo root (npm workspaces, Vitest, Playwright, TypeScript)
 ├── playwright.config.ts        # Playwright E2E configuration for full-stack integration testing
@@ -53,7 +53,7 @@ npm run dev:web
 # Or launch Expo Metro server & scan QR code in Expo Go on your Android/iOS phone:
 npm run dev:mobile
 ```
-> **Offline-First Resilience:** `apps/mobile` runs `@gymify/game-engine` deterministically in-client if `localhost:4000` is offline, so you can preview and test every screen immediately without Docker running.
+> **Offline-First Resilience:** `apps/mobile` runs `@goki/game-engine` deterministically in-client if `localhost:4000` is offline, so you can preview and test every screen immediately without Docker running.
 
 ### 4. Run Test Suites & Strict Typechecks
 ```bash
@@ -67,7 +67,7 @@ npm run test:e2e      # Run Playwright full-stack E2E tests (auth, offline loggi
 
 ## Diagnostics, Bug Reporting, & Crash Handling
 
-Gymify RPG includes a built-in offline-first diagnostic subsystem:
+Goki includes a built-in offline-first diagnostic subsystem:
 
 * **Persistent Bug Reports (`packages/database`):** Relational `BugReport` model tracking severity (`INFO`, `WARNING`, `ERROR`, `FATAL`), category (`FEATURE_SUGGESTION`, `UI_UX`, `WORKOUT_SYNC`, `WEARABLE_TELEMETRY`, `COMBAT_DUNGEON`, `CRASH_EXCEPTION`, `OTHER`), triage status (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`), sanitized snapshots, breadcrumb ring-buffers, and device metadata.
 * **REST API (`apps/server`):**
@@ -77,8 +77,8 @@ Gymify RPG includes a built-in offline-first diagnostic subsystem:
   * **Developer Webhook Forwarding:** Set `DIAGNOSTICS_WEBHOOK_URL` (Discord/Slack incoming webhook) in `.env` to receive real-time color-coded crash alerts and emerald-coded `💡 Feature Suggestion` notifications.
   * **Global Fastify Hook:** Automatically persists unhandled 500 server errors to `BugReport`.
 * **Mobile Ring-Buffer & Exception Boundary (`apps/mobile`):**
-  * `DiagnosticLogger`: 100-event rolling ring-buffer, recursive credential sanitization (`password`, `jwt`, `bearer`), and offline outbox (`@gymify_bug_report_outbox`) with automatic reconnection flush.
-  * `ErrorBoundary`: High-contrast "Encounter Interrupted" crash recovery screen with **Zero Lost Sets Guarantee** and startup crash prompt (`@gymify_pending_crash_report`).
+  * `DiagnosticLogger`: 100-event rolling ring-buffer, recursive credential sanitization (`password`, `jwt`, `bearer`), and offline outbox (`@goki_bug_report_outbox`) with automatic reconnection flush.
+  * `ErrorBoundary`: High-contrast "Encounter Interrupted" crash recovery screen with **Zero Lost Sets Guarantee** and startup crash prompt (`@goki_pending_crash_report`).
   * `BugReportModal`: User-facing reporting modal with a dedicated **💡 Feature Suggestion** category, tailored placeholders, and dynamic severity (`INFO`).
   * `DeveloperTriageModal` ("Developer Sanctum"): In-app live triage UI accessible via `🛠️ Dev Triage` on the Character Profile screen to inspect, filter by type (`💡 Suggestions` vs `🐛 Bugs Only`), copy raw JSON, and transition bug statuses (`OPEN`, `INVESTIGATING`, `RESOLVED`, `IGNORED`) directly from mobile or web.
 
@@ -86,7 +86,7 @@ Gymify RPG includes a built-in offline-first diagnostic subsystem:
 
 ## Workout-Safe Auto-Update System
 
-Gymify RPG incorporates a dual-layer, zero-interrupted-sets auto-update subsystem designed for standalone Android APKs, iOS builds, and Expo Web:
+Goki incorporates a dual-layer, zero-interrupted-sets auto-update subsystem designed for standalone Android APKs, iOS builds, and Expo Web:
 
 * **Dual-Layer Update Architecture:**
   * **Over-The-Air (OTA) JS/Asset Bundles:** Powered by `expo-updates` (`preview` and `production` channels). New bundles download silently in the background without user intervention.
@@ -108,4 +108,4 @@ Gymify RPG incorporates a dual-layer, zero-interrupted-sets auto-update subsyste
 
 For the complete architectural blueprint, mathematical formulas, state machine definitions, Ironman verification protocols, and cloud infrastructure specifications, refer to:
 
-👉 **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — *Gymify RPG Project State of Affairs & Technical Brief*
+👉 **[`ARCHITECTURE.md`](./ARCHITECTURE.md)** — *Goki: Fitness RPG Project State of Affairs & Technical Brief*

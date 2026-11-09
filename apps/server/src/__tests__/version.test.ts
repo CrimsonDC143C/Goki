@@ -1,4 +1,4 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import { describe, expect, it } from 'vitest';
 import { buildServerApp } from '../app';
 

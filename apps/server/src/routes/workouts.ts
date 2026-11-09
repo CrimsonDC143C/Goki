@@ -1,4 +1,4 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import {
   ARRIVAL_BOON_MULTIPLIER,
   DungeonWorkoutBuff,
@@ -27,7 +27,7 @@ import {
   verifyMindBodyTelemetry,
   verifyRecoveryTelemetry,
   verifyTelemetry,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { GameTimerScheduler } from '../queues/bullmq-workers';

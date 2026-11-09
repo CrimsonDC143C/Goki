@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright E2E configuration for Gymify RPG full-stack testing.
+ * Playwright E2E configuration for Goki full-stack testing.
  * Automatically orchestrates the Fastify API Server and Expo Web bundler.
  */
 export default defineConfig({
@@ -36,13 +36,13 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'npm run dev --workspace=@gymify/server',
+      command: 'npm run dev --workspace=@goki/server',
       port: 4000,
       reuseExistingServer: !process.env.CI,
       timeout: 45000,
     },
     {
-      command: 'npm run web --workspace=@gymify/mobile',
+      command: 'npm run web --workspace=@goki/mobile',
       port: 8081,
       reuseExistingServer: !process.env.CI,
       timeout: 60000,

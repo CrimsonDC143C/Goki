@@ -1,9 +1,9 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildServerApp } from '../app';
 import { forwardWebhookAlert } from '../routes/diagnostics';
 
-describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () => {
+describe('@goki/server Diagnostics, Bug Reporting, & Exception Subsystem', () => {
   let memoryReports: any[] = [];
   let mockDb: any;
 
@@ -102,7 +102,7 @@ describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () 
     // Generate valid test JWT
     const token = app.jwt.sign({
       userId: 'user_warrior_99',
-      email: 'warrior@gymify.rpg',
+      email: 'warrior@gokirpg.com',
       username: 'iron_warrior',
     });
 
@@ -233,7 +233,7 @@ describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () 
     // 2. Authenticated request succeeds
     const token = app.jwt.sign({
       userId: 'admin_dev',
-      email: 'admin@gymify.rpg',
+      email: 'admin@gokirpg.com',
       username: 'admin',
     });
 
@@ -296,7 +296,7 @@ describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () 
 
     const token = app.jwt.sign({
       userId: 'dev_user',
-      email: 'dev@gymify.rpg',
+      email: 'dev@gokirpg.com',
       username: 'dev_hero',
     });
 
@@ -331,7 +331,7 @@ describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () 
 
     try {
       process.env.NODE_ENV = 'production';
-      process.env.ADMIN_EMAILS = 'admin@gymify.rpg, lead@gymify.rpg';
+      process.env.ADMIN_EMAILS = 'admin@gokirpg.com, lead@gokirpg.com';
 
       const nonAdminToken = app.jwt.sign({
         userId: 'playtester_1',
@@ -341,7 +341,7 @@ describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () 
 
       const adminToken = app.jwt.sign({
         userId: 'admin_1',
-        email: 'ADMIN@gymify.rpg',
+        email: 'ADMIN@gokirpg.com',
         username: 'admin',
       });
 
@@ -447,7 +447,7 @@ describe('@gymify/server Diagnostics, Bug Reporting, & Exception Subsystem', () 
 
 describe('DiagnosticLogger Ring-Buffer & Secret Sanitization Logic', () => {
   it('sanitizes passwords, JWT tokens, Bearer strings, and auth secrets recursively', async () => {
-    const { sanitizeDiagnosticData } = await import('@gymify/game-engine');
+    const { sanitizeDiagnosticData } = await import('@goki/game-engine');
 
     const testState = {
       user: {
@@ -481,7 +481,7 @@ describe('DiagnosticLogger Ring-Buffer & Secret Sanitization Logic', () => {
   });
 
   it('caps the breadcrumb buffer at 100 entries and rolls oldest entries out', async () => {
-    const { BreadcrumbRingBuffer } = await import('@gymify/game-engine');
+    const { BreadcrumbRingBuffer } = await import('@goki/game-engine');
 
     const buffer = new BreadcrumbRingBuffer(100);
     expect(buffer.getAll()).toHaveLength(0);

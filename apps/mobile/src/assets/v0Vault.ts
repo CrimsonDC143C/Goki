@@ -1,7 +1,7 @@
 /**
- * Gymify RPG — Design System & Asset Vault (v0 Harvested)
+ * Goki — Design System & Asset Vault (v0 Harvested)
  *
- * All SVGs extracted directly from https://gymify-phi.vercel.app/
+ * All SVGs extracted directly from the v0 production design prototype
  * Includes:
  * - 7 Core Stat Glyphs (STR, END, AGI, DEX, CON, WIS, SPR)
  * - 7 Adventurer Rank Crests (Copper -> Mythic)

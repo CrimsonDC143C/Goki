@@ -5,12 +5,12 @@ import {
   DEFAULT_EXERCISE_CATALOG,
   DEFAULT_TALENT_TREES,
   STARTER_WORKOUT_PRESETS,
-} from '@gymify/game-engine';
+} from '@goki/game-engine';
 
 const prisma = new PrismaClient();
 
 export async function runSeed(db: PrismaClient = prisma): Promise<void> {
-  console.log('🌱 Seeding Gymify RPG database...');
+  console.log('🌱 Seeding Goki database...');
 
   // --------------------------------------------------------------------------
   // 1. Tailored Exercise & Sport Catalog
@@ -455,12 +455,12 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
   // 7. Demo User, Character, Guild, & Active 7-Day Boss Raids
   // --------------------------------------------------------------------------
   const demoUser = await db.user.upsert({
-    where: { email: 'hero@gymify.rpg' },
+    where: { email: 'hero@gokirpg.com' },
     update: {
       passwordHash: '$2b$10$yhYXws24AU5CU0/LA2I5peE5cxniSnZvnOtHVL.9IROpu.j96M/oq',
     },
     create: {
-      email: 'hero@gymify.rpg',
+      email: 'hero@gokirpg.com',
       username: 'iron_adventurer',
       passwordHash: '$2b$10$yhYXws24AU5CU0/LA2I5peE5cxniSnZvnOtHVL.9IROpu.j96M/oq',
       timezone: 'America/Los_Angeles',

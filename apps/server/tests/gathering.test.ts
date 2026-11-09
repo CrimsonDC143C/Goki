@@ -1,4 +1,4 @@
-import { PrismaClient } from '@gymify/database';
+import { PrismaClient } from '@goki/database';
 import { describe, expect, it, vi } from 'vitest';
 import { buildServerApp } from '../src/app';
 import { GameTimerScheduler } from '../src/queues/bullmq-workers';

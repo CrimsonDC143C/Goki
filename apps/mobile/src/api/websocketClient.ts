@@ -13,7 +13,7 @@ export interface InboundWebSocketEvent {
   [key: string]: unknown;
 }
 
-export class GymifyWebSocketClient {
+export class GokiWebSocketClient {
   private socket: WebSocket | null = null;
   private status: WebSocketStatus = 'disconnected';
   private subscribedRooms = new Set<string>();
@@ -62,7 +62,7 @@ export class GymifyWebSocketClient {
   }
 
   /**
-   * Establishes real-time bi-directional connection to the Gymify RPG server.
+   * Establishes real-time bi-directional connection to the Goki server.
    */
   public async connect(): Promise<void> {
     if (this.socket && (this.socket.readyState === 0 || this.socket.readyState === 1)) {
@@ -286,4 +286,4 @@ export class GymifyWebSocketClient {
 /**
  * Shared singleton WebSocket client for the mobile application.
  */
-export const gymifyWebSocket = new GymifyWebSocketClient();
+export const gokiWebSocket = new GokiWebSocketClient();
