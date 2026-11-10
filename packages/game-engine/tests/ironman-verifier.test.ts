@@ -209,6 +209,73 @@ describe('Ironman Mode Telemetry Verifier (@goki/game-engine)', () => {
       expect(volatileResult.verified).toBe(false);
       expect(volatileResult.reasons.some((r) => r.includes('Excessive heart rate volatility'))).toBe(true);
     });
+
+    it('authenticates thermal SAUNA and COLD_PLUNGE sessions with elevated physiological HR and autonomic variance', () => {
+      // Sauna session: HR elevates up to ~155 BPM (above 0.80 * 190 = 152 calm Yoga ceiling, within 0.92 * 190 = 175 thermal ceiling)
+      const saunaSamples: HeartRateSample[] = Array.from({ length: 20 }, (_, i) => ({
+        bpm: 138 + (i % 18), // 138..155 BPM, avg ~147 BPM
+        timestamp: 1000000 + i * 60000,
+      }));
+
+      const saunaResult = verifyMindBodyTelemetry({
+        samples: saunaSamples,
+        durationSeconds: 1200,
+        expectedModality: 'SAUNA',
+        osActivityClassification: 'HKWorkoutActivityTypeOther',
+        userMaxHr: 190,
+      });
+
+      expect(saunaResult.verified).toBe(true);
+      expect(saunaResult.osClassificationVerified).toBe(true);
+      expect(saunaResult.heartRateStabilityVerified).toBe(true);
+      expect(saunaResult.peakBpm).toBe(155);
+
+      // Cold plunge session: initial cold-shock spike to 145 BPM then bradycardic adaptation down to 92 BPM (stdDev ~18 BPM)
+      const coldPlungeSamples: HeartRateSample[] = Array.from({ length: 16 }, (_, i) => ({
+        bpm: i < 4 ? 140 + i : 92 + (i % 6),
+        timestamp: 1000000 + i * 15000,
+      }));
+
+      const coldPlungeResult = verifyMindBodyTelemetry({
+        samples: coldPlungeSamples,
+        durationSeconds: 240,
+        expectedModality: 'COLD_PLUNGE',
+        osActivityClassification: 'HKWorkoutActivityTypeWaterFitness',
+        userMaxHr: 190,
+      });
+
+      expect(coldPlungeResult.verified).toBe(true);
+      expect(coldPlungeResult.osClassificationVerified).toBe(true);
+      expect(coldPlungeResult.heartRateStabilityVerified).toBe(true);
+
+      // Flatline in SAUNA still rejected
+      const flatSaunaSamples: HeartRateSample[] = Array.from({ length: 15 }, (_, i) => ({
+        bpm: 145,
+        timestamp: 1000000 + i * 60000,
+      }));
+      const flatSauna = verifyMindBodyTelemetry({
+        samples: flatSaunaSamples,
+        durationSeconds: 900,
+        expectedModality: 'SAUNA',
+        osActivityClassification: 'sauna',
+      });
+      expect(flatSauna.verified).toBe(false);
+      expect(flatSauna.reasons.some((r) => r.includes('flatline'))).toBe(true);
+
+      // Non-thermal YOGA at 160 BPM still fails
+      const highHrYogaSamples: HeartRateSample[] = Array.from({ length: 15 }, (_, i) => ({
+        bpm: 152 + (i % 9), // peaks at 160 BPM
+        timestamp: 1000000 + i * 60000,
+      }));
+      const failedYoga = verifyMindBodyTelemetry({
+        samples: highHrYogaSamples,
+        durationSeconds: 900,
+        expectedModality: 'YOGA',
+        osActivityClassification: 'HKWorkoutActivityTypeYoga',
+        userMaxHr: 190,
+      });
+      expect(failedYoga.verified).toBe(false);
+    });
   });
 
   describe('verifyRecoveryTelemetry (Sleep & Pedometer)', () => {
@@ -224,6 +291,7 @@ describe('Ironman Mode Telemetry Verifier (@goki/game-engine)', () => {
       const result = verifyRecoveryTelemetry({
         sleepStages: validStages,
         stepCount: 9240,
+        stepTrackingDurationSeconds: 7200,
       });
 
       expect(result.verified).toBe(true);
@@ -265,11 +333,37 @@ describe('Ironman Mode Telemetry Verifier (@goki/game-engine)', () => {
       expect(result.reasons.some((r) => r.includes('flat block of Awake'))).toBe(true);
     });
 
-    it('validates pedometer step counts and flags negative or implausible values', () => {
-      // Valid step-only payload
-      const validSteps = verifyRecoveryTelemetry({ stepCount: 10500 });
+    it('validates pedometer step counts and flags negative, zero-duration, missing-duration, or implausible values', () => {
+      // Valid step-only payload with positive tracking duration
+      const validSteps = verifyRecoveryTelemetry({
+        stepCount: 10500,
+        stepTrackingDurationSeconds: 5400, // 90 min (~116 steps/min)
+      });
       expect(validSteps.verified).toBe(true);
       expect(validSteps.stepsVerified).toBe(true);
+
+      // Missing stepTrackingDurationSeconds when stepCount > 0 must be rejected
+      const missingDurationSteps = verifyRecoveryTelemetry({ stepCount: 10500 });
+      expect(missingDurationSteps.verified).toBe(false);
+      expect(missingDurationSteps.stepsVerified).toBe(false);
+      expect(
+        missingDurationSteps.reasons.some((r) =>
+          r.includes('Step tracking duration must be greater than zero seconds to verify cadence')
+        )
+      ).toBe(true);
+
+      // Zero stepTrackingDurationSeconds bypass attempt must be rejected
+      const zeroDurationSteps = verifyRecoveryTelemetry({
+        stepCount: 8000,
+        stepTrackingDurationSeconds: 0,
+      });
+      expect(zeroDurationSteps.verified).toBe(false);
+      expect(zeroDurationSteps.stepsVerified).toBe(false);
+      expect(
+        zeroDurationSteps.reasons.some((r) =>
+          r.includes('Step tracking duration must be greater than zero seconds to verify cadence')
+        )
+      ).toBe(true);
 
       // Negative steps
       const negativeSteps = verifyRecoveryTelemetry({ stepCount: -200 });

@@ -31,7 +31,11 @@ export interface PlatesAndWarmupModalProps {
   warmupPresetCount: WarmupPresetCount;
   onSelectBarWeightKg: (barKg: number) => void;
   onSelectWarmupPresetCount: (count: WarmupPresetCount) => void;
-  onInsertWarmupSets: (sets: GeneratedWarmupSet[]) => void;
+  onInsertWarmupSets: (
+    sets: GeneratedWarmupSet[],
+    barWeight: number,
+    targetWorkingWeightDisplay?: number
+  ) => void;
   onClose: () => void;
 }
 
@@ -272,7 +276,8 @@ export const PlatesAndWarmupModal: React.FC<PlatesAndWarmupModalProps> = ({
                 ]}
                 disabled={warmupSets.length === 0}
                 onPress={() => {
-                  onInsertWarmupSets(warmupSets);
+                  const parsedWorkingWeight = Math.max(0, Number(targetWeightStr) || 0);
+                  onInsertWarmupSets(warmupSets, barWeightKg, parsedWorkingWeight);
                   onClose();
                 }}
                 activeOpacity={0.8}

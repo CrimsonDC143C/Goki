@@ -341,11 +341,20 @@ export const GuildHallScreen: React.FC = () => {
               </Pressable>
 
               <Pressable
-                style={styles.rolloverBtn}
+                style={[
+                  styles.rolloverBtn,
+                  Boolean(raid.lastResolution) && styles.strikeBtnDone,
+                ]}
+                disabled={Boolean(raid.lastResolution)}
                 onPress={() => resolveWeeklyRaidRewards(raid.id)}
               >
-                <Text style={styles.rolloverBtnText}>
-                  🎁 Preview/Claim 7d Rollover
+                <Text
+                  style={[
+                    styles.rolloverBtnText,
+                    Boolean(raid.lastResolution) && styles.strikeBtnTextDone,
+                  ]}
+                >
+                  {raid.lastResolution ? '✓ Rollover Claimed' : '🎁 Preview/Claim 7d Rollover'}
                 </Text>
               </Pressable>
             </View>

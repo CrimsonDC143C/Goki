@@ -2,6 +2,8 @@ import { PrismaClient } from '@goki/database';
 import { MS_PER_HOUR } from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { env } from '../config';
+import { assertCharacterActiveAndOwned, requireAuth } from '../middleware/auth';
 import { GameTimerScheduler } from '../queues/bullmq-workers';
 import {
   buildCharacterCombatSnapshot,
@@ -44,9 +46,10 @@ export function registerDungeonRoutes(
   });
 
   // Create a 1-5 player Dungeon Run (Solo instant start or Recruiting co-op party lobby)
-  app.post('/api/dungeons/:dungeonId/runs', async (request, reply) => {
+  app.post('/api/dungeons/:dungeonId/runs', { preHandler: [requireAuth] }, async (request, reply) => {
     const { dungeonId } = z.object({ dungeonId: z.string() }).parse(request.params);
     const body = createRunSchema.parse(request.body);
+    await assertCharacterActiveAndOwned(db, body.leaderCharacterId, request.user.userId);
 
     const dungeon = await db.dungeon.findFirst({
       where: { OR: [{ id: dungeonId }, { slug: dungeonId }] },
@@ -121,9 +124,10 @@ export function registerDungeonRoutes(
   });
 
   // Join a RECRUITING 1-5 player co-op Dungeon lobby
-  app.post('/api/dungeon-runs/:runId/join', async (request, reply) => {
+  app.post('/api/dungeon-runs/:runId/join', { preHandler: [requireAuth] }, async (request, reply) => {
     const { runId } = z.object({ runId: z.string() }).parse(request.params);
     const { characterId } = joinRunSchema.parse(request.body);
+    await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
     const run = await db.dungeonRun.findUnique({
       where: { id: runId },
@@ -183,7 +187,7 @@ export function registerDungeonRoutes(
   });
 
   // Lock in a RECRUITING lobby and begin the 24-Hour Expedition Window
-  app.post('/api/dungeon-runs/:runId/start', async (request, reply) => {
+  app.post('/api/dungeon-runs/:runId/start', { preHandler: [requireAuth] }, async (request, reply) => {
     const { runId } = z.object({ runId: z.string() }).parse(request.params);
 
     const run = await db.dungeonRun.findUnique({
@@ -193,6 +197,8 @@ export function registerDungeonRoutes(
     if (!run) {
       return reply.status(404).send({ error: 'Dungeon run not found.' });
     }
+    await assertCharacterActiveAndOwned(db, run.leaderCharacterId, request.user.userId);
+
     if (run.status !== 'RECRUITING') {
       return reply.status(400).send({ error: `Cannot start run in status ${run.status}.` });
     }
@@ -244,15 +250,46 @@ export function registerDungeonRoutes(
   });
 
   // Trigger deterministic Auto-Battler resolution (when 24h window ends or dev fast-forward)
-  app.post('/api/dungeon-runs/:runId/resolve', async (request, reply) => {
+  app.post('/api/dungeon-runs/:runId/resolve', { preHandler: [requireAuth] }, async (request, reply) => {
     const { runId } = z.object({ runId: z.string() }).parse(request.params);
     const { forceDevResolve = false } = z
       .object({ forceDevResolve: z.boolean().optional() })
       .parse(request.body ?? {});
 
-    const run = await db.dungeonRun.findUnique({ where: { id: runId } });
+    const run = await db.dungeonRun.findUnique({
+      where: { id: runId },
+      include: { participants: true },
+    });
     if (!run) {
       return reply.status(404).send({ error: 'Dungeon run not found.' });
+    }
+
+    // Verify requester owns run.leaderCharacterId or a participant character in the run
+    const candidateCharIds = Array.from(
+      new Set([
+        run.leaderCharacterId,
+        ...((run as { participants?: Array<{ characterId: string }> }).participants?.map(
+          (p) => p.characterId
+        ) ?? []),
+      ].filter(Boolean))
+    );
+    let authorizedParticipant = false;
+    for (const cid of candidateCharIds) {
+      const char = await db.character.findUnique({ where: { id: cid } });
+      if (char && char.userId === request.user.userId && !char.deletedAt) {
+        authorizedParticipant = true;
+        break;
+      }
+    }
+    if (!authorizedParticipant) {
+      return reply.status(403).send({
+        error: 'Forbidden: You do not own a character participating in this dungeon run.',
+      });
+    }
+
+    const isProd = (process.env.NODE_ENV || env.NODE_ENV) === 'production';
+    if (forceDevResolve && isProd) {
+      return reply.status(403).send({ error: 'Dev resolution bypass is disabled in production.' });
     }
 
     if (

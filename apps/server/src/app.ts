@@ -48,6 +48,10 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
   app.decorate('requireAuth', requireAuth);
   app.decorate('websocketManager', wsManager);
 
+  app.addHook('onClose', async () => {
+    wsManager.shutdown();
+  });
+
   // Automatically convert BigInt fields (Raid Boss HP & Contribution scores) before JSON serialization
   app.addHook('preSerialization', async (_request, _reply, payload) => {
     return serializeBigInts(payload);
@@ -69,6 +73,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
 
     // Enhance Fastify error handler: unhandled 500 exceptions are logged into BugReport
     if (statusCode >= 500 && options.db?.bugReport?.create) {
+      const sanitizedUrl = (request.raw.url ?? '').replace(/([?&]token=)[^&]+/gi, '$1[REDACTED]');
       options.db.bugReport
         .create({
           data: {
@@ -79,7 +84,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
             stackTrace: error instanceof Error ? error.stack ?? null : null,
             breadcrumbs: [],
             stateSnapshot: {
-              url: request.raw.url,
+              url: sanitizedUrl,
               method: request.raw.method,
             },
             deviceMetadata: {

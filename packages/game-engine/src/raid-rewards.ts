@@ -314,29 +314,41 @@ export function calculateRaidRewards(
         const baseRolls = TIER_GEAR_ROLL_COUNT[rewardTier];
         const effectiveRolls = isBossDefeated ? baseRolls : Math.max(1, baseRolls - 1);
 
+        const getLootKey = (d: LootDrop) =>
+          d.tier || d.prefixId || d.suffixId || d.uniquePassive
+            ? `${d.itemSlug}:${d.tier ?? ''}:${d.prefixId ?? ''}:${d.suffixId ?? ''}:${d.uniquePassive?.passiveId ?? (d.uniquePassive as { id?: string } | null | undefined)?.id ?? ''}`
+            : d.itemSlug;
+
         for (let r = 0; r < effectiveRolls; r++) {
           const picked = rng.pickWeighted(eligibleLoot);
-          const existing = lootDrops.find((d) => d.itemSlug === picked.itemSlug);
-          if (existing) {
-            existing.quantity += picked.quantity;
-          } else if (BASE_EQUIPPABLE_ITEM_BY_SLUG[picked.itemSlug]) {
+          let drop: LootDrop;
+          if (BASE_EQUIPPABLE_ITEM_BY_SLUG[picked.itemSlug]) {
             const rolled = rollRaidProceduralGearDrop({
               contributionTier: rewardTier,
               isBossDefeated,
               seed: `raid-gear:${input.seed ?? 'seed'}:${p.characterId}:${r}:${picked.itemSlug}`,
               baseSlug: picked.itemSlug,
             });
-            lootDrops.push({
+            drop = {
               ...rolled,
               quantity: picked.quantity,
-            });
+            };
           } else {
-            lootDrops.push({
+            drop = {
+              ...picked,
               itemSlug: picked.itemSlug,
               itemName: picked.itemName,
               rarity: picked.rarity,
               quantity: picked.quantity,
-            });
+            };
+          }
+
+          const targetKey = getLootKey(drop);
+          const existing = lootDrops.find((d) => getLootKey(d) === targetKey);
+          if (existing) {
+            existing.quantity += drop.quantity;
+          } else {
+            lootDrops.push({ ...drop });
           }
         }
       }

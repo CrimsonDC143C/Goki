@@ -201,7 +201,7 @@ export function verifyTelemetry(
 export interface MindBodyTelemetryPayload {
   samples?: HeartRateSample[];
   durationSeconds?: number;
-  expectedModality?: 'YOGA' | 'PILATES' | 'MEDITATION' | 'BREATHWORK' | string;
+  expectedModality?: 'YOGA' | 'PILATES' | 'MEDITATION' | 'BREATHWORK' | 'SAUNA' | 'COLD_PLUNGE' | string;
   osActivityClassification?: string | null;
   userMaxHr?: number;
   userRestingHr?: number;
@@ -275,6 +275,7 @@ export function verifyMindBodyTelemetry(
 
   // 2. OS Activity Classification Verification
   const rawOsTag = (payload.osActivityClassification ?? '').trim().toLowerCase();
+  const normalizedExpectedModality = (payload.expectedModality ?? '').trim().toUpperCase();
   const validMindBodyTags = [
     'yoga',
     'pilates',
@@ -289,10 +290,34 @@ export function verifyMindBodyTelemetry(
     'hkworkoutactivitytypepilates',
     'hkworkoutactivitytypeflexibility',
   ];
+  const validThermalTags = [
+    'sauna',
+    'cold_plunge',
+    'coldplunge',
+    'thermal',
+    'ice_bath',
+    'icebath',
+    'waterfitness',
+    'hkworkoutactivitytypewaterfitness',
+    'hkworkoutactivitytypeother',
+    'hkworkoutactivitytypecooldown',
+    'other',
+    'recovery',
+  ];
+
+  const isThermalModality =
+    ['SAUNA', 'COLD_PLUNGE'].includes(normalizedExpectedModality) ||
+    (rawOsTag.length > 0 && validThermalTags.some((tag) => rawOsTag.includes(tag)));
 
   let osClassificationVerified = false;
   if (rawOsTag.length > 0) {
-    osClassificationVerified = validMindBodyTags.some((tag) => rawOsTag.includes(tag));
+    if (isThermalModality) {
+      osClassificationVerified =
+        validThermalTags.some((tag) => rawOsTag.includes(tag)) ||
+        validMindBodyTags.some((tag) => rawOsTag.includes(tag));
+    } else {
+      osClassificationVerified = validMindBodyTags.some((tag) => rawOsTag.includes(tag));
+    }
   }
 
   if (!osClassificationVerified) {
@@ -306,36 +331,67 @@ export function verifyMindBodyTelemetry(
   // 3. Heart Rate Stability & Low Variance Verification
   let heartRateStabilityVerified = true;
 
-  // A. Reject Zone 4 / Zone 5 spikes (Zone 4 begins at 80% Max HR)
-  const zone4BpmCeiling = Math.round(maxHr * 0.8);
-  if (peakBpm >= zone4BpmCeiling) {
-    heartRateStabilityVerified = false;
-    reasons.push(
-      `Zone 4 heart rate spike detected (${peakBpm} BPM >= ${zone4BpmCeiling} BPM); session incompatible with low-intensity mind-body restorative state`
-    );
-  }
+  if (isThermalModality) {
+    // Thermal recovery (Sauna / Cold Plunge): physiological vasodilation or cold-shock autonomic adaptation
+    const thermalPeakBpmCeiling = Math.round(maxHr * 0.92);
+    if (peakBpm > thermalPeakBpmCeiling) {
+      heartRateStabilityVerified = false;
+      reasons.push(
+        `Peak heart rate (${peakBpm} BPM > ${thermalPeakBpmCeiling} BPM) exceeds safe physiological thermal recovery ceiling`
+      );
+    }
 
-  // B. Average BPM should remain calm (Zone 1 or mild Zone 2, <= 72% Max HR)
-  const calmBpmCeiling = Math.round(maxHr * 0.72);
-  if (averageBpm > calmBpmCeiling) {
-    heartRateStabilityVerified = false;
-    reasons.push(
-      `Average heart rate (${averageBpm} BPM) exceeds calm restorative ceiling (${calmBpmCeiling} BPM)`
-    );
-  }
+    const thermalAvgBpmCeiling = Math.round(maxHr * 0.88);
+    if (averageBpm > thermalAvgBpmCeiling) {
+      heartRateStabilityVerified = false;
+      reasons.push(
+        `Average heart rate (${averageBpm} BPM) exceeds thermal recovery ceiling (${thermalAvgBpmCeiling} BPM)`
+      );
+    }
 
-  // C. Reject artificial flatline (spoofed/synthetic data with zero physiological jitter)
-  if (bpmStdDev < 0.5 && validSamples.length >= 5) {
-    heartRateStabilityVerified = false;
-    reasons.push('Artificial flatline detected: zero physiological heart rate variance');
-  }
+    if (bpmStdDev < 0.5 && validSamples.length >= 5) {
+      heartRateStabilityVerified = false;
+      reasons.push('Artificial flatline detected: zero physiological heart rate variance');
+    }
 
-  // D. Reject excessive variance/volatility (e.g., HIIT/sprints mistakenly logged as Yoga)
-  if (bpmStdDev > 16.0) {
-    heartRateStabilityVerified = false;
-    reasons.push(
-      `Excessive heart rate volatility (stdDev ${bpmStdDev} BPM); indicates strenuous or erratic exertion incompatible with stable mind-body focus`
-    );
+    if (bpmStdDev > 24.0) {
+      heartRateStabilityVerified = false;
+      reasons.push(
+        `Excessive heart rate volatility (stdDev ${bpmStdDev} BPM); exceeds physiological autonomic adaptation range for thermal recovery`
+      );
+    }
+  } else {
+    // A. Reject Zone 4 / Zone 5 spikes (Zone 4 begins at 80% Max HR)
+    const zone4BpmCeiling = Math.round(maxHr * 0.8);
+    if (peakBpm >= zone4BpmCeiling) {
+      heartRateStabilityVerified = false;
+      reasons.push(
+        `Zone 4 heart rate spike detected (${peakBpm} BPM >= ${zone4BpmCeiling} BPM); session incompatible with low-intensity mind-body restorative state`
+      );
+    }
+
+    // B. Average BPM should remain calm (Zone 1 or mild Zone 2, <= 72% Max HR)
+    const calmBpmCeiling = Math.round(maxHr * 0.72);
+    if (averageBpm > calmBpmCeiling) {
+      heartRateStabilityVerified = false;
+      reasons.push(
+        `Average heart rate (${averageBpm} BPM) exceeds calm restorative ceiling (${calmBpmCeiling} BPM)`
+      );
+    }
+
+    // C. Reject artificial flatline (spoofed/synthetic data with zero physiological jitter)
+    if (bpmStdDev < 0.5 && validSamples.length >= 5) {
+      heartRateStabilityVerified = false;
+      reasons.push('Artificial flatline detected: zero physiological heart rate variance');
+    }
+
+    // D. Reject excessive variance/volatility (e.g., HIIT/sprints mistakenly logged as Yoga)
+    if (bpmStdDev > 16.0) {
+      heartRateStabilityVerified = false;
+      reasons.push(
+        `Excessive heart rate volatility (stdDev ${bpmStdDev} BPM); indicates strenuous or erratic exertion incompatible with stable mind-body focus`
+      );
+    }
   }
 
   // 4. Scoring
@@ -486,13 +542,22 @@ export function verifyRecoveryTelemetry(
       reasons.push('Negative step count is physiologically impossible');
     } else if (stepCount > 100000) {
       reasons.push(`Implausibly high step count (${stepCount}) exceeds daily human physiological limits`);
-    } else if (payload.stepTrackingDurationSeconds && payload.stepTrackingDurationSeconds > 0) {
-      const durationMin = payload.stepTrackingDurationSeconds / 60;
-      const cadence = stepCount / durationMin;
-      if (cadence > 280) {
-        reasons.push(`Step cadence (${Math.round(cadence)} steps/min) exceeds plausible sustained movement speed`);
+    } else if (stepCount > 0) {
+      if (
+        payload.stepTrackingDurationSeconds === undefined ||
+        !Number.isFinite(payload.stepTrackingDurationSeconds) ||
+        payload.stepTrackingDurationSeconds <= 0
+      ) {
+        stepsVerified = false;
+        reasons.push('Step tracking duration must be greater than zero seconds to verify cadence');
       } else {
-        stepsVerified = true;
+        const durationMin = payload.stepTrackingDurationSeconds / 60;
+        const cadence = stepCount / durationMin;
+        if (cadence > 280) {
+          reasons.push(`Step cadence (${Math.round(cadence)} steps/min) exceeds plausible sustained movement speed`);
+        } else {
+          stepsVerified = true;
+        }
       }
     } else {
       stepsVerified = true;

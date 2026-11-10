@@ -1,13 +1,18 @@
 import { PrismaClient } from '@goki/database';
 import {
+  BASE_EQUIPPABLE_ITEM_BY_SLUG,
+  EquipItemType,
+  EquipmentSlot,
   aggregateTalentModifiers,
   evaluateFatigueStateAtTime,
   getAvailableStrenuousXpMultiplier,
   getSystemicFatigueCombatPenalties,
+  validateEquipmentRequirements,
 } from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth';
+import { assertCharacterActiveAndOwned, requireAuth } from '../middleware/auth';
+import { isPrismaUniqueConstraintError, withDbTransaction } from '../services/game-operations';
 
 export const SOFT_DELETE_RETENTION_DAYS = 30;
 export const SOFT_DELETE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -33,6 +38,9 @@ const equipSchema = z.object({
     'boots',
     'accessory1',
     'accessory2',
+    'ring1',
+    'ring2',
+    'trinket',
   ]),
   inventoryItemId: z.string().nullable(),
 });
@@ -125,81 +133,134 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
     const chosenName = body.name.trim();
     const chosenAppearance = body.appearanceId || body.avatarSpriteId || 'oni_warlord';
 
-    // 1. Check existing active characters for this account
-    const existingCharacters = await db.character.findMany({
-      where: { userId },
-    });
-    const activeCharacters = existingCharacters.filter((c) => !c.deletedAt);
+    let txResult:
+      | { ok: true; character: any }
+      | { ok: false; statusCode: number; error: string };
+    try {
+      txResult = await withDbTransaction(
+        db,
+        async (tx) => {
+          // 1. Check existing active characters for this account inside serialized transaction
+          const existingCharacters = await tx.character.findMany({
+            where: { userId },
+          });
+          const activeCharacters = existingCharacters.filter((c) => !c.deletedAt);
 
-    if (activeCharacters.length >= 2) {
-      return reply.status(400).send({
-        error:
-          'Account character limit reached. Each user is allowed a maximum of 2 characters: one Standard (Manual Honesty) and one Ironman Verified.',
-      });
-    }
+          if (activeCharacters.length >= 2) {
+            return {
+              ok: false as const,
+              statusCode: 400,
+              error:
+                'Account character limit reached. Each user is allowed a maximum of 2 characters: one Standard (Manual Honesty) and one Ironman Verified.',
+            };
+          }
 
-    if (activeCharacters.some((c) => c.gameMode === body.gameMode)) {
-      const modeLabel = body.gameMode === 'STANDARD' ? 'Standard (Manual Honesty)' : 'Ironman Verified';
-      return reply.status(409).send({
-        error: `You already have a character in ${modeLabel} mode. Only one character is permitted per game mode.`,
-      });
-    }
+          if (activeCharacters.some((c) => c.gameMode === body.gameMode)) {
+            const modeLabel =
+              body.gameMode === 'STANDARD' ? 'Standard (Manual Honesty)' : 'Ironman Verified';
+            return {
+              ok: false as const,
+              statusCode: 409,
+              error: `You already have a character in ${modeLabel} mode. Only one character is permitted per game mode.`,
+            };
+          }
 
-    // 2. Check name uniqueness among active characters
-    const existingCharacterWithName =
-      typeof (db.character as any).findFirst === 'function'
-        ? await db.character.findFirst({
-            where: {
+          // 2. Check case-insensitive name uniqueness among active characters
+          let existingCharacterWithName: any = null;
+          if (typeof (tx.character as any).findFirst === 'function') {
+            existingCharacterWithName = await tx.character.findFirst({
+              where: {
+                name: { equals: chosenName, mode: 'insensitive' } as any,
+                deletedAt: null,
+              },
+            });
+            if (!existingCharacterWithName) {
+              existingCharacterWithName = await tx.character.findFirst({
+                where: {
+                  name: chosenName,
+                  deletedAt: null,
+                },
+              });
+            }
+          } else if (typeof (tx.character as any).findUnique === 'function') {
+            existingCharacterWithName = await tx.character.findUnique({
+              where: { name: chosenName },
+            });
+          }
+
+          if (existingCharacterWithName && !existingCharacterWithName.deletedAt) {
+            return {
+              ok: false as const,
+              statusCode: 409,
+              error:
+                'A character with this name already exists in the realm. Please choose a different name.',
+            };
+          }
+
+          // If a soft-deleted character held this name in the DB, rename it so database unique constraints won't clash
+          if (
+            typeof (tx.character as any).findFirst === 'function' &&
+            typeof (tx.character as any).update === 'function'
+          ) {
+            const existingDeletedWithName =
+              (await tx.character.findFirst({
+                where: {
+                  name: { equals: chosenName, mode: 'insensitive' } as any,
+                  NOT: { deletedAt: null },
+                },
+              })) ??
+              (await tx.character.findFirst({
+                where: {
+                  name: chosenName,
+                  NOT: { deletedAt: null },
+                },
+              }));
+            if (existingDeletedWithName) {
+              await tx.character.update({
+                where: { id: existingDeletedWithName.id },
+                data: { name: `${chosenName}#${existingDeletedWithName.id.slice(-4)}` },
+              });
+            }
+          }
+
+          // 3. Create the character with required relational records
+          const character = await tx.character.create({
+            data: {
+              userId,
               name: chosenName,
-              deletedAt: null,
+              gameMode: body.gameMode,
+              appearanceId: chosenAppearance,
+              avatarSpriteId: chosenAppearance,
+              stats: { create: {} },
+              fatigueState: { create: {} },
+              equipmentLoadout: { create: {} },
             },
-          })
-        : await db.character.findUnique({
-            where: { name: chosenName },
+            include: {
+              stats: true,
+              fatigueState: true,
+              equipmentLoadout: true,
+            },
           });
 
-    if (existingCharacterWithName && !existingCharacterWithName.deletedAt) {
-      return reply.status(409).send({
-        error: 'A character with this name already exists in the realm. Please choose a different name.',
-      });
-    }
-
-    // If a soft-deleted character held this name in the DB, rename it so database unique constraints won't clash
-    if (typeof (db.character as any).findFirst === 'function' && typeof (db.character as any).update === 'function') {
-      const existingDeletedWithName = await db.character.findFirst({
-        where: {
-          name: chosenName,
-          NOT: { deletedAt: null },
+          return { ok: true as const, character };
         },
-      });
-      if (existingDeletedWithName) {
-        await db.character.update({
-          where: { id: existingDeletedWithName.id },
-          data: { name: `${chosenName}#${existingDeletedWithName.id.slice(-4)}` },
+        `character-user:${userId}`
+      );
+    } catch (err) {
+      if (isPrismaUniqueConstraintError(err)) {
+        return reply.status(409).send({
+          error:
+            'A character with this name or game mode slot already exists. Only one active character per game mode is permitted.',
         });
       }
+      throw err;
     }
 
-    // 3. Create the character with required relational records
-    const character = await db.character.create({
-      data: {
-        userId,
-        name: chosenName,
-        gameMode: body.gameMode,
-        appearanceId: chosenAppearance,
-        avatarSpriteId: chosenAppearance,
-        stats: { create: {} },
-        fatigueState: { create: {} },
-        equipmentLoadout: { create: {} },
-      },
-      include: {
-        stats: true,
-        fatigueState: true,
-        equipmentLoadout: true,
-      },
-    });
+    if (!txResult.ok) {
+      return reply.status(txResult.statusCode).send({ error: txResult.error });
+    }
 
-    return reply.status(201).send({ character });
+    return reply.status(201).send({ character: txResult.character });
   });
 
   /**
@@ -332,58 +393,127 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
    */
   app.post('/api/characters/:characterId/restore', { preHandler: [requireAuth] }, async (request, reply) => {
     const { characterId } = z.object({ characterId: z.string() }).parse(request.params);
+    const { userId } = request.user;
 
-    const character = await db.character.findUnique({
-      where: { id: characterId },
-    });
+    let txResult:
+      | { ok: true; character: any }
+      | { ok: false; statusCode: number; error: string };
+    try {
+      txResult = await withDbTransaction(
+        db,
+        async (tx) => {
+          const character = await tx.character.findUnique({
+            where: { id: characterId },
+          });
 
-    if (!character) {
-      return reply.status(404).send({ error: 'Character not found.' });
+          if (!character) {
+            return { ok: false as const, statusCode: 404, error: 'Character not found.' };
+          }
+          if (character.userId !== userId) {
+            return { ok: false as const, statusCode: 403, error: 'You do not own this character.' };
+          }
+          if (!character.deletedAt) {
+            return { ok: false as const, statusCode: 400, error: 'Character is already active.' };
+          }
+
+          const deletedTimestamp = new Date(character.deletedAt).getTime();
+          if (deletedTimestamp + SOFT_DELETE_RETENTION_MS < Date.now()) {
+            return {
+              ok: false as const,
+              statusCode: 410,
+              error: 'The 30-day restoration window for this hero has expired.',
+            };
+          }
+
+          const userCharacters = await tx.character.findMany({
+            where: { userId },
+          });
+          const activeCharacters = userCharacters.filter(
+            (c) => !c.deletedAt && c.id !== characterId
+          );
+
+          if (activeCharacters.length >= 2) {
+            return {
+              ok: false as const,
+              statusCode: 400,
+              error:
+                'Account character limit reached. Each user is allowed a maximum of 2 characters: one Standard (Manual Honesty) and one Ironman Verified.',
+            };
+          }
+
+          const conflict = activeCharacters.find((c) => c.gameMode === character.gameMode);
+          if (conflict) {
+            return {
+              ok: false as const,
+              statusCode: 409,
+              error:
+                'You already have an active hero in this mode slot. Please delete/archive your current active hero in that mode before restoring this fallen hero.',
+            };
+          }
+
+          // Check case-insensitive name availability against other active characters
+          let nameConflict: any = null;
+          if (typeof (tx.character as any).findFirst === 'function') {
+            nameConflict =
+              (await tx.character.findFirst({
+                where: {
+                  name: { equals: character.name, mode: 'insensitive' } as any,
+                  deletedAt: null,
+                  id: { not: characterId },
+                },
+              })) ??
+              (await tx.character.findFirst({
+                where: {
+                  name: character.name,
+                  deletedAt: null,
+                  id: { not: characterId },
+                },
+              }));
+          }
+          if (nameConflict && nameConflict.id !== characterId && !nameConflict.deletedAt) {
+            return {
+              ok: false as const,
+              statusCode: 409,
+              error:
+                'An active character with this name already exists in the realm. Cannot restore under a conflicting name.',
+            };
+          }
+
+          const restored = await tx.character.update({
+            where: { id: characterId },
+            data: { deletedAt: null },
+            include: {
+              stats: true,
+              fatigueState: true,
+              equipmentLoadout: true,
+            },
+          });
+
+          return { ok: true as const, character: restored };
+        },
+        `character-user:${userId}`
+      );
+    } catch (err) {
+      if (isPrismaUniqueConstraintError(err)) {
+        return reply.status(409).send({
+          error:
+            'You already have an active hero in this mode slot or name conflict occurred.',
+        });
+      }
+      throw err;
     }
-    if (character.userId !== request.user.userId) {
-      return reply.status(403).send({ error: 'You do not own this character.' });
-    }
-    if (!character.deletedAt) {
-      return reply.status(400).send({ error: 'Character is already active.' });
+
+    if (!txResult.ok) {
+      return reply.status(txResult.statusCode).send({ error: txResult.error });
     }
 
-    const deletedTimestamp = new Date(character.deletedAt).getTime();
-    if (deletedTimestamp + SOFT_DELETE_RETENTION_MS < Date.now()) {
-      return reply.status(410).send({
-        error: 'The 30-day restoration window for this hero has expired.',
-      });
-    }
-
-    const userCharacters = await db.character.findMany({
-      where: { userId: request.user.userId },
-    });
-    const conflict = userCharacters.find(
-      (c) => !c.deletedAt && c.id !== characterId && c.gameMode === character.gameMode
-    );
-
-    if (conflict) {
-      return reply.status(409).send({
-        error:
-          'You already have an active hero in this mode slot. Please delete/archive your current active hero in that mode before restoring this fallen hero.',
-      });
-    }
-
-    const restored = await db.character.update({
-      where: { id: characterId },
-      data: { deletedAt: null },
-      include: {
-        stats: true,
-        fatigueState: true,
-        equipmentLoadout: true,
-      },
-    });
-
-    return reply.send({ character: restored });
+    return reply.send({ character: txResult.character });
   });
 
   // Fetch full Character sheet with live projected Tavern Rest & Systemic Fatigue state
-  app.get('/api/characters/:characterId', async (request, reply) => {
+  app.get('/api/characters/:characterId', { preHandler: [requireAuth] }, async (request, reply) => {
     const { characterId } = z.object({ characterId: z.string() }).parse(request.params);
+    await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
     const character = await db.character.findUnique({
       where: { id: characterId },
@@ -463,9 +593,10 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
   });
 
   // Instant Travel between RPG locations (No step/GPS gate per MVP spec)
-  app.post('/api/characters/:characterId/travel', async (request, reply) => {
+  app.post('/api/characters/:characterId/travel', { preHandler: [requireAuth] }, async (request, reply) => {
     const { characterId } = z.object({ characterId: z.string() }).parse(request.params);
     const { destination } = travelSchema.parse(request.body);
+    await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
     const character = await db.character.update({
       where: { id: characterId },
@@ -476,9 +607,17 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
   });
 
   // Stat-gated Equipment Loadout slot assignment
-  app.post('/api/characters/:characterId/equip', async (request, reply) => {
+  app.post('/api/characters/:characterId/equip', { preHandler: [requireAuth] }, async (request, reply) => {
     const { characterId } = z.object({ characterId: z.string() }).parse(request.params);
-    const { slot, inventoryItemId } = equipSchema.parse(request.body);
+    const { slot: rawSlot, inventoryItemId } = equipSchema.parse(request.body);
+    await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
+
+    const normalizeTargetSlot = (s: string): EquipmentSlot => {
+      if (s === 'ring1' || s === 'trinket') return 'accessory1';
+      if (s === 'ring2') return 'accessory2';
+      return s as EquipmentSlot;
+    };
+    const slot = normalizeTargetSlot(rawSlot);
 
     const character = await db.character.findUnique({
       where: { id: characterId },
@@ -488,35 +627,7 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
       return reply.status(404).send({ error: 'Character not found.' });
     }
 
-    if (inventoryItemId !== null) {
-      const invItem = await db.inventoryItem.findUnique({
-        where: { id: inventoryItemId },
-        include: { item: true },
-      });
-
-      if (!invItem || invItem.characterId !== characterId) {
-        return reply.status(400).send({ error: 'Inventory item does not belong to character.' });
-      }
-
-      // Enforce Strength / Endurance / Agility equip requirements
-      if (character.stats.strengthLevel < invItem.item.requiredStrength) {
-        return reply.status(400).send({
-          error: `Requires Strength Level ${invItem.item.requiredStrength} (current: ${character.stats.strengthLevel}).`,
-        });
-      }
-      if (character.stats.enduranceLevel < invItem.item.requiredEndurance) {
-        return reply.status(400).send({
-          error: `Requires Endurance Level ${invItem.item.requiredEndurance} (current: ${character.stats.enduranceLevel}).`,
-        });
-      }
-      if (character.stats.agilityLevel < invItem.item.requiredAgility) {
-        return reply.status(400).send({
-          error: `Requires Agility Level ${invItem.item.requiredAgility} (current: ${character.stats.agilityLevel}).`,
-        });
-      }
-    }
-
-    const slotFieldMap: Record<typeof slot, string> = {
+    const slotFieldMap: Record<EquipmentSlot, string> = {
       mainHand: 'mainHandItemId',
       offHand: 'offHandItemId',
       head: 'headItemId',
@@ -528,9 +639,141 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
     };
     const fkField = slotFieldMap[slot];
 
+    const duplicateClearUpdates: Record<string, null> = {};
+
+    if (inventoryItemId !== null) {
+      const invItem = await db.inventoryItem.findUnique({
+        where: { id: inventoryItemId },
+        include: { item: true },
+      });
+
+      if (!invItem || invItem.characterId !== characterId) {
+        return reply.status(400).send({ error: 'Inventory item does not belong to character.' });
+      }
+
+      const itemObj = (invItem.item ?? {}) as Record<string, any>;
+      const slug = (itemObj.slug ?? (invItem as any).itemSlug ?? (invItem as any).slug ?? '') as string;
+      const baseCatalogItem = slug ? BASE_EQUIPPABLE_ITEM_BY_SLUG[slug] : undefined;
+
+      const rawItemType = String(itemObj.itemType ?? baseCatalogItem?.itemType ?? '').toUpperCase();
+      const nonEquippableSlugs = new Set([
+        'vitality_elixir',
+        'tempered_whetstone',
+        'iron_ore_cluster',
+        'sunleaf_herb_bundle',
+        'obsidian_ingot',
+        'titanite_ember',
+        'champion_sigil_shard',
+        'raid_essence_crystal',
+      ]);
+
+      if (
+        rawItemType === 'CONSUMABLE' ||
+        rawItemType === 'MATERIAL' ||
+        rawItemType === 'CRAFTING_MATERIAL' ||
+        rawItemType === 'QUEST_ITEM' ||
+        nonEquippableSlugs.has(slug)
+      ) {
+        return reply.status(400).send({
+          error: 'Consumables, materials, and quest items cannot be equipped in gear slots.',
+        });
+      }
+
+      const explicitItemSlot = (itemObj.slot ?? baseCatalogItem?.slot) as string | undefined;
+      if (explicitItemSlot) {
+        const normalizedExplicit = normalizeTargetSlot(explicitItemSlot);
+        const isAccessoryMatch =
+          (normalizedExplicit === 'accessory1' ||
+            normalizedExplicit === 'accessory2' ||
+            explicitItemSlot === 'ring' ||
+            explicitItemSlot === 'trinket' ||
+            rawItemType === 'ACCESSORY') &&
+          (slot === 'accessory1' || slot === 'accessory2');
+        const isOneHandedOffhandMatch =
+          normalizedExplicit === 'mainHand' &&
+          slot === 'offHand' &&
+          (itemObj.weaponHandedness ?? baseCatalogItem?.handedness) === 'ONE_HANDED';
+
+        if (normalizedExplicit !== slot && !isAccessoryMatch && !isOneHandedOffhandMatch) {
+          return reply.status(400).send({
+            error: `This item cannot be equipped in the ${slot} slot.`,
+          });
+        }
+      }
+
+      const effectiveItemType = (
+        rawItemType === 'CRAFTING_MATERIAL' ? 'MATERIAL' : rawItemType
+      ) as EquipItemType;
+      const reqStr = itemObj.requiredStrength ?? baseCatalogItem?.statRequirements?.STR ?? 0;
+      const reqEnd = itemObj.requiredEndurance ?? baseCatalogItem?.statRequirements?.END ?? 0;
+      const reqAgi = itemObj.requiredAgility ?? baseCatalogItem?.statRequirements?.AGI ?? 0;
+      const handedness = (itemObj.weaponHandedness ?? baseCatalogItem?.handedness) as
+        | 'ONE_HANDED'
+        | 'TWO_HANDED'
+        | undefined;
+
+      if (effectiveItemType) {
+        const validation = validateEquipmentRequirements(
+          {
+            itemType: effectiveItemType,
+            requiredStrength: reqStr,
+            requiredEndurance: reqEnd,
+            requiredAgility: reqAgi,
+            weaponHandedness: handedness,
+          },
+          {
+            strengthLevel: character.stats.strengthLevel,
+            enduranceLevel: character.stats.enduranceLevel,
+            agilityLevel: character.stats.agilityLevel,
+          },
+          slot
+        );
+        if (!validation.valid) {
+          return reply.status(400).send({
+            error: validation.error ?? 'Equipment requirements not met.',
+          });
+        }
+      } else {
+        // Fallback stat checks when custom/test mock item omits itemType
+        if (character.stats.strengthLevel < reqStr) {
+          return reply.status(400).send({
+            error: `Requires Strength Level ${reqStr} (current: ${character.stats.strengthLevel}).`,
+          });
+        }
+        if (character.stats.enduranceLevel < reqEnd) {
+          return reply.status(400).send({
+            error: `Requires Endurance Level ${reqEnd} (current: ${character.stats.enduranceLevel}).`,
+          });
+        }
+        if (character.stats.agilityLevel < reqAgi) {
+          return reply.status(400).send({
+            error: `Requires Agility Level ${reqAgi} (current: ${character.stats.agilityLevel}).`,
+          });
+        }
+      }
+
+      // Prevent equipping the exact same inventoryItemId into two slots simultaneously
+      const currentLoadout = (character.equipmentLoadout ?? {}) as Record<string, any>;
+      for (const [otherSlot, otherFkField] of Object.entries(slotFieldMap)) {
+        if (otherSlot === slot) continue;
+        const equippedId =
+          currentLoadout[otherFkField] ??
+          currentLoadout[otherSlot]?.id ??
+          (typeof currentLoadout[otherSlot] === 'string' ? currentLoadout[otherSlot] : null);
+        if (equippedId === inventoryItemId) {
+          if ((invItem.quantity ?? 1) <= 1) {
+            return reply.status(400).send({
+              error: `This item is already equipped in ${otherSlot} and cannot be equipped in two slots simultaneously.`,
+            });
+          }
+          duplicateClearUpdates[otherFkField] = null;
+        }
+      }
+    }
+
     const updatedLoadout = await db.equipmentLoadout.upsert({
       where: { characterId },
-      update: { [fkField]: inventoryItemId },
+      update: { ...duplicateClearUpdates, [fkField]: inventoryItemId },
       create: { characterId, [fkField]: inventoryItemId },
       include: {
         mainHand: { include: { item: true } },

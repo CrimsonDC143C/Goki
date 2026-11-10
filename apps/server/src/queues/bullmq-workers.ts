@@ -70,46 +70,75 @@ export function createBullMqGameTimerRuntime(params: {
   redisUrl: string;
   db: PrismaClient;
 }): GameTimerScheduler {
+  const logBullMqError = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[BullMQ/Redis Error]', msg);
+  };
+
   const connection = new IORedis(params.redisUrl, {
     maxRetriesPerRequest: null,
   });
+  connection.on('error', logBullMqError);
+
+  const workerConnections: IORedis[] = [];
+  const createWorkerConnection = (): IORedis => {
+    const workerConn = connection.duplicate({ maxRetriesPerRequest: null });
+    workerConn.on('error', logBullMqError);
+    workerConnections.push(workerConn);
+    return workerConn;
+  };
 
   const gatheringQueue = new Queue(QUEUE_NAMES.GATHERING_COMPLETION, { connection });
   const dungeonQueue = new Queue(QUEUE_NAMES.DUNGEON_RESOLUTION, { connection });
   const fatigueQueue = new Queue(QUEUE_NAMES.FATIGUE_TRANSITION, { connection });
   const raidQueue = new Queue(QUEUE_NAMES.RAID_ROLLOVER, { connection });
 
+  gatheringQueue.on('error', logBullMqError);
+  dungeonQueue.on('error', logBullMqError);
+  fatigueQueue.on('error', logBullMqError);
+  raidQueue.on('error', logBullMqError);
+
   const gatheringWorker = new Worker<{ taskId: string; characterId: string }>(
     QUEUE_NAMES.GATHERING_COMPLETION,
     async (job) => {
-      await completeGatheringTaskOperation(params.db, job.data.taskId);
+      await completeGatheringTaskOperation(params.db, job.data.taskId, {
+        gracefulMissing: true,
+      });
     },
-    { connection }
+    { connection: createWorkerConnection() }
   );
+  gatheringWorker.on('error', logBullMqError);
 
   const dungeonWorker = new Worker<{ dungeonRunId: string }>(
     QUEUE_NAMES.DUNGEON_RESOLUTION,
     async (job) => {
-      await resolveDungeonRunOperation(params.db, job.data.dungeonRunId);
+      await resolveDungeonRunOperation(params.db, job.data.dungeonRunId, {
+        gracefulMissing: true,
+      });
     },
-    { connection }
+    { connection: createWorkerConnection() }
   );
+  dungeonWorker.on('error', logBullMqError);
 
   const fatigueWorker = new Worker<{ characterId: string }>(
     QUEUE_NAMES.FATIGUE_TRANSITION,
     async (job) => {
       await applyAutomaticTavernTransitionOperation(params.db, job.data.characterId);
     },
-    { connection }
+    { connection: createWorkerConnection() }
   );
+  fatigueWorker.on('error', logBullMqError);
 
   const raidWorker = new Worker<{ raidInstanceId: string }>(
     QUEUE_NAMES.RAID_ROLLOVER,
     async (job) => {
-      await resolveRaidBossRolloverOperation(params.db, job.data.raidInstanceId);
+      await resolveRaidBossRolloverOperation(params.db, job.data.raidInstanceId, {
+        gracefulMissing: true,
+      });
     },
-    { connection }
+    { connection: createWorkerConnection() }
   );
+  raidWorker.on('error', logBullMqError);
 
   return {
     async scheduleGatheringCompletion({ taskId, characterId, delayMs }) {
@@ -168,7 +197,8 @@ export function createBullMqGameTimerRuntime(params: {
         fatigueQueue.close(),
         raidQueue.close(),
       ]);
-      await connection.quit();
+      await Promise.all(workerConnections.map((conn) => conn.quit().catch(() => {})));
+      await connection.quit().catch(() => {});
     },
   };
 }

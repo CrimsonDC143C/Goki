@@ -179,6 +179,7 @@ export interface EncounterBossOverlay {
   maxHp: number;
   currentHp: number;
   defeatedCount: number;
+  isDefeated?: boolean;
 }
 
 export type ResilienceReason =
@@ -232,11 +233,13 @@ export interface CharacterProgression {
  */
 export interface RewardPayload {
   sessionId: string;
+  workoutType?: WorkoutSessionType;
   totalTonnageKg: number;
   totalReps: number;
   workingSetCount: number;
   averageRpe: number | null;
   durationSeconds: number;
+  cardioDurationSeconds?: number;
   arrivalBoonMultiplier: number;
   fatigueAndRestMultiplier: number;
   resilienceBonus: ResilienceBonusResult;
@@ -780,47 +783,57 @@ export function evaluatePostWorkoutLootChest(params: {
   const table = CHEST_LOOT_TABLES[tier];
   const rollCount = tier === 'EPIC' ? 2 : tier === 'RARE' && effortQualityScore >= 58 ? 2 : 1;
 
+  const getLootKey = (d: LootDrop) =>
+    d.tier || d.prefixId || d.suffixId || d.uniquePassive
+      ? `${d.itemSlug}:${d.tier ?? ''}:${d.prefixId ?? ''}:${d.suffixId ?? ''}:${d.uniquePassive?.passiveId ?? (d.uniquePassive as { id?: string } | null | undefined)?.id ?? ''}`
+      : d.itemSlug;
+
   const dropsMap = new Map<string, LootDrop>();
   for (let i = 0; i < rollCount; i += 1) {
     const picked = rng.pickWeighted(table);
-    const existing = dropsMap.get(picked.itemSlug);
-    if (existing) {
-      existing.quantity += picked.quantity;
-    } else {
-      if (BASE_EQUIPPABLE_ITEM_BY_SLUG[picked.itemSlug]) {
-        const roll = rng.nextFloat();
-        let itemTier: ItemTier = 1;
-        if (tier === 'COMMON') {
-          itemTier = roll < 0.75 ? 1 : 2;
-        } else if (tier === 'RARE') {
-          if (roll < 0.55) itemTier = 2;
-          else if (roll < 0.9) itemTier = 3;
-          else itemTier = 4;
-        } else {
-          // EPIC
-          if (roll < 0.45) itemTier = 3;
-          else if (roll < 0.85) itemTier = 4;
-          else itemTier = 5;
-        }
-
-        const rolled = rollProceduralItemInstance({
-          baseSlug: picked.itemSlug,
-          tier: itemTier,
-          seed: `chest-gear:${params.rngSeed}:${i}:${picked.itemSlug}`,
-        });
-
-        dropsMap.set(picked.itemSlug, {
-          ...proceduralItemToLootDrop(rolled),
-          quantity: picked.quantity,
-        });
+    let drop: LootDrop;
+    if (BASE_EQUIPPABLE_ITEM_BY_SLUG[picked.itemSlug]) {
+      const roll = rng.nextFloat();
+      let itemTier: ItemTier = 1;
+      if (tier === 'COMMON') {
+        itemTier = roll < 0.75 ? 1 : 2;
+      } else if (tier === 'RARE') {
+        if (roll < 0.55) itemTier = 2;
+        else if (roll < 0.9) itemTier = 3;
+        else itemTier = 4;
       } else {
-        dropsMap.set(picked.itemSlug, {
-          itemSlug: picked.itemSlug,
-          itemName: picked.itemName,
-          rarity: picked.rarity as ItemRarity,
-          quantity: picked.quantity,
-        });
+        // EPIC
+        if (roll < 0.45) itemTier = 3;
+        else if (roll < 0.85) itemTier = 4;
+        else itemTier = 5;
       }
+
+      const rolled = rollProceduralItemInstance({
+        baseSlug: picked.itemSlug,
+        tier: itemTier,
+        seed: `chest-gear:${params.rngSeed}:${i}:${picked.itemSlug}`,
+      });
+
+      drop = {
+        ...proceduralItemToLootDrop(rolled),
+        quantity: picked.quantity,
+      };
+    } else {
+      drop = {
+        ...picked,
+        itemSlug: picked.itemSlug,
+        itemName: picked.itemName,
+        rarity: picked.rarity as ItemRarity,
+        quantity: picked.quantity,
+      };
+    }
+
+    const key = getLootKey(drop);
+    const existing = dropsMap.get(key);
+    if (existing) {
+      existing.quantity += drop.quantity;
+    } else {
+      dropsMap.set(key, { ...drop });
     }
   }
 
@@ -870,10 +883,13 @@ export function consolidateHybridWorkoutSession(params: {
   const fatigueMult = Math.max(0.5, params.fatigueAndRestMultiplier ?? 1.0);
 
   const workingSets = params.setLogs.filter(
-    (s) => !isWarmupSetType(s.setType, s.isWarmup) && s.reps > 0
+    (s) => !isWarmupSetType(s.setType, s.isWarmup) && Number.isFinite(s.reps) && s.reps > 0
   );
   const totalTonnageKg = roundTo2(
-    workingSets.reduce((sum, s) => sum + Math.max(0, s.weightKg) * s.reps, 0)
+    workingSets.reduce(
+      (sum, s) => sum + (Number.isFinite(s.weightKg) ? Math.max(0, s.weightKg) : 0) * s.reps,
+      0
+    )
   );
   const totalReps = workingSets.reduce((sum, s) => sum + s.reps, 0);
 
@@ -886,7 +902,11 @@ export function consolidateHybridWorkoutSession(params: {
       ? roundTo2(rpeValues.reduce((sum, r) => sum + r, 0) / rpeValues.length)
       : null;
 
-  const cardioDurationSeconds = cardioSegments.reduce((sum, c) => sum + c.durationSeconds, 0);
+  const cardioDurationSeconds = cardioSegments.reduce(
+    (sum, c) =>
+      sum + (Number.isFinite(c.durationSeconds) ? Math.max(0, Math.round(c.durationSeconds)) : 0),
+    0
+  );
 
   const resilienceBonus = evaluateResilienceBonus({
     lastWorkoutAt: params.lastWorkoutAt ?? null,
@@ -1008,11 +1028,15 @@ export function consolidateHybridWorkoutSession(params: {
 
   return {
     sessionId: params.sessionId,
+    workoutType: params.workoutType,
     totalTonnageKg,
     totalReps,
     workingSetCount: workingSets.length,
     averageRpe,
-    durationSeconds: Math.max(0, Math.round(params.durationSeconds)),
+    durationSeconds: Number.isFinite(params.durationSeconds)
+      ? Math.max(0, Math.round(params.durationSeconds))
+      : 0,
+    cardioDurationSeconds,
     arrivalBoonMultiplier: arrivalBoon,
     fatigueAndRestMultiplier: fatigueMult,
     resilienceBonus,
@@ -1045,7 +1069,7 @@ export type HybridWorkoutMachineEvent =
     }
   | {
       type: 'LOG_SET';
-      setId: string;
+      setId?: string;
       exerciseId: string;
       exerciseName: string;
       reps: number;
@@ -1062,6 +1086,23 @@ export type HybridWorkoutMachineEvent =
       customAdviceRationale?: string;
       nextSetHint?: { exerciseId: string; exerciseName: string; weightKg: number; reps: number };
       nowMs?: number;
+    }
+  | {
+      type: 'UNLOG_SET';
+      setId?: string;
+      setIndex?: number;
+    }
+  | {
+      type: 'UPDATE_SET';
+      setId: string;
+      reps?: number;
+      weightKg?: number;
+      rpe?: number | null;
+      isWarmup?: boolean;
+      setType?: SetType;
+      supersetGroupId?: string | null;
+      exerciseBaseXpFactor?: number;
+      historicalPR?: HistoricalExercisePR;
     }
   | {
       type: 'ADD_CARDIO_SEGMENT';
@@ -1254,15 +1295,18 @@ export function transitionHybridWorkoutState(
       }
 
       const nowMs = event.nowMs ?? Date.now();
+      const resolvedSetId = event.setId || `set_${nowMs}`;
       const session = state.activeSession;
-      const setNumber = session.setLogs.length + 1;
+      const existingIdx = session.setLogs.findIndex((s) => s.id === resolvedSetId);
+      const prevSet = existingIdx >= 0 ? session.setLogs[existingIdx] : null;
+      const setNumber = prevSet ? prevSet.setNumber : session.setLogs.length + 1;
       const resolvedIsWarmup = isWarmupSetType(event.setType, event.isWarmup);
       const resolvedSetType: SetType =
         event.setType ?? (resolvedIsWarmup ? 'WARMUP' : 'NORMAL');
       const resolvedRpe = resolveEffectiveSetRpe(event.rpe, resolvedSetType);
 
       const { feedback, prTypesOnPace } = evaluateLiveSetMicroReward({
-        setId: event.setId,
+        setId: resolvedSetId,
         exerciseId: event.exerciseId,
         reps: event.reps,
         weightKg: event.weightKg,
@@ -1299,7 +1343,7 @@ export function transitionHybridWorkoutState(
         : baseAdvice;
 
       const newSetLog: SetLog = {
-        id: event.setId,
+        id: resolvedSetId,
         setNumber,
         exerciseId: event.exerciseId,
         exerciseName: event.exerciseName,
@@ -1320,6 +1364,73 @@ export function transitionHybridWorkoutState(
         loggedAtIso: new Date(nowMs).toISOString(),
       };
 
+      const hint = event.nextSetHint ?? {
+        exerciseId: event.exerciseId,
+        exerciseName: event.exerciseName,
+        weightKg: event.weightKg,
+        reps: event.reps,
+      };
+
+      const shouldSuppressRest = Boolean(event.suppressRestTimer);
+
+      if (prevSet && existingIdx >= 0) {
+        const nextSetLogs = [...session.setLogs];
+        nextSetLogs[existingIdx] = newSetLog;
+        const xpDelta = newSetLog.microXpTick - prevSet.microXpTick;
+        const goldDelta = newSetLog.microGoldTick - prevSet.microGoldTick;
+        const dmgDelta = newSetLog.bossHpDamage - prevSet.bossHpDamage;
+        const nextHp = clamp(
+          session.encounterBoss.currentHp - dmgDelta,
+          0,
+          session.encounterBoss.maxHp
+        );
+
+        const updatedSession: WorkoutSession = {
+          ...session,
+          setLogs: nextSetLogs,
+          accumulatedMicroXp: Math.max(0, session.accumulatedMicroXp + xpDelta),
+          accumulatedMicroGold: Math.max(0, session.accumulatedMicroGold + goldDelta),
+          encounterBoss: {
+            ...session.encounterBoss,
+            currentHp: nextHp,
+            isDefeated: nextHp <= 0,
+          },
+          restTimer: shouldSuppressRest
+            ? {
+                ...session.restTimer,
+                isActive: false,
+                configuredSeconds: restSeconds,
+                remainingSeconds: 0,
+                startedAtMs: null,
+                endsAtMs: null,
+                advice,
+              }
+            : {
+                isActive: true,
+                configuredSeconds: restSeconds,
+                remainingSeconds: restSeconds,
+                startedAtMs: nowMs,
+                endsAtMs: nowMs + restSeconds * 1000,
+                advice,
+              },
+          nextSetPreview: {
+            setNumber: nextSetLogs.length + 1,
+            exerciseId: hint.exerciseId,
+            exerciseName: hint.exerciseName,
+            suggestedWeightKg: hint.weightKg,
+            suggestedReps: hint.reps,
+            targetRpe: resolvedRpe ?? 8,
+          },
+        };
+
+        return {
+          phase: shouldSuppressRest ? 'DungeonActive' : 'Resting',
+          activeSession: updatedSession,
+          lastMicroFeedback: feedback,
+          lastError: null,
+        };
+      }
+
       // Update Encounter Boss HP (if slain mid-session, respawn next construct tier seamlessly!)
       let nextBossHp = session.encounterBoss.currentHp - feedback.bossHpDamage;
       let nextDefeatedCount = session.encounterBoss.defeatedCount;
@@ -1329,15 +1440,6 @@ export function transitionHybridWorkoutState(
         nextMaxHp = Math.round(session.encounterBoss.maxHp * 1.25);
         nextBossHp = nextMaxHp;
       }
-
-      const hint = event.nextSetHint ?? {
-        exerciseId: event.exerciseId,
-        exerciseName: event.exerciseName,
-        weightKg: event.weightKg,
-        reps: event.reps,
-      };
-
-      const shouldSuppressRest = Boolean(event.suppressRestTimer);
 
       const updatedSession: WorkoutSession = {
         ...session,
@@ -1349,6 +1451,7 @@ export function transitionHybridWorkoutState(
           maxHp: nextMaxHp,
           currentHp: nextBossHp,
           defeatedCount: nextDefeatedCount,
+          isDefeated: nextBossHp <= 0,
         },
         restTimer: shouldSuppressRest
           ? {
@@ -1381,6 +1484,142 @@ export function transitionHybridWorkoutState(
       return {
         phase: shouldSuppressRest ? 'DungeonActive' : 'Resting',
         activeSession: updatedSession,
+        lastMicroFeedback: feedback,
+        lastError: null,
+      };
+    }
+
+    case 'UNLOG_SET': {
+      if (!state.activeSession) {
+        return { ...state, lastError: null };
+      }
+
+      const session = state.activeSession;
+      let idx = event.setId
+        ? session.setLogs.findIndex((s) => s.id === event.setId)
+        : -1;
+      if (idx < 0 && typeof event.setIndex === 'number') {
+        idx = event.setIndex;
+      }
+      if (idx < 0 || idx >= session.setLogs.length) {
+        return { ...state, lastError: null };
+      }
+
+      const removed = session.setLogs[idx];
+      if (!removed) {
+        return { ...state, lastError: null };
+      }
+      const remainingSets = session.setLogs
+        .filter((_, i) => i !== idx)
+        .map((s, i) => ({
+          ...s,
+          setNumber: i + 1,
+        }));
+
+      const boss = session.encounterBoss;
+      const restoredHp = Math.min(boss.maxHp, boss.currentHp + removed.bossHpDamage);
+
+      return {
+        ...state,
+        activeSession: {
+          ...session,
+          setLogs: remainingSets,
+          accumulatedMicroXp: Math.max(0, session.accumulatedMicroXp - removed.microXpTick),
+          accumulatedMicroGold: Math.max(0, session.accumulatedMicroGold - removed.microGoldTick),
+          encounterBoss: {
+            ...boss,
+            currentHp: restoredHp,
+            isDefeated: restoredHp <= 0,
+          },
+        },
+        lastMicroFeedback: null,
+        lastError: null,
+      };
+    }
+
+    case 'UPDATE_SET': {
+      if (!state.activeSession) {
+        return { ...state, lastError: null };
+      }
+
+      const session = state.activeSession;
+      const idx = session.setLogs.findIndex((s) => s.id === event.setId);
+      if (idx < 0) {
+        return { ...state, lastError: null };
+      }
+
+      const prevSet = session.setLogs[idx];
+      if (!prevSet) {
+        return { ...state, lastError: null };
+      }
+      const nextReps = event.reps !== undefined ? event.reps : prevSet.reps;
+      const nextWeightKg = event.weightKg !== undefined ? event.weightKg : prevSet.weightKg;
+      const rawRpe = event.rpe !== undefined ? event.rpe : prevSet.rpe;
+      const rawIsWarmup = event.isWarmup !== undefined ? event.isWarmup : prevSet.isWarmup;
+      const rawSetType = event.setType !== undefined ? event.setType : prevSet.setType;
+      const nextSupersetGroupId =
+        event.supersetGroupId !== undefined ? event.supersetGroupId : prevSet.supersetGroupId;
+
+      const resolvedIsWarmup = isWarmupSetType(rawSetType, rawIsWarmup);
+      const resolvedSetType: SetType =
+        rawSetType ?? (resolvedIsWarmup ? 'WARMUP' : 'NORMAL');
+      const resolvedRpe = resolveEffectiveSetRpe(rawRpe, resolvedSetType);
+
+      const { feedback, prTypesOnPace } = evaluateLiveSetMicroReward({
+        setId: prevSet.id,
+        exerciseId: prevSet.exerciseId,
+        reps: nextReps,
+        weightKg: nextWeightKg,
+        rpe: resolvedRpe,
+        isWarmup: resolvedIsWarmup,
+        setType: resolvedSetType,
+        exerciseBaseXpFactor: event.exerciseBaseXpFactor ?? 1.0,
+        historicalPR: event.historicalPR,
+        arrivalBoonMultiplier: session.arrivalBoon.multiplier,
+      });
+
+      const updatedSet: SetLog = {
+        ...prevSet,
+        reps: nextReps,
+        weightKg: nextWeightKg,
+        rpe: resolvedRpe,
+        isWarmup: resolvedIsWarmup,
+        setType: resolvedSetType,
+        supersetGroupId: nextSupersetGroupId ?? null,
+        calculatedE1RM: feedback.calculatedE1RM,
+        relativeIntensity: feedback.relativeIntensity,
+        isLivePersonalRecordPace: feedback.isLivePrPace,
+        prTypesOnPace,
+        microXpTick: feedback.xpTick,
+        microGoldTick: feedback.goldTick,
+        bossHpDamage: feedback.bossHpDamage,
+      };
+
+      const nextSetLogs = [...session.setLogs];
+      nextSetLogs[idx] = updatedSet;
+
+      const xpDelta = updatedSet.microXpTick - prevSet.microXpTick;
+      const goldDelta = updatedSet.microGoldTick - prevSet.microGoldTick;
+      const dmgDelta = updatedSet.bossHpDamage - prevSet.bossHpDamage;
+      const nextHp = clamp(
+        session.encounterBoss.currentHp - dmgDelta,
+        0,
+        session.encounterBoss.maxHp
+      );
+
+      return {
+        ...state,
+        activeSession: {
+          ...session,
+          setLogs: nextSetLogs,
+          accumulatedMicroXp: Math.max(0, session.accumulatedMicroXp + xpDelta),
+          accumulatedMicroGold: Math.max(0, session.accumulatedMicroGold + goldDelta),
+          encounterBoss: {
+            ...session.encounterBoss,
+            currentHp: nextHp,
+            isDefeated: nextHp <= 0,
+          },
+        },
         lastMicroFeedback: feedback,
         lastError: null,
       };
@@ -1425,10 +1664,34 @@ export function transitionHybridWorkoutState(
       }
 
       const rt = state.activeSession.restTimer;
-      const nextRemaining =
-        event.nowMs !== undefined && rt.endsAtMs !== null
-          ? Math.max(0, Math.ceil((rt.endsAtMs - event.nowMs) / 1000))
-          : Math.max(0, rt.remainingSeconds - (event.elapsedSeconds ?? 1));
+      let nextRemaining: number;
+      if (event.nowMs !== undefined && Number.isFinite(event.nowMs)) {
+        const rawStartedAtMs =
+          rt.startedAtMs ??
+          (rt.endsAtMs !== null && Number.isFinite(rt.endsAtMs)
+            ? rt.endsAtMs - rt.configuredSeconds * 1000
+            : null);
+        const anchorStartMs =
+          rawStartedAtMs !== null && Number.isFinite(rawStartedAtMs)
+            ? Math.min(event.nowMs, rawStartedAtMs)
+            : event.nowMs;
+        const effectiveEndsAtMs =
+          rt.startedAtMs !== null && Number.isFinite(rt.startedAtMs) && rt.startedAtMs > event.nowMs
+            ? anchorStartMs + rt.configuredSeconds * 1000
+            : rt.endsAtMs !== null && Number.isFinite(rt.endsAtMs)
+              ? Math.min(rt.endsAtMs, anchorStartMs + rt.configuredSeconds * 1000)
+              : anchorStartMs + rt.configuredSeconds * 1000;
+        nextRemaining = Math.min(
+          rt.configuredSeconds,
+          Math.max(0, Math.ceil((effectiveEndsAtMs - event.nowMs) / 1000))
+        );
+      } else {
+        const step =
+          event.elapsedSeconds !== undefined && Number.isFinite(event.elapsedSeconds)
+            ? Math.max(0, event.elapsedSeconds)
+            : 1;
+        nextRemaining = Math.max(0, rt.remainingSeconds - step);
+      }
 
       if (nextRemaining <= 0) {
         return {
@@ -1462,7 +1725,8 @@ export function transitionHybridWorkoutState(
 
     case 'ADJUST_REST_TIMER': {
       if (!state.activeSession) return state;
-      const nowMs = event.nowMs ?? Date.now();
+      const nowMs =
+        event.nowMs !== undefined && Number.isFinite(event.nowMs) ? event.nowMs : Date.now();
       const rt = state.activeSession.restTimer;
 
       if (!rt.isActive) {
@@ -1486,11 +1750,15 @@ export function transitionHybridWorkoutState(
         };
       }
 
-      const anchorStartMs =
+      const rawStartedAtMs =
         rt.startedAtMs ??
-        (rt.endsAtMs !== null
+        (rt.endsAtMs !== null && Number.isFinite(rt.endsAtMs)
           ? rt.endsAtMs - rt.configuredSeconds * 1000
           : nowMs - Math.max(0, rt.configuredSeconds - rt.remainingSeconds) * 1000);
+      const anchorStartMs =
+        rawStartedAtMs !== null && Number.isFinite(rawStartedAtMs)
+          ? Math.min(nowMs, rawStartedAtMs)
+          : nowMs;
 
       if (event.newDurationSeconds !== undefined) {
         const targetConfigured = clamp(event.newDurationSeconds, 10, 600);
@@ -1536,9 +1804,18 @@ export function transitionHybridWorkoutState(
         };
       }
 
-      const deltaSec = event.deltaSeconds ?? 0;
-      const currentEndsAtMs = rt.endsAtMs ?? nowMs + rt.remainingSeconds * 1000;
-      const rawNextEndsAtMs = currentEndsAtMs + deltaSec * 1000;
+      const deltaSec =
+        event.deltaSeconds !== undefined && Number.isFinite(event.deltaSeconds)
+          ? event.deltaSeconds
+          : 0;
+      const elapsedSec = Math.max(0, Math.floor((nowMs - anchorStartMs) / 1000));
+      const baseEndsAtMs =
+        rt.startedAtMs !== null && Number.isFinite(rt.startedAtMs) && rt.startedAtMs > nowMs
+          ? anchorStartMs + rt.configuredSeconds * 1000
+          : rt.endsAtMs !== null && Number.isFinite(rt.endsAtMs)
+            ? Math.min(rt.endsAtMs, anchorStartMs + rt.configuredSeconds * 1000)
+            : nowMs + Math.max(0, rt.configuredSeconds - elapsedSec) * 1000;
+      const rawNextEndsAtMs = baseEndsAtMs + deltaSec * 1000;
       const remainingMs = rawNextEndsAtMs - nowMs;
 
       if (remainingMs <= 0) {
@@ -1662,11 +1939,17 @@ export function transitionHybridWorkoutState(
         };
       }
 
-      const nowMs = event.nowMs ?? Date.now();
+      const nowMs =
+        event.nowMs !== undefined && Number.isFinite(event.nowMs) ? event.nowMs : Date.now();
+      const cardioSegDuration = session.cardioSegments.reduce(
+        (acc, c) =>
+          acc + (Number.isFinite(c.durationSeconds) ? Math.max(0, Math.round(c.durationSeconds)) : 0),
+        0
+      );
       const elapsedDurationSec = Math.max(
         60,
         Math.round((nowMs - session.startedAtMs) / 1000),
-        session.cardioSegments.reduce((acc, c) => acc + c.durationSeconds, 0)
+        cardioSegDuration
       );
 
       const rewardPayload = consolidateHybridWorkoutSession({
@@ -1764,3 +2047,5 @@ export function transitionHybridWorkoutState(
     }
   }
 }
+
+export type HybridWorkoutEvent = HybridWorkoutMachineEvent;

@@ -4,10 +4,12 @@ import {
   CharacterStats,
   CoreStatBlock,
   HeartRateZone,
+  HolisticStatType,
   LootDrop,
   StatType,
   WorkoutModality,
   WorkoutSessionType,
+  normalizeCoreStatBlock,
 } from './types';
 import {
   DROP_SET_XP_MULTIPLIER,
@@ -215,6 +217,7 @@ export interface WorkoutEvaluationResult {
   diminishedXpBeforeMultiplier: Record<StatType, number>;
   xpMultiplierApplied: number;
   finalXpAwarded: Record<StatType, number>;
+  finalXpByHolisticStat?: Record<HolisticStatType, number>;
   evaluatedSets: EvaluatedResistanceSet[];
   criticalTrainingBonus: CriticalTrainingBonus;
   updatedPRs: Record<string, HistoricalExercisePR>;
@@ -234,14 +237,27 @@ export interface StatLevelProgressionResult {
 // ============================================================================
 
 function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
 }
 
 function roundTo2(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   return Math.round(value * 100) / 100;
 }
 
+export function clampHeartRateZone(rawZone: number | undefined | null): HeartRateZone {
+  return (
+    typeof rawZone === 'number' && Number.isFinite(rawZone)
+      ? Math.min(5, Math.max(1, Math.round(rawZone)))
+      : 2
+  ) as HeartRateZone;
+}
+
 export function formatWeightBracketKey(weightKg: number): string {
+  if (!Number.isFinite(weightKg) || weightKg <= 0) {
+    return '0.0';
+  }
   // Normalize weights to 0.5kg increments so floating-point jitter doesn't create phantom PR keys
   const normalized = Math.round(weightKg * 2) / 2;
   return normalized.toFixed(1);
@@ -268,7 +284,7 @@ export function applyDiminishingReturns(
   moderateEfficiency = 0.5,
   tailEfficiency = 0.15
 ): number {
-  if (rawValue <= 0) return 0;
+  if (!Number.isFinite(rawValue) || rawValue <= 0) return 0;
   if (rawValue <= healthyThreshold) {
     return rawValue;
   }
@@ -307,16 +323,20 @@ export function calculateStrengthSetXp(params: {
   } = params;
 
   const warmup = isWarmupSetType(setType, isWarmup);
+  const safeWeight = Number.isFinite(weightKg) ? Math.max(0, weightKg) : 0;
+  const safeReps = Number.isFinite(reps) ? Math.max(0, reps) : 0;
+  const safeRefE1RM = Number.isFinite(referenceE1RM) ? referenceE1RM : 0;
+  const safeBaseFactor = Number.isFinite(exerciseBaseXpFactor) ? exerciseBaseXpFactor : 1.0;
 
-  if (warmup || weightKg <= 0 || reps <= 0 || referenceE1RM <= 0) {
-    return { rawXp: 0, relativeIntensity: 0, setVolume: Math.max(0, weightKg * reps) };
+  if (warmup || safeWeight <= 0 || safeReps <= 0 || safeRefE1RM <= 0) {
+    return { rawXp: 0, relativeIntensity: 0, setVolume: roundTo2(safeWeight * safeReps) };
   }
 
-  const setVolume = weightKg * reps;
-  const relativeIntensity = clamp(weightKg / referenceE1RM, 0.2, 1.25);
+  const setVolume = safeWeight * safeReps;
+  const relativeIntensity = clamp(safeWeight / safeRefE1RM, 0.2, 1.25);
 
   // ~85% weight from Relative Intensity & effort, ~15% from log-normalized tonnage
-  const relativeEffortTerm = reps * Math.pow(relativeIntensity, 1.8) * 3.5;
+  const relativeEffortTerm = safeReps * Math.pow(relativeIntensity, 1.8) * 3.5;
   const volumeBonusTerm = Math.log1p(setVolume / 50) * relativeIntensity * 2.0;
 
   // Drop-Sets award +10% metabolic intensity multiplier; Failure/AMRAP applies peak intensity bonus
@@ -329,7 +349,7 @@ export function calculateStrengthSetXp(params: {
 
   const rawXp =
     (relativeEffortTerm + volumeBonusTerm) *
-    Math.max(0.5, exerciseBaseXpFactor) *
+    Math.max(0.5, safeBaseFactor) *
     setTypeMultiplier;
   return {
     rawXp: roundTo2(rawXp),
@@ -346,7 +366,7 @@ export function calculateEnduranceCardioXp(
   hrZone: 1 | 2 | 3,
   activityType = 'running'
 ): number {
-  if (durationSeconds <= 0) return 0;
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0;
 
   const effectiveSeconds = applyDiminishingReturns(
     durationSeconds,
@@ -357,8 +377,11 @@ export function calculateEnduranceCardioXp(
   );
 
   const minutes = effectiveSeconds / 60;
-  const zoneRate = ENDURANCE_XP_PER_MINUTE_BY_ZONE[hrZone];
-  const modalityFactor = CARDIO_MODALITY_FACTORS[activityType.toLowerCase()] ?? 1.0;
+  const safeZone = (
+    Number.isFinite(hrZone) ? Math.min(3, Math.max(1, Math.round(hrZone))) : 2
+  ) as 1 | 2 | 3;
+  const zoneRate = ENDURANCE_XP_PER_MINUTE_BY_ZONE[safeZone] ?? ENDURANCE_XP_PER_MINUTE_BY_ZONE[2];
+  const modalityFactor = CARDIO_MODALITY_FACTORS[(activityType || 'running').toLowerCase()] ?? 1.0;
 
   return roundTo2(minutes * zoneRate * modalityFactor);
 }
@@ -371,7 +394,7 @@ export function calculateAgilityCardioXp(
   hrZone: 4 | 5,
   activityType = 'running'
 ): number {
-  if (durationSeconds <= 0) return 0;
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0;
 
   const effectiveSeconds = applyDiminishingReturns(
     durationSeconds,
@@ -382,8 +405,11 @@ export function calculateAgilityCardioXp(
   );
 
   const minutes = effectiveSeconds / 60;
-  const zoneRate = AGILITY_XP_PER_MINUTE_BY_ZONE[hrZone];
-  const modalityFactor = CARDIO_MODALITY_FACTORS[activityType.toLowerCase()] ?? 1.0;
+  const safeZone = (
+    Number.isFinite(hrZone) ? Math.min(5, Math.max(4, Math.round(hrZone))) : 4
+  ) as 4 | 5;
+  const zoneRate = AGILITY_XP_PER_MINUTE_BY_ZONE[safeZone] ?? AGILITY_XP_PER_MINUTE_BY_ZONE[4];
+  const modalityFactor = CARDIO_MODALITY_FACTORS[(activityType || 'running').toLowerCase()] ?? 1.0;
 
   return roundTo2(minutes * zoneRate * modalityFactor);
 }
@@ -441,20 +467,23 @@ export function calculateDexterityXp(
     if (arg1.modality !== undefined) modality = arg1.modality;
   }
 
-  if (durationMinutes <= 0 && volumeReps <= 0) return 0;
+  const safeDurationMinutes = Number.isFinite(durationMinutes) ? Math.max(0, durationMinutes) : 0;
+  const safeVolumeReps = Number.isFinite(volumeReps) ? Math.max(0, volumeReps) : 0;
 
-  const safeRpe = clamp(rpe, 1, 10);
-  const safeSkill = Math.max(1, skillLevel);
+  if (safeDurationMinutes <= 0 && safeVolumeReps <= 0) return 0;
+
+  const safeRpe = clamp(Number.isFinite(rpe) ? rpe : 7, 1, 10);
+  const safeSkill = Math.max(1, Number.isFinite(skillLevel) ? skillLevel : 1);
 
   // RPE scales intensity (0.6x at RPE 1 up to 1.5x at RPE 10)
   const rpeMultiplier = 0.5 + safeRpe / 10;
   // Skill tier progression scaling (+15% per skill level above 1)
   const skillMultiplier = 1.0 + (safeSkill - 1) * 0.15;
   // Climbing emphasizes high isometric and body tension
-  const modalityMultiplier = modality.toUpperCase().includes('CLIMB') ? 1.15 : 1.0;
+  const modalityMultiplier = String(modality || 'CALISTHENICS').toUpperCase().includes('CLIMB') ? 1.15 : 1.0;
 
-  const durationXp = durationMinutes * 6.5;
-  const volumeXp = volumeReps * 0.75;
+  const durationXp = safeDurationMinutes * 6.5;
+  const volumeXp = safeVolumeReps * 0.75;
 
   const rawXp = (durationXp + volumeXp) * rpeMultiplier * skillMultiplier * modalityMultiplier;
   return roundTo2(rawXp);
@@ -499,20 +528,23 @@ export function calculateConstitutionXp(
     steps = arg1.stepCount ?? arg1.steps ?? 0;
   }
 
-  if (sleepHours <= 0 && steps <= 0) return 0;
+  const safeSleepHours = Number.isFinite(sleepHours) ? Math.max(0, sleepHours) : 0;
+  const safeSteps = Number.isFinite(steps) ? Math.max(0, steps) : 0;
+
+  if (safeSleepHours <= 0 && safeSteps <= 0) return 0;
 
   let totalXp = 0;
 
   // Sleep duration + quality (optimal 7-9 hours, quality 0-100)
-  if (sleepHours > 0) {
-    const safeQuality = clamp(qualityScore, 0, 100) / 100;
-    const effectiveHours = sleepHours <= 9 ? sleepHours : 9 + (sleepHours - 9) * 0.3;
+  if (safeSleepHours > 0) {
+    const safeQuality = clamp(Number.isFinite(qualityScore) ? qualityScore : 100, 0, 100) / 100;
+    const effectiveHours = safeSleepHours <= 9 ? safeSleepHours : 9 + (safeSleepHours - 9) * 0.3;
     totalXp += effectiveHours * 8.0 * (0.5 + 0.5 * safeQuality);
   }
 
   // Daily Step counts (5 XP per 1,000 steps, diminishing returns past 15,000 steps)
-  if (steps > 0) {
-    const effectiveSteps = steps <= 15000 ? steps : 15000 + (steps - 15000) * 0.4;
+  if (safeSteps > 0) {
+    const effectiveSteps = safeSteps <= 15000 ? safeSteps : 15000 + (safeSteps - 15000) * 0.4;
     totalXp += (effectiveSteps / 1000) * 5.0;
   }
 
@@ -546,7 +578,7 @@ export function calculateWisdomXp(
     if (arg1.modality !== undefined) modality = arg1.modality;
   }
 
-  if (minutes <= 0) return 0;
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
 
   // Diminishing returns past 45 minutes of mobility/yoga
   const effectiveSeconds = applyDiminishingReturns(
@@ -557,7 +589,7 @@ export function calculateWisdomXp(
     0.2
   );
   const effectiveMinutes = effectiveSeconds / 60;
-  const modalityMultiplier = modality.toUpperCase().includes('PILATES') ? 1.05 : 1.0;
+  const modalityMultiplier = String(modality || 'YOGA').toUpperCase().includes('PILATES') ? 1.05 : 1.0;
 
   return roundTo2(effectiveMinutes * 5.0 * modalityMultiplier);
 }
@@ -589,7 +621,7 @@ export function calculateSpiritXp(
     if (arg1.modality !== undefined) modality = arg1.modality;
   }
 
-  if (minutes <= 0) return 0;
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
 
   // Diminishing returns past 30 minutes of mindfulness/thermal stress
   const effectiveSeconds = applyDiminishingReturns(
@@ -601,7 +633,7 @@ export function calculateSpiritXp(
   );
   const effectiveMinutes = effectiveSeconds / 60;
 
-  const upperMod = modality.toUpperCase();
+  const upperMod = String(modality || 'MEDITATION').toUpperCase();
   let modalityMultiplier = 1.0;
   if (upperMod.includes('COLD_PLUNGE') || upperMod.includes('COLD')) {
     modalityMultiplier = 1.25; // Hormetic cold shock & mental grit
@@ -634,26 +666,16 @@ export function calculateOverallLevel(stats: {
   wisdomLevel?: number;
   spiritLevel?: number;
 } | CoreStatBlock | CharacterStats): number {
-  const str = stats.strengthLevel ?? 1;
-  const end = stats.enduranceLevel ?? 1;
-  const agi = stats.agilityLevel ?? 1;
+  const normalized = normalizeCoreStatBlock(stats, 1);
+  const str = normalized.strengthLevel;
+  const end = normalized.enduranceLevel;
+  const agi = normalized.agilityLevel;
 
-  const dex = stats.dexLevel ?? stats.dexterityLevel;
-  const con = stats.conLevel ?? stats.constitutionLevel;
-  const wis = stats.wisLevel ?? stats.wisdomLevel;
-  const spr = stats.sprLevel ?? stats.spiritLevel;
-
-  const hasNewStats =
-    dex !== undefined ||
-    con !== undefined ||
-    wis !== undefined ||
-    spr !== undefined;
-
-  if (hasNewStats) {
-    const d = dex ?? 1;
-    const c = con ?? 1;
-    const w = wis ?? 1;
-    const s = spr ?? 1;
+  if (normalized.hasHolisticStats) {
+    const d = normalized.dexLevel;
+    const c = normalized.conLevel;
+    const w = normalized.wisLevel;
+    const s = normalized.sprLevel;
     return Math.max(1, Math.floor((str + end + agi + d + c + w + s) / 7));
   }
 
@@ -698,7 +720,8 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
   const resistanceSets = input.resistanceSets ?? [];
   const cardioSegments = input.cardioSegments ?? [];
   const historicalPRs = input.historicalPRs ?? {};
-  const xpMultiplier = Math.max(0.1, input.xpMultiplier ?? 1.0);
+  const rawMultiplier = input.xpMultiplier ?? 1.0;
+  const xpMultiplier = Math.max(0.1, Number.isFinite(rawMultiplier) ? rawMultiplier : 1.0);
   const rngSeed = input.rngSeed ?? `workout-${resistanceSets.length}-${cardioSegments.length}`;
 
   // Clone or initialize PR records map
@@ -706,9 +729,9 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
   for (const [exId, pr] of Object.entries(historicalPRs)) {
     updatedPRs[exId] = {
       exerciseId: pr.exerciseId,
-      bestE1RM: pr.bestE1RM,
-      bestSingleSetVolume: pr.bestSingleSetVolume,
-      bestSessionVolume: pr.bestSessionVolume,
+      bestE1RM: Number.isFinite(pr.bestE1RM) ? pr.bestE1RM : 0,
+      bestSingleSetVolume: Number.isFinite(pr.bestSingleSetVolume) ? pr.bestSingleSetVolume : 0,
+      bestSessionVolume: Number.isFinite(pr.bestSessionVolume) ? pr.bestSessionVolume : 0,
       maxRepsByWeight: { ...pr.maxRepsByWeight },
       bestCardioDurationSecByZone: { ...pr.bestCardioDurationSecByZone },
     };
@@ -720,7 +743,15 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
 
   for (const set of resistanceSets) {
     const warmup = isWarmupSetType(set.setType, set.isWarmup);
-    if (warmup || set.weightKg <= 0 || set.reps <= 0) continue;
+    if (
+      warmup ||
+      !Number.isFinite(set.weightKg) ||
+      !Number.isFinite(set.reps) ||
+      set.weightKg <= 0 ||
+      set.reps <= 0
+    ) {
+      continue;
+    }
     const setE1RM = calculateE1RM(set.weightKg, set.reps);
     sessionPeakE1RMByExercise[set.exerciseId] = Math.max(
       sessionPeakE1RMByExercise[set.exerciseId] ?? 0,
@@ -740,18 +771,22 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
     const isWarmup = isWarmupSetType(set.setType, set.isWarmup);
     const resolvedSetType: SetType = set.setType ?? (isWarmup ? 'WARMUP' : 'NORMAL');
     const resolvedRpe = resolveEffectiveSetRpe(set.rpe, resolvedSetType);
+    const safeWeightKg = Number.isFinite(set.weightKg) ? Math.max(0, set.weightKg) : 0;
+    const safeReps = Number.isFinite(set.reps) ? Math.max(0, set.reps) : 0;
     const baselinePR = historicalPRs[set.exerciseId];
-    const hasPriorResistanceBaseline = Boolean(baselinePR && baselinePR.bestE1RM > 0);
+    const hasPriorResistanceBaseline = Boolean(
+      baselinePR && Number.isFinite(baselinePR.bestE1RM) && baselinePR.bestE1RM > 0
+    );
 
     const referenceE1RM =
-      baselinePR && baselinePR.bestE1RM > 0
+      baselinePR && Number.isFinite(baselinePR.bestE1RM) && baselinePR.bestE1RM > 0
         ? baselinePR.bestE1RM
         : (sessionPeakE1RMByExercise[set.exerciseId] ?? 0);
 
-    const calculatedE1RM = isWarmup ? 0 : calculateE1RM(set.weightKg, set.reps);
+    const calculatedE1RM = isWarmup ? 0 : calculateE1RM(safeWeightKg, safeReps);
     const { rawXp, relativeIntensity, setVolume } = calculateStrengthSetXp({
-      weightKg: set.weightKg,
-      reps: set.reps,
+      weightKg: safeWeightKg,
+      reps: safeReps,
       referenceE1RM,
       isWarmup,
       setType: resolvedSetType,
@@ -774,16 +809,17 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
 
     const setPrBroken: PrRecordBreakType[] = [];
 
-    if (!isWarmup && set.weightKg > 0 && set.reps > 0) {
-      const weightKey = formatWeightBracketKey(set.weightKg);
-      const priorBestE1RM = baselinePR?.bestE1RM ?? 0;
+    if (!isWarmup && safeWeightKg > 0 && safeReps > 0) {
+      const weightKey = formatWeightBracketKey(safeWeightKg);
+      const priorBestE1RM =
+        baselinePR && Number.isFinite(baselinePR.bestE1RM) ? baselinePR.bestE1RM : 0;
       const priorMaxRepsAtWeight = baselinePR?.maxRepsByWeight[weightKey] ?? 0;
 
       if (hasPriorResistanceBaseline) {
         if (calculatedE1RM > priorBestE1RM) {
           setPrBroken.push('E1RM');
         }
-        if (priorMaxRepsAtWeight > 0 && set.reps > priorMaxRepsAtWeight) {
+        if (priorMaxRepsAtWeight > 0 && safeReps > priorMaxRepsAtWeight) {
           setPrBroken.push('REPS_AT_WEIGHT');
         }
       }
@@ -796,7 +832,7 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
       );
       currentPrRecord.maxRepsByWeight[weightKey] = Math.max(
         currentPrRecord.maxRepsByWeight[weightKey] ?? 0,
-        set.reps
+        safeReps
       );
 
       if (setPrBroken.length > 0) {
@@ -810,8 +846,8 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
 
     evaluatedSets.push({
       exerciseId: set.exerciseId,
-      reps: set.reps,
-      weightKg: set.weightKg,
+      reps: safeReps,
+      weightKg: safeWeightKg,
       isWarmup,
       setType: resolvedSetType,
       supersetGroupId: set.supersetGroupId ?? null,
@@ -859,18 +895,22 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
   > = {};
 
   for (const segment of cardioSegments) {
-    if (segment.durationSeconds <= 0) continue;
+    if (!Number.isFinite(segment.durationSeconds) || segment.durationSeconds <= 0) continue;
 
     // Dedicated ACTIVE_RECOVERY workouts give modest Zone 1 restoration XP + the +25% buff (via fatigue-manager)
-    const zone = segment.averageHrZone;
-    const modalityFactor = CARDIO_MODALITY_FACTORS[segment.activityType.toLowerCase()] ?? 1.0;
+    const rawZone = segment.averageHrZone;
+    const safeZone = (
+      Number.isFinite(rawZone) ? Math.min(5, Math.max(1, Math.round(rawZone))) : 2
+    ) as HeartRateZone;
+    const modalityFactor =
+      CARDIO_MODALITY_FACTORS[(segment.activityType || 'running').toLowerCase()] ?? 1.0;
 
-    if (zone === 1 || zone === 2 || zone === 3) {
-      const perMin = ENDURANCE_XP_PER_MINUTE_BY_ZONE[zone] * modalityFactor;
+    if (safeZone === 1 || safeZone === 2 || safeZone === 3) {
+      const perMin = ENDURANCE_XP_PER_MINUTE_BY_ZONE[safeZone] * modalityFactor;
       totalEnduranceSeconds += segment.durationSeconds;
       weightedEnduranceRateSum += segment.durationSeconds * perMin;
     } else {
-      const perMin = AGILITY_XP_PER_MINUTE_BY_ZONE[zone] * modalityFactor;
+      const perMin = AGILITY_XP_PER_MINUTE_BY_ZONE[safeZone] * modalityFactor;
       totalAgilitySeconds += segment.durationSeconds;
       weightedAgilityRateSum += segment.durationSeconds * perMin;
     }
@@ -878,7 +918,7 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
     const exZoneMap =
       sessionCardioSecByExerciseAndZone[segment.exerciseId] ??
       (sessionCardioSecByExerciseAndZone[segment.exerciseId] = {});
-    exZoneMap[zone] = (exZoneMap[zone] ?? 0) + segment.durationSeconds;
+    exZoneMap[safeZone] = (exZoneMap[safeZone] ?? 0) + segment.durationSeconds;
   }
 
   // Cardio Duration PR Detection in Target HR Zone (only against established prior session baselines)
@@ -1019,6 +1059,15 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
       ENDURANCE: finalEnduranceXp,
       AGILITY: finalAgilityXp,
     },
+    finalXpByHolisticStat: {
+      STRENGTH: finalStrengthXp,
+      ENDURANCE: finalEnduranceXp,
+      AGILITY: finalAgilityXp,
+      DEXTERITY: 0,
+      CONSTITUTION: 0,
+      WISDOM: 0,
+      SPIRIT: 0,
+    },
     evaluatedSets,
     criticalTrainingBonus: {
       triggered: triggeredPrCrit,
@@ -1041,7 +1090,7 @@ export function evaluateWorkoutSession(input: WorkoutEvaluationInput): WorkoutEv
  * Smooth polynomial curve: Level 1->2 requires 200 XP, scaling steadily.
  */
 export function xpRequiredForStatLevel(level: number): number {
-  const safeLevel = Math.max(1, Math.floor(level));
+  const safeLevel = Math.max(1, Number.isFinite(level) ? Math.floor(level) : 1);
   return Math.round(150 + 50 * Math.pow(safeLevel, 1.35));
 }
 
@@ -1054,8 +1103,11 @@ export function applyStatXpProgression(
   currentXp: number,
   xpGained: number
 ): StatLevelProgressionResult {
-  let level = Math.max(1, Math.floor(currentLevel));
-  let xp = Math.max(0, currentXp) + Math.max(0, Math.floor(xpGained));
+  const initialLevel = Math.max(1, Number.isFinite(currentLevel) ? Math.floor(currentLevel) : 1);
+  let level = initialLevel;
+  const safeCurrentXp = Number.isFinite(currentXp) ? Math.max(0, currentXp) : 0;
+  const safeXpGained = Number.isFinite(xpGained) ? Math.max(0, Math.floor(xpGained)) : 0;
+  let xp = safeCurrentXp + safeXpGained;
   let levelsGained = 0;
 
   while (xp >= xpRequiredForStatLevel(level)) {
@@ -1065,7 +1117,7 @@ export function applyStatXpProgression(
   }
 
   return {
-    previousLevel: Math.max(1, Math.floor(currentLevel)),
+    previousLevel: initialLevel,
     newLevel: level,
     levelsGained,
     remainingXp: xp,

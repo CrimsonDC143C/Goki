@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
+import { isPrismaUniqueConstraintError, withDbTransaction } from '../services/game-operations';
 import { SOFT_DELETE_RETENTION_MS, computeDaysRemaining } from './characters';
 
 const registerSchema = z.object({
@@ -45,39 +46,82 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
       });
     }
 
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(body.password, saltRounds);
-
-    const user = await db.user.create({
-      data: {
-        email: body.email,
-        username: body.username,
-        passwordHash,
-        timezone: body.timezone ?? 'UTC',
-        lastLoginAt: new Date(),
-      },
-    });
-
     const chosenCharacterName = body.characterName?.trim() || `${body.username}'s Hero`;
     const chosenGameMode = body.gameMode ?? 'STANDARD';
     const chosenAppearance = body.appearanceId || body.avatarSpriteId || 'oni_warlord';
-    const character = await db.character.create({
-      data: {
-        userId: user.id,
-        name: chosenCharacterName,
-        gameMode: chosenGameMode,
-        appearanceId: chosenAppearance,
-        avatarSpriteId: chosenAppearance,
-        stats: { create: {} },
-        fatigueState: { create: {} },
-        equipmentLoadout: { create: {} },
-      },
-      include: {
-        stats: true,
-        fatigueState: true,
-        equipmentLoadout: true,
-      },
-    });
+
+    // Check case-insensitive character name uniqueness before creating user+character
+    const existingCharWithName =
+      typeof (db.character as any)?.findFirst === 'function'
+        ? await db.character.findFirst({
+            where: {
+              name: { equals: chosenCharacterName, mode: 'insensitive' } as any,
+              deletedAt: null,
+            },
+          })
+        : typeof (db.character as any)?.findUnique === 'function'
+          ? await db.character.findUnique({
+              where: { name: chosenCharacterName },
+            })
+          : null;
+
+    if (existingCharWithName && !existingCharWithName.deletedAt) {
+      return reply.status(409).send({
+        error: 'A character with this name already exists in the realm. Please choose a different name.',
+      });
+    }
+
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(body.password, saltRounds);
+
+    let user: any;
+    let character: any;
+    try {
+      const result = await withDbTransaction(
+        db,
+        async (tx) => {
+          const createdUser = await tx.user.create({
+            data: {
+              email: body.email,
+              username: body.username,
+              passwordHash,
+              timezone: body.timezone ?? 'UTC',
+              lastLoginAt: new Date(),
+            },
+          });
+
+          const createdCharacter = await tx.character.create({
+            data: {
+              userId: createdUser.id,
+              name: chosenCharacterName,
+              gameMode: chosenGameMode,
+              appearanceId: chosenAppearance,
+              avatarSpriteId: chosenAppearance,
+              stats: { create: {} },
+              fatigueState: { create: {} },
+              equipmentLoadout: { create: {} },
+            },
+            include: {
+              stats: true,
+              fatigueState: true,
+              equipmentLoadout: true,
+            },
+          });
+
+          return { createdUser, createdCharacter };
+        },
+        `register:${body.email.toLowerCase()}`
+      );
+      user = result.createdUser;
+      character = result.createdCharacter;
+    } catch (err) {
+      if (isPrismaUniqueConstraintError(err)) {
+        return reply.status(409).send({
+          error: 'Email, username, or hero name is already taken.',
+        });
+      }
+      throw err;
+    }
 
     const token = app.jwt.sign({
       userId: user.id,

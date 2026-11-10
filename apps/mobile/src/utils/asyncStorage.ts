@@ -4,7 +4,8 @@ import { Platform } from 'react-native';
 const STORAGE_MAP_FILENAME = 'goki_key_value_store_v1.json';
 let inMemoryStore: Record<string, string> = {};
 let isStoreLoaded = false;
-let fileWriteChain: Promise<void> = Promise.resolve();
+let loadPromise: Promise<void> | null = null;
+let writeChain: Promise<void> = Promise.resolve();
 
 interface WebStorageGlobal {
   localStorage?: {
@@ -15,29 +16,39 @@ interface WebStorageGlobal {
   };
 }
 
-async function loadNativeStore(): Promise<Record<string, string>> {
-  if (isStoreLoaded) return inMemoryStore;
-  try {
-    const file = new File(Paths.document, STORAGE_MAP_FILENAME);
-    if (!file.exists) {
+function ensureNativeStoreLoaded(): Promise<void> {
+  if (isStoreLoaded) return Promise.resolve();
+  if (loadPromise) return loadPromise;
+
+  loadPromise = (async () => {
+    try {
+      const file = new File(Paths.document, STORAGE_MAP_FILENAME);
+      if (!file.exists) {
+        isStoreLoaded = true;
+        return;
+      }
+      const content = await file.text();
+      if (content) {
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === 'object') {
+          // Merge disk keys without overwriting keys written early on cold boot
+          inMemoryStore = { ...(parsed as Record<string, string>), ...inMemoryStore };
+        }
+      }
+    } catch {
+      // Graceful fallback to empty store if unparseable
+    } finally {
       isStoreLoaded = true;
-      return inMemoryStore;
     }
-    const content = await file.text();
-    if (content) {
-      inMemoryStore = JSON.parse(content);
-    }
-  } catch {
-    // Graceful fallback to empty store if unparseable
-  }
-  isStoreLoaded = true;
-  return inMemoryStore;
+  })();
+
+  return loadPromise;
 }
 
 function persistNativeStore(): Promise<void> {
   const serialized = JSON.stringify(inMemoryStore);
-  fileWriteChain = fileWriteChain
-    .then(async () => {
+  const next = writeChain.then(
+    async () => {
       try {
         const file = new File(Paths.document, STORAGE_MAP_FILENAME);
         if (!file.exists) {
@@ -47,9 +58,21 @@ function persistNativeStore(): Promise<void> {
       } catch {
         // Fallback to in-memory store
       }
-    })
-    .catch(() => {});
-  return fileWriteChain;
+    },
+    async () => {
+      try {
+        const file = new File(Paths.document, STORAGE_MAP_FILENAME);
+        if (!file.exists) {
+          file.create({ overwrite: true });
+        }
+        await file.write(serialized);
+      } catch {
+        // Fallback to in-memory store
+      }
+    }
+  );
+  writeChain = next.catch(() => {});
+  return writeChain;
 }
 
 /**
@@ -66,13 +89,13 @@ export const AsyncStorage = {
         return inMemoryStore[key] ?? null;
       }
     }
-    await loadNativeStore();
+    await ensureNativeStoreLoaded();
     return inMemoryStore[key] ?? null;
   },
 
   async setItem(key: string, value: string): Promise<void> {
-    inMemoryStore[key] = value;
     if (Platform.OS === 'web') {
+      inMemoryStore[key] = value;
       try {
         const ls = (globalThis as unknown as WebStorageGlobal).localStorage;
         ls?.setItem(key, value);
@@ -81,12 +104,14 @@ export const AsyncStorage = {
       }
       return;
     }
+    await ensureNativeStoreLoaded();
+    inMemoryStore[key] = value;
     await persistNativeStore();
   },
 
   async removeItem(key: string): Promise<void> {
-    delete inMemoryStore[key];
     if (Platform.OS === 'web') {
+      delete inMemoryStore[key];
       try {
         const ls = (globalThis as unknown as WebStorageGlobal).localStorage;
         ls?.removeItem(key);
@@ -95,12 +120,38 @@ export const AsyncStorage = {
       }
       return;
     }
+    await ensureNativeStoreLoaded();
+    delete inMemoryStore[key];
+    await persistNativeStore();
+  },
+
+  async multiRemove(keys: string[]): Promise<void> {
+    if (Platform.OS === 'web') {
+      for (const key of keys) {
+        delete inMemoryStore[key];
+      }
+      try {
+        const ls = (globalThis as unknown as WebStorageGlobal).localStorage;
+        if (ls) {
+          for (const key of keys) {
+            ls.removeItem(key);
+          }
+        }
+      } catch {
+        // In-memory handled
+      }
+      return;
+    }
+    await ensureNativeStoreLoaded();
+    for (const key of keys) {
+      delete inMemoryStore[key];
+    }
     await persistNativeStore();
   },
 
   async clear(): Promise<void> {
-    inMemoryStore = {};
     if (Platform.OS === 'web') {
+      inMemoryStore = {};
       try {
         const ls = (globalThis as unknown as WebStorageGlobal).localStorage;
         ls?.clear?.();
@@ -109,6 +160,8 @@ export const AsyncStorage = {
       }
       return;
     }
+    await ensureNativeStoreLoaded();
+    inMemoryStore = {};
     await persistNativeStore();
   },
 };

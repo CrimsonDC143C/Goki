@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useCallback } from 'react';
+import React, { useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   Platform,
   TurboModuleRegistry,
@@ -91,6 +91,7 @@ export interface ArenaMotionDriver {
   triggerEnemyApproach: (fromX: number, duration: number, onComplete?: () => void) => void;
   triggerHeroFloat: (toY: number, duration: number) => void;
   triggerEnemyFloat: (toY: number, duration: number) => void;
+  cancelAll: () => void;
 }
 
 function useReanimatedArenaMotion(): ArenaMotionDriver {
@@ -203,6 +204,37 @@ function useReanimatedArenaMotion(): ArenaMotionDriver {
     );
   }, [Reanimated, enemyFloatingY, enemyFloatingOpacity]);
 
+  const cancelAll = useCallback(() => {
+    const cancelAnim = (Reanimated as unknown as { cancelAnimation?: (sv: unknown) => void }).cancelAnimation;
+    if (typeof cancelAnim === 'function') {
+      cancelAnim(heroLungeX);
+      cancelAnim(enemyLungeX);
+      cancelAnim(enemyApproachX);
+      cancelAnim(heroFloatingY);
+      cancelAnim(heroFloatingOpacity);
+      cancelAnim(enemyFloatingY);
+      cancelAnim(enemyFloatingOpacity);
+    }
+    heroLungeX.value = 0;
+    enemyLungeX.value = 0;
+    enemyApproachX.value = 0;
+    heroFloatingY.value = 0;
+    heroFloatingOpacity.value = 0;
+    enemyFloatingY.value = 0;
+    enemyFloatingOpacity.value = 0;
+  }, [
+    Reanimated,
+    heroLungeX,
+    enemyLungeX,
+    enemyApproachX,
+    heroFloatingY,
+    heroFloatingOpacity,
+    enemyFloatingY,
+    enemyFloatingOpacity,
+  ]);
+
+  useEffect(() => () => cancelAll(), [cancelAll]);
+
   return {
     heroTransformStyle: heroTransformStyle as ArenaMotionStyle,
     enemyLungeStyle: enemyLungeStyle as ArenaMotionStyle,
@@ -215,6 +247,7 @@ function useReanimatedArenaMotion(): ArenaMotionDriver {
     triggerEnemyApproach,
     triggerHeroFloat,
     triggerEnemyFloat,
+    cancelAll,
   };
 }
 
@@ -367,6 +400,33 @@ function useNativeDriverArenaMotion(): ArenaMotionDriver {
     ]).start();
   }, [enemyFloatingY, enemyFloatingOpacity]);
 
+  const cancelAll = useCallback(() => {
+    heroLungeX.stopAnimation();
+    enemyLungeX.stopAnimation();
+    enemyApproachX.stopAnimation();
+    heroFloatingY.stopAnimation();
+    heroFloatingOpacity.stopAnimation();
+    enemyFloatingY.stopAnimation();
+    enemyFloatingOpacity.stopAnimation();
+    heroLungeX.setValue(0);
+    enemyLungeX.setValue(0);
+    enemyApproachX.setValue(0);
+    heroFloatingY.setValue(0);
+    heroFloatingOpacity.setValue(0);
+    enemyFloatingY.setValue(0);
+    enemyFloatingOpacity.setValue(0);
+  }, [
+    heroLungeX,
+    enemyLungeX,
+    enemyApproachX,
+    heroFloatingY,
+    heroFloatingOpacity,
+    enemyFloatingY,
+    enemyFloatingOpacity,
+  ]);
+
+  useEffect(() => () => cancelAll(), [cancelAll]);
+
   return {
     heroTransformStyle: heroTransformStyle as ArenaMotionStyle,
     enemyLungeStyle: enemyLungeStyle as ArenaMotionStyle,
@@ -379,6 +439,7 @@ function useNativeDriverArenaMotion(): ArenaMotionDriver {
     triggerEnemyApproach,
     triggerHeroFloat,
     triggerEnemyFloat,
+    cancelAll,
   };
 }
 

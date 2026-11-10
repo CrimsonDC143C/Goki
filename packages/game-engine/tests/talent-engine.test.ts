@@ -203,4 +203,20 @@ describe('talent-engine', () => {
     expect(agg.pointsSpentByStat.DEXTERITY).toBe(1);
     expect(agg.pointsSpentByStat.CONSTITUTION).toBe(1);
   });
+
+  it('aligns grd_immortal_citadel and acro_phantom_equilibrium rank 5 keystone totals with their descriptions (P3-3)', () => {
+    const citadelAgg = aggregateTalentModifiers({ grd_immortal_citadel: 5 });
+    expect(citadelAgg.maxHpPct).toBeCloseTo(0.20, 4);
+    expect(citadelAgg.defensePct).toBeCloseTo(0.20, 4);
+    expect(citadelAgg.armorPct).toBeCloseTo(0.20, 4);
+    expect(citadelAgg.attackSpeedPct).toBeCloseTo(-0.10, 4);
+    expect(citadelAgg.unlockedKeystones).toContain('grd_immortal_citadel');
+
+    const phantomAgg = aggregateTalentModifiers({ acro_phantom_equilibrium: 5 });
+    expect(phantomAgg.dodgeChancePct).toBeCloseTo(0.15, 4);
+    expect(phantomAgg.dodgeRatingBonus).toBeCloseTo(0.15, 4);
+    expect(phantomAgg.attackSpeedPct).toBeCloseTo(0.15, 4);
+    expect(phantomAgg.maxHpPct).toBeCloseTo(-0.08, 4);
+    expect(phantomAgg.unlockedKeystones).toContain('acro_phantom_equilibrium');
+  });
 });

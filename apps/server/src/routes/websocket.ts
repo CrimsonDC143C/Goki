@@ -89,6 +89,16 @@ export function registerWebSocketRoutes(
             case 'SUBSCRIBE': {
               if (typeof data.room === 'string' && data.room.trim()) {
                 const room = data.room.trim();
+                const isPublicRoom = room === 'raid:all' || room.startsWith('raid:');
+                const currentClient = wsManager.getClient(socket);
+                if (!isPublicRoom && !currentClient?.user) {
+                  wsManager.sendToSocket(socket, {
+                    type: 'ERROR',
+                    error: 'Authentication required to subscribe to private rooms.',
+                    message: 'Authentication required to subscribe to private rooms.',
+                  });
+                  break;
+                }
                 wsManager.joinRoom(socket, room);
                 wsManager.sendToSocket(socket, {
                   type: 'SUBSCRIBED',

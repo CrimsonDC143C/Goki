@@ -323,6 +323,158 @@ describe('hybrid-reward-protocol (3-Phase Behavioral Neuroscience Loop)', () => 
       expect(deltaMachine.activeSession?.restTimer.startedAtMs).toBeNull();
       expect(deltaMachine.activeSession?.restTimer.endsAtMs).toBeNull();
     });
+
+    it('guards TICK_REST_TIMER and ADJUST_REST_TIMER against future startedAtMs clock skew', () => {
+      const t0 = 1_760_000_000_000;
+      let machine = createInitialHybridMachineState();
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'START_SESSION',
+        sessionId: 'sess_skew_test',
+        workoutType: 'RESISTANCE',
+        trigger: 'MANUAL_OPEN_WORLD',
+        nowMs: t0 + 30_000, // Started with future clock skew (+30s ahead)
+      });
+
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'LOG_SET',
+        setId: 'set_skew_1',
+        exerciseId: 'bench_press',
+        exerciseName: 'Barbell Bench Press',
+        weightKg: 80,
+        reps: 8,
+        customRestSeconds: 90,
+        nowMs: t0 + 30_000, // startedAtMs = t0 + 30_000, endsAtMs = t0 + 120_000
+      });
+
+      // Now system clock corrects back to t0 (so startedAtMs is 30s in the future relative to nowMs = t0)
+      const ticked = transitionHybridWorkoutState(machine, {
+        type: 'TICK_REST_TIMER',
+        nowMs: t0,
+      });
+      // Remaining seconds must never exceed configuredSeconds (90s)
+      expect(ticked.activeSession?.restTimer.remainingSeconds).toBeLessThanOrEqual(90);
+      expect(ticked.activeSession?.restTimer.remainingSeconds).toBe(90);
+
+      // Adjusting +30s with future startedAtMs anchors to nowMs so configuredSeconds & remainingSeconds become 120s cleanly
+      const adjusted = transitionHybridWorkoutState(machine, {
+        type: 'ADJUST_REST_TIMER',
+        deltaSeconds: 30,
+        nowMs: t0,
+      });
+      expect(adjusted.activeSession?.restTimer.startedAtMs).toBe(t0);
+      expect(adjusted.activeSession?.restTimer.configuredSeconds).toBe(120);
+      expect(adjusted.activeSession?.restTimer.remainingSeconds).toBe(120);
+    });
+
+    it('deduplicates duplicate LOG_SET setIds, rolls back UNLOG_SET, and recalculates UPDATE_SET deltas in-place', () => {
+      const t0 = 1_760_000_000_000;
+      let machine = createInitialHybridMachineState();
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'START_SESSION',
+        sessionId: 'sess_sync_test',
+        workoutType: 'RESISTANCE',
+        trigger: 'MANUAL_OPEN_WORLD',
+        nowMs: t0,
+      });
+
+      const initialBossHp = machine.activeSession!.encounterBoss.currentHp;
+
+      // 1. Log Set 1
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'LOG_SET',
+        setId: 'set_row_1',
+        exerciseId: 'bench_press',
+        exerciseName: 'Barbell Bench Press',
+        weightKg: 80,
+        reps: 8,
+        rpe: 8,
+        nowMs: t0 + 10_000,
+      });
+
+      expect(machine.activeSession?.setLogs).toHaveLength(1);
+      const set1Initial = machine.activeSession!.setLogs[0];
+      expect(set1Initial.id).toBe('set_row_1');
+      expect(set1Initial.setNumber).toBe(1);
+      const xpAfterSet1 = machine.activeSession!.accumulatedMicroXp;
+      const goldAfterSet1 = machine.activeSession!.accumulatedMicroGold;
+      const bossHpAfterSet1 = machine.activeSession!.encounterBoss.currentHp;
+      expect(bossHpAfterSet1).toBe(initialBossHp - set1Initial.bossHpDamage);
+
+      // 2. Log Set 1 again with same setId ('set_row_1') but heavier weight (100kg x 8) -> replaces in-place without duplicating!
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'LOG_SET',
+        setId: 'set_row_1',
+        exerciseId: 'bench_press',
+        exerciseName: 'Barbell Bench Press',
+        weightKg: 100,
+        reps: 8,
+        rpe: 9,
+        nowMs: t0 + 20_000,
+      });
+
+      expect(machine.activeSession?.setLogs).toHaveLength(1);
+      const set1Replaced = machine.activeSession!.setLogs[0];
+      expect(set1Replaced.id).toBe('set_row_1');
+      expect(set1Replaced.setNumber).toBe(1);
+      expect(set1Replaced.weightKg).toBe(100);
+      expect(machine.activeSession?.accumulatedMicroXp).toBe(set1Replaced.microXpTick);
+      expect(machine.activeSession?.accumulatedMicroGold).toBe(set1Replaced.microGoldTick);
+      expect(machine.activeSession?.encounterBoss.currentHp).toBe(
+        initialBossHp - set1Replaced.bossHpDamage
+      );
+
+      // 3. Log Set 2 ('set_row_2')
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'LOG_SET',
+        setId: 'set_row_2',
+        exerciseId: 'bench_press',
+        exerciseName: 'Barbell Bench Press',
+        weightKg: 100,
+        reps: 8,
+        rpe: 9,
+        nowMs: t0 + 80_000,
+      });
+      expect(machine.activeSession?.setLogs).toHaveLength(2);
+      expect(machine.activeSession?.setLogs[1].setNumber).toBe(2);
+
+      // 4. UPDATE_SET on 'set_row_2' to warmup (reduces XP, gold, and boss damage in-place)
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'UPDATE_SET',
+        setId: 'set_row_2',
+        weightKg: 60,
+        reps: 5,
+        isWarmup: true,
+        setType: 'WARMUP',
+      });
+      expect(machine.activeSession?.setLogs).toHaveLength(2);
+      const set2Updated = machine.activeSession!.setLogs[1];
+      expect(set2Updated.isWarmup).toBe(true);
+      expect(set2Updated.microXpTick).toBe(2);
+      expect(set2Updated.bossHpDamage).toBe(25);
+      expect(machine.activeSession?.accumulatedMicroXp).toBe(
+        set1Replaced.microXpTick + set2Updated.microXpTick
+      );
+      expect(machine.activeSession?.encounterBoss.currentHp).toBe(
+        initialBossHp - set1Replaced.bossHpDamage - set2Updated.bossHpDamage
+      );
+
+      // 5. UNLOG_SET on 'set_row_1' -> removes set 1, renumbers set_row_2 to setNumber 1, restores boss HP & subtracts XP/gold
+      machine = transitionHybridWorkoutState(machine, {
+        type: 'UNLOG_SET',
+        setId: 'set_row_1',
+      });
+      expect(machine.activeSession?.setLogs).toHaveLength(1);
+      expect(machine.activeSession?.setLogs[0].id).toBe('set_row_2');
+      expect(machine.activeSession?.setLogs[0].setNumber).toBe(1);
+      expect(machine.activeSession?.accumulatedMicroXp).toBe(set2Updated.microXpTick);
+      expect(machine.activeSession?.accumulatedMicroGold).toBe(set2Updated.microGoldTick);
+      expect(machine.activeSession?.encounterBoss.currentHp).toBe(
+        initialBossHp - set2Updated.bossHpDamage
+      );
+      expect(machine.lastMicroFeedback).toBeNull();
+      expect(xpAfterSet1).toBeGreaterThan(0);
+      expect(goldAfterSet1).toBeGreaterThan(0);
+    });
   });
 
   describe('Phase 3: Anti-Streak Collapse & Effort-Over-Volume Chest Rarity', () => {

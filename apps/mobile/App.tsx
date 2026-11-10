@@ -4,6 +4,7 @@ import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HolisticStatType, StatType, isIntraWorkoutFocusLocked } from '@goki/game-engine';
 import { BugReportModal } from './src/components/BugReportModal';
+import { CharacterManagerModal } from './src/components/CharacterManagerModal';
 import { CharacterPortraitFrame } from './src/components/CharacterPortraitFrame';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { TopMenuBorderArt } from './src/components/TopMenuBorderArt';
@@ -370,9 +371,11 @@ const AppRouter: React.FC = () => {
     offlineDraft,
     activeCharacterId,
     characters,
+    isAuthenticated,
   } = useGame();
   const [appMode, setAppMode] = useState<AppMode>('LANDING');
   const [worldTab, setWorldTab] = useState<ActiveTab>(DEFAULT_WORLD_ENTRY_TAB);
+  const [showPostDeleteCreatorModal, setShowPostDeleteCreatorModal] = useState(false);
 
   const hasActiveHero = Boolean(activeCharacterId && characters.some((c) => c.id === activeCharacterId));
 
@@ -380,8 +383,17 @@ const AppRouter: React.FC = () => {
   useEffect(() => {
     if (appMode === 'WORLD' && !hasActiveHero) {
       setAppMode('LANDING');
+      if (isAuthenticated) {
+        setShowPostDeleteCreatorModal(true);
+      }
     }
-  }, [appMode, hasActiveHero]);
+  }, [appMode, hasActiveHero, isAuthenticated]);
+
+  useEffect(() => {
+    if (hasActiveHero) {
+      setShowPostDeleteCreatorModal(false);
+    }
+  }, [hasActiveHero]);
 
   // Initialize dual-layer Auto-Update subsystem
   useEffect(() => {
@@ -480,6 +492,12 @@ const AppRouter: React.FC = () => {
   return (
     <>
       {renderContent()}
+      <CharacterManagerModal
+        visible={showPostDeleteCreatorModal}
+        initialView="CREATE"
+        onClose={() => setShowPostDeleteCreatorModal(false)}
+        onCharacterActivated={() => setShowPostDeleteCreatorModal(false)}
+      />
       <UpdateBanner />
     </>
   );

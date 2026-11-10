@@ -3,11 +3,14 @@ import {
   EQUIPMENT_SLOTS,
   buildWorkoutSpoilsReceipt,
   calculateDerivedCombatStats,
+  calculateOverallCharacterLevel,
   calculateWorkoutRaidEnergyDamage,
   consolidateHybridWorkoutSession,
   consolidateSpoilsReceipts,
   createLiveDungeonWorkoutBuff,
   inferOfflineWorkoutType,
+  mergeLootDrops,
+  normalizeCoreStatBlock,
   validateEquipmentRequirements,
 } from '../src';
 
@@ -251,6 +254,11 @@ describe('character-loadout-spoils engine module', () => {
     const summary = consolidateSpoilsReceipts([receipt1, receipt2]);
     expect(summary).not.toBeNull();
     expect(summary!.sessionCount).toBe(2);
+    // Pure resistance receipt1 has cardioDurationSeconds === 0; cardio receipt2 has 1500s
+    expect(receipt1.cardioDurationSeconds).toBe(0);
+    expect(receipt2.cardioDurationSeconds).toBe(1500);
+    expect(summary!.totalCardioSeconds).toBe(1500);
+    expect(receipt1.finalXpByHolisticStat?.STRENGTH).toBe(receipt1.xpGained.STRENGTH);
     expect(summary!.totalXpGained.STRENGTH).toBeGreaterThan(0);
     expect(summary!.totalXpGained.AGILITY).toBeGreaterThan(0);
     expect(summary!.statLevelUps.STRENGTH.levelsGained).toBeGreaterThanOrEqual(1);
@@ -261,5 +269,139 @@ describe('character-loadout-spoils engine module', () => {
     expect(summary!.injectedDungeonBuffs.length).toBe(2);
     expect(summary!.totalRaidDamage).toBe(raidDmg1 + 900);
     expect(summary!.raidTargets).toEqual(['Ignisrax, World-Forge Wyrm']);
+  });
+
+  it('incorporates 7-stat coreStats (CON, DEX, WIS, SPR) and 7-stat talent modifiers into calculateDerivedCombatStats', () => {
+    const base3Stat = calculateDerivedCombatStats({
+      coreStats: { strengthLevel: 5, enduranceLevel: 5, agilityLevel: 5 },
+    });
+
+    const full7Stat = calculateDerivedCombatStats({
+      coreStats: {
+        strengthLevel: 5,
+        enduranceLevel: 5,
+        agilityLevel: 5,
+        conLevel: 8,
+        dexLevel: 8,
+        wisLevel: 8,
+        sprLevel: 8,
+      },
+      equipmentPrimaryStats: {
+        CON: 2,
+        DEX: 2,
+        WIS: 2,
+        SPR: 2,
+      },
+      unlockedTalentRanks: {
+        grd_fortress_plating: 2, // defensePct
+        cal_bodyweight_mastery: 2, // attackPowerPct + dodgeChancePct
+        zen_precision_focus: 2, // critChancePct + critDamagePct
+      },
+    });
+
+    // CON (10 total) adds +150 rawMaxHp and +20 rawArmor
+    expect(full7Stat.maxHp).toBeGreaterThan(base3Stat.maxHp + 140);
+    expect(full7Stat.armor).toBeGreaterThan(base3Stat.armor + 18);
+    // WIS (10 total) adds +60 rawMaxStamina
+    expect(full7Stat.maxStamina).toBeGreaterThan(base3Stat.maxStamina + 55);
+    // DEX (10 total) adds +0.06 critChance and +0.04 accuracy
+    expect(full7Stat.critChance).toBeGreaterThan(base3Stat.critChance + 0.05);
+    expect(full7Stat.accuracy).toBeGreaterThan(base3Stat.accuracy);
+    // SPR (10 total) adds +0.05 damageMitigationPct
+    expect(full7Stat.damageMitigationPct).toBeGreaterThanOrEqual(0.05);
+  });
+
+  it('preserves procedural gear affixes in mergeLootDrops and separates distinct procedural rolls while stacking materials', () => {
+    const drops = [
+      {
+        itemSlug: 'iron_ore_cluster',
+        itemName: 'Rich Iron Ore Cluster',
+        rarity: 'COMMON' as const,
+        quantity: 2,
+      },
+      {
+        itemSlug: 'iron_ore_cluster',
+        itemName: 'Rich Iron Ore Cluster',
+        rarity: 'COMMON' as const,
+        quantity: 3,
+      },
+      {
+        itemSlug: 'ironbound_greatsword',
+        itemName: 'Fierce Ironbound Greatsword of Precision [T3]',
+        rarity: 'RARE' as const,
+        quantity: 1,
+        baseSlug: 'ironbound_greatsword',
+        tier: 3 as const,
+        prefixId: 'fierce',
+        suffixId: 'of_precision',
+        statBonuses: { meleePower: 35, critChance: 0.04 },
+        primaryStatBonuses: { STR: 4, DEX: 2 },
+      },
+      {
+        itemSlug: 'ironbound_greatsword',
+        itemName: 'Stalwart Ironbound Greatsword of the Bear [T4]',
+        rarity: 'EPIC' as const,
+        quantity: 1,
+        baseSlug: 'ironbound_greatsword',
+        tier: 4 as const,
+        prefixId: 'stalwart',
+        suffixId: 'of_the_bear',
+        statBonuses: { meleePower: 44, maxHp: 80 },
+        primaryStatBonuses: { STR: 6, CON: 5 },
+      },
+    ];
+
+    const merged = mergeLootDrops(drops);
+    expect(merged).toHaveLength(3);
+
+    const ore = merged.find((d) => d.itemSlug === 'iron_ore_cluster');
+    expect(ore?.quantity).toBe(5);
+
+    const greatswords = merged.filter((d) => d.itemSlug === 'ironbound_greatsword');
+    expect(greatswords).toHaveLength(2);
+    expect(greatswords[0]?.tier).toBe(3);
+    expect(greatswords[0]?.prefixId).toBe('fierce');
+    expect(greatswords[0]?.suffixId).toBe('of_precision');
+    expect(greatswords[0]?.statBonuses).toEqual({ meleePower: 35, critChance: 0.04 });
+    expect(greatswords[0]?.primaryStatBonuses).toEqual({ STR: 4, DEX: 2 });
+
+    expect(greatswords[1]?.tier).toBe(4);
+    expect(greatswords[1]?.prefixId).toBe('stalwart');
+    expect(greatswords[1]?.suffixId).toBe('of_the_bear');
+    expect(greatswords[1]?.statBonuses).toEqual({ meleePower: 44, maxHp: 80 });
+    expect(greatswords[1]?.primaryStatBonuses).toEqual({ STR: 6, CON: 5 });
+  });
+
+  it('normalizes abbreviated and full 7-stat CoreStatBlock fields via normalizeCoreStatBlock', () => {
+    const fromFull = normalizeCoreStatBlock({
+      strengthLevel: 6,
+      enduranceLevel: 5,
+      agilityLevel: 4,
+      dexterityLevel: 8,
+      constitutionLevel: 9,
+      wisdomLevel: 7,
+      spiritLevel: 10,
+    });
+    expect(fromFull.dexLevel).toBe(8);
+    expect(fromFull.dexterityLevel).toBe(8);
+    expect(fromFull.conLevel).toBe(9);
+    expect(fromFull.constitutionLevel).toBe(9);
+    expect(fromFull.wisLevel).toBe(7);
+    expect(fromFull.wisdomLevel).toBe(7);
+    expect(fromFull.sprLevel).toBe(10);
+    expect(fromFull.spiritLevel).toBe(10);
+    expect(fromFull.hasHolisticStats).toBe(true);
+
+    expect(
+      calculateOverallCharacterLevel({
+        strengthLevel: 7,
+        enduranceLevel: 7,
+        agilityLevel: 7,
+        dexterityLevel: 7,
+        constitutionLevel: 7,
+        wisdomLevel: 7,
+        spiritLevel: 7,
+      })
+    ).toBe(7);
   });
 });

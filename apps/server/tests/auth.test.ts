@@ -368,4 +368,107 @@ describe('@goki/server JWT Authentication & Password Hashing', () => {
 
     await app.close();
   });
+
+  it('prevents concurrent POST /api/characters race condition and handles P2002 on /api/auth/register with 409', async () => {
+    const memoryCharacters: any[] = [];
+    const testUser = {
+      id: 'user_race_1',
+      email: 'race@gokirpg.com',
+      username: 'race_runner',
+    };
+
+    const mockDb = {
+      user: {
+        findFirst: async () => null,
+        findUnique: async () => testUser,
+        create: async () => {
+          throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+        },
+      },
+      character: {
+        findMany: async ({ where }: any) => {
+          await new Promise((r) => setTimeout(r, 15));
+          return memoryCharacters.filter((c) => !where?.userId || c.userId === where.userId);
+        },
+        findFirst: async ({ where }: any) => {
+          const targetName =
+            typeof where?.name === 'string'
+              ? where.name
+              : typeof where?.name?.equals === 'string'
+                ? where.name.equals
+                : null;
+          if (!targetName) return null;
+          return (
+            memoryCharacters.find(
+              (c) => !c.deletedAt && c.name.toLowerCase() === targetName.toLowerCase()
+            ) ?? null
+          );
+        },
+        create: async ({ data }: any) => {
+          const char = {
+            id: `char_race_${memoryCharacters.length + 1}`,
+            userId: data.userId,
+            name: data.name,
+            gameMode: data.gameMode,
+            deletedAt: null,
+            stats: { strengthLevel: 1 },
+            fatigueState: {},
+            equipmentLoadout: {},
+            createdAt: new Date(),
+          };
+          memoryCharacters.push(char);
+          return char;
+        },
+      },
+    } as unknown as PrismaClient;
+
+    const app = await buildServerApp({ db: mockDb });
+    const token = app.jwt.sign({
+      userId: testUser.id,
+      email: testUser.email,
+      username: testUser.username,
+    });
+
+    // Fire 3 concurrent STANDARD character creations for the same user
+    const [r1, r2, r3] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/api/characters',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { name: 'Hero Alpha', gameMode: 'STANDARD' },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/api/characters',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { name: 'Hero Beta', gameMode: 'STANDARD' },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/api/characters',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { name: 'Hero Gamma', gameMode: 'STANDARD' },
+      }),
+    ]);
+
+    const statuses = [r1.statusCode, r2.statusCode, r3.statusCode].sort();
+    expect(statuses).toEqual([201, 409, 409]);
+    expect(memoryCharacters).toHaveLength(1);
+
+    // P2002 collision on POST /api/auth/register returns 409 instead of 500
+    const p2002Res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: {
+        email: 'collision@gokirpg.com',
+        username: 'collision_user',
+        password: 'password123',
+        characterName: 'Unique Hero Name',
+      },
+    });
+    expect(p2002Res.statusCode).toBe(409);
+    expect(p2002Res.json().error).toContain('already taken');
+
+    await app.close();
+  });
 });

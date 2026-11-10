@@ -17,6 +17,7 @@ import {
 import {
   BASE_EQUIPPABLE_ITEM_BY_SLUG,
   ItemTier,
+  PrimaryStatBonuses,
   proceduralItemToLootDrop,
   rollProceduralItemInstance,
 } from './item-affix-engine';
@@ -55,6 +56,7 @@ export interface CombatantCharacterInput {
   name: string;
   coreStats: CoreStatBlock;
   equipmentBonuses?: EquipmentStatBonuses;
+  equipmentPrimaryStatBonuses?: PrimaryStatBonuses;
   unlockedTalentRanks?: Record<string, number>;
   systemicFatigueStacks?: number;
 }
@@ -301,6 +303,7 @@ interface SimHero {
   armor: number;
   damageMitigationPct: number;
   armorPenetrationPct: number;
+  lifeOnHit: number;
   attackIntervalMs: number;
   accuracy: number;
   dodgeChance: number;
@@ -453,16 +456,34 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
   const heroes: SimHero[] = input.party.map((member, index) => {
     const talents = heroTalentProfiles[index]!;
     const gear = member.equipmentBonuses ?? {};
+    const gearPrim = member.equipmentPrimaryStatBonuses ?? {};
     const fatigue = getSystemicFatigueCombatPenalties(member.systemicFatigueStacks ?? 0);
 
-    const effStr = member.coreStats.strengthLevel * fatigue.statEffectivenessMultiplier;
-    const effEnd = member.coreStats.enduranceLevel * fatigue.statEffectivenessMultiplier;
-    const effAgi = member.coreStats.agilityLevel * fatigue.statEffectivenessMultiplier;
+    const strBonus = gearPrim.STR ?? 0;
+    const endBonus = gearPrim.END ?? 0;
+    const agiBonus = gearPrim.AGI ?? 0;
+    const dexBonus = gearPrim.DEX ?? 0;
+    const conBonus = gearPrim.CON ?? 0;
+    const wisBonus = gearPrim.WIS ?? 0;
+    const sprBonus = gearPrim.SPR ?? 0;
 
-    const rawMaxHp = 220 + effEnd * 28 + effStr * 10 + (gear.maxHp ?? 0);
+    const baseCon = member.coreStats.conLevel ?? member.coreStats.constitutionLevel ?? 0;
+    const baseDex = member.coreStats.dexLevel ?? member.coreStats.dexterityLevel ?? 0;
+    const baseWis = member.coreStats.wisLevel ?? member.coreStats.wisdomLevel ?? 0;
+    const baseSpr = member.coreStats.sprLevel ?? member.coreStats.spiritLevel ?? 0;
+
+    const effStr = (member.coreStats.strengthLevel + strBonus) * fatigue.statEffectivenessMultiplier;
+    const effEnd = (member.coreStats.enduranceLevel + endBonus) * fatigue.statEffectivenessMultiplier;
+    const effAgi = (member.coreStats.agilityLevel + agiBonus) * fatigue.statEffectivenessMultiplier;
+    const effCon = (baseCon + conBonus) * fatigue.statEffectivenessMultiplier;
+    const effDex = (baseDex + dexBonus) * fatigue.statEffectivenessMultiplier;
+    const effWis = (baseWis + wisBonus) * fatigue.statEffectivenessMultiplier;
+    const effSpr = (baseSpr + sprBonus) * fatigue.statEffectivenessMultiplier;
+
+    const rawMaxHp = 220 + effEnd * 28 + effStr * 10 + effCon * 15 + (gear.maxHp ?? 0);
     const maxHp = Math.max(100, Math.round(rawMaxHp * (1 + talents.maxHpPct)));
 
-    const rawMaxStamina = 90 + effEnd * 12 + effAgi * 5 + (gear.maxStamina ?? 0);
+    const rawMaxStamina = 90 + effEnd * 12 + effAgi * 5 + effWis * 6 + (gear.maxStamina ?? 0);
     const maxStamina = Math.max(
       40,
       Math.round(rawMaxStamina * (1 + talents.maxStaminaPct + partyBuffs.maxStaminaPct))
@@ -471,11 +492,17 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
     const rawMeleePower = 18 + effStr * 4.5 + effAgi * 1.2 + (gear.meleePower ?? 0);
     const meleePower = Math.max(
       5,
-      Math.round(rawMeleePower * (1 + talents.meleePowerPct + partyBuffs.meleePowerPct))
+      Math.round(
+        rawMeleePower *
+          (1 + talents.meleePowerPct + (talents.attackPowerPct ?? 0) + partyBuffs.meleePowerPct)
+      )
     );
 
-    const rawArmor = 8 + effStr * 2.2 + effEnd * 1.5 + (gear.armorRating ?? 0);
-    const armor = Math.max(0, Math.round(rawArmor * (1 + talents.armorPct)));
+    const rawArmor = 8 + effStr * 2.2 + effEnd * 1.5 + effCon * 2.0 + (gear.armorRating ?? 0);
+    const armor = Math.max(
+      0,
+      Math.round(rawArmor * (1 + talents.armorPct + (talents.defensePct ?? 0)))
+    );
 
     const attackSpeedMultiplier =
       (1 +
@@ -492,20 +519,27 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
       effAgi * 0.006 +
       (gear.dodgeRating ?? 0) +
       talents.dodgeRatingBonus +
+      (talents.dodgeChancePct ?? 0) +
       partyBuffs.dodgeBonus;
     const dodgeChance = clamp(rawDodge * fatigue.dodgeMultiplier, 0, 0.60);
 
     const critChance = clamp(
       0.05 +
         effAgi * 0.007 +
+        effDex * 0.006 +
         (gear.critChance ?? 0) +
         talents.critChanceBonus +
+        (talents.critChancePct ?? 0) +
         partyBuffs.critChanceBonus,
       0,
       0.75
     );
 
-    const critMultiplier = 1.65 + (gear.critMultiplier ?? 0) + talents.critDamageBonus;
+    const critMultiplier =
+      1.65 +
+      (gear.critMultiplier ?? 0) +
+      talents.critDamageBonus +
+      (talents.critDamagePct ?? 0);
     const cooldownHastePct = clamp(
       effAgi * 0.005 + talents.cooldownHastePct + partyBuffs.cooldownHastePct,
       0,
@@ -513,13 +547,19 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
     );
 
     const damageMitigationPct = clamp(
-      talents.damageMitigationPct + partyAuraMitigationPct,
+      talents.damageMitigationPct +
+        partyAuraMitigationPct +
+        (gear.damageMitigationPct ?? 0) +
+        effSpr * 0.005,
       0,
-      0.65
+      0.75
     );
 
     const hazardResistancePct = clamp(
-      effEnd * 0.015 + talents.hazardResistancePct + partyBuffs.hazardResistancePct,
+      effEnd * 0.015 +
+        (gear.hazardResistancePct ?? 0) +
+        talents.hazardResistancePct +
+        partyBuffs.hazardResistancePct,
       0,
       0.85
     );
@@ -529,20 +569,27 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
       skillReadyAtMs[sk.skillId] = 0;
     }
 
+    const initialShieldHp = Math.max(0, Math.round(gear.startOfCombatShieldHp ?? 0));
+
     return {
       characterId: member.characterId,
       name: member.name,
       maxHp,
       hp: maxHp,
-      shieldHp: 0,
+      shieldHp: initialShieldHp,
       maxStamina,
       stamina: maxStamina,
       meleePower,
       armor,
       damageMitigationPct,
-      armorPenetrationPct: clamp(talents.armorPenetrationPct, 0, 0.75),
+      armorPenetrationPct: clamp(
+        talents.armorPenetrationPct + (gear.armorPenetrationPct ?? 0),
+        0,
+        0.75
+      ),
+      lifeOnHit: Math.max(0, Math.round(gear.lifeOnHit ?? 0)),
       attackIntervalMs,
-      accuracy: clamp(0.96 * fatigue.accuracyMultiplier, 0.65, 1.0),
+      accuracy: clamp((0.96 + effDex * 0.004) * fatigue.accuracyMultiplier, 0.65, 1.0),
       dodgeChance,
       critChance,
       critMultiplier,
@@ -583,7 +630,12 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
   let roomsCleared = 0;
 
   const mergeLootDrop = (drop: LootDrop) => {
-    const existing = collectedLoot.find((d) => d.itemSlug === drop.itemSlug);
+    const getLootKey = (d: LootDrop) =>
+      d.tier || d.prefixId || d.suffixId || d.uniquePassive
+        ? `${d.itemSlug}:${d.tier ?? ''}:${d.prefixId ?? ''}:${d.suffixId ?? ''}:${d.uniquePassive?.passiveId ?? (d.uniquePassive as { id?: string } | null | undefined)?.id ?? ''}`
+        : d.itemSlug;
+    const targetKey = getLootKey(drop);
+    const existing = collectedLoot.find((d) => getLootKey(d) === targetKey);
     if (existing) {
       existing.quantity += drop.quantity;
     } else {
@@ -925,6 +977,12 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
                 target.hp -= finalDmg;
                 hero.summary.totalDamageDealt += finalDmg;
 
+                if (hero.lifeOnHit > 0 && hero.hp > 0 && hero.hp < hero.maxHp) {
+                  const healed = Math.min(hero.maxHp - hero.hp, hero.lifeOnHit);
+                  hero.hp += healed;
+                  hero.summary.totalHealingDone += healed;
+                }
+
                 pushEvent(room.roomNumber, {
                   type: 'SKILL_CAST',
                   actorId: hero.characterId,
@@ -1013,6 +1071,12 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
           const finalDmg = Math.min(target.hp, Math.max(1, Math.round(dmg)));
           target.hp -= finalDmg;
           hero.summary.totalDamageDealt += finalDmg;
+
+          if (hero.lifeOnHit > 0 && hero.hp > 0 && hero.hp < hero.maxHp) {
+            const healed = Math.min(hero.maxHp - hero.hp, hero.lifeOnHit);
+            hero.hp += healed;
+            hero.summary.totalHealingDone += healed;
+          }
 
           pushEvent(room.roomNumber, {
             type: 'BASIC_ATTACK',

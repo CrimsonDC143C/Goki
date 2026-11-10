@@ -85,6 +85,7 @@ class AudioManagerService {
   private _soundsMap = new Map<SoundEffectKey, AudioPlayer>();
   private _audioConfigured = false;
   private _listeners: Array<(muted: boolean) => void> = [];
+  private _webAudioCtx: AudioContext | null = null;
 
   private constructor() {
     this.restoreMuteState();
@@ -190,7 +191,13 @@ class AudioManagerService {
     if (Platform.OS !== 'web' && preset.uri) {
       try {
         await this.ensureAudioConfigured();
-        const player = createAudioPlayer(preset.uri);
+        let player = this._soundsMap.get(key);
+        if (!player) {
+          player = createAudioPlayer(preset.uri);
+          this._soundsMap.set(key, player);
+        } else {
+          player.seekTo?.(0);
+        }
         player.volume = vol;
         player.play();
         return;
@@ -209,28 +216,21 @@ class AudioManagerService {
   private playSynthesizedSound(config: SoundConfig, volume: number): void {
     try {
       const g = globalThis as unknown as {
-        AudioContext?: new () => {
-          currentTime: number;
-          destination: unknown;
-          createOscillator: () => {
-            type: OscillatorType;
-            frequency: { setValueAtTime: (f: number, t: number) => void };
-            connect: (dest: unknown) => void;
-            start: (t: number) => void;
-            stop: (t: number) => void;
-          };
-          createGain: () => {
-            gain: {
-              setValueAtTime: (v: number, t: number) => void;
-              exponentialRampToValueAtTime: (v: number, t: number) => void;
-            };
-            connect: (dest: unknown) => void;
-          };
-        };
+        AudioContext?: new () => AudioContext;
+        webkitAudioContext?: new () => AudioContext;
       };
 
-      if (!g.AudioContext) return;
-      const ctx = new g.AudioContext();
+      const AudioContextClass = g.AudioContext ?? g.webkitAudioContext;
+      if (!AudioContextClass) return;
+
+      if (!this._webAudioCtx || this._webAudioCtx.state === 'closed') {
+        this._webAudioCtx = new AudioContextClass();
+      }
+      const ctx = this._webAudioCtx;
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
       const now = ctx.currentTime;
       let offset = 0;
 
@@ -255,6 +255,15 @@ class AudioManagerService {
         osc.connect(gain);
         gain.connect(ctx.destination);
 
+        osc.onended = () => {
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch {
+            // Safe disconnect
+          }
+        };
+
         osc.start(now + offset);
         osc.stop(now + offset + dur);
 
@@ -268,12 +277,28 @@ class AudioManagerService {
   public async unloadAll(): Promise<void> {
     for (const player of this._soundsMap.values()) {
       try {
-        player.release();
+        (player as AudioPlayer & { remove?: () => void }).remove?.();
+        player.release?.();
       } catch {
         // Safe unload
       }
     }
     this._soundsMap.clear();
+
+    if (this._webAudioCtx) {
+      try {
+        if (this._webAudioCtx.state !== 'closed') {
+          await this._webAudioCtx.close();
+        }
+      } catch {
+        // Safe close
+      }
+      this._webAudioCtx = null;
+    }
+  }
+
+  public async cleanup(): Promise<void> {
+    await this.unloadAll();
   }
 }
 

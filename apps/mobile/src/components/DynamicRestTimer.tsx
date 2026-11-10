@@ -20,6 +20,8 @@ export interface DynamicRestTimerProps {
   onSelectPreset?: (seconds: number) => void;
   recommendedSeconds?: number;
   scrollOffsetY?: number;
+  disableOsNotification?: boolean;
+  disableExpirySensoryCue?: boolean;
 }
 
 export const REST_PRESETS = [60, 90, 120, 180, 240] as const;
@@ -45,6 +47,8 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
   onSelectPreset,
   recommendedSeconds,
   scrollOffsetY,
+  disableOsNotification = false,
+  disableExpirySensoryCue = false,
 }) => {
   const [secondsRemaining, setSecondsRemaining] = useState<number>(() =>
     targetEndTimeMs ? Math.max(0, Math.ceil((targetEndTimeMs - Date.now()) / 1000)) : 0
@@ -65,8 +69,12 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
         if (now >= targetEndTimeMs) {
           completedRef.current = true;
           setSecondsRemaining(0);
-          triggerSensoryCue('REST_TIMER_EXPIRED');
-          cancelRestTimerNotification().catch(() => {});
+          if (!disableExpirySensoryCue) {
+            triggerSensoryCue('REST_TIMER_EXPIRED');
+          }
+          if (!disableOsNotification) {
+            cancelRestTimerNotification().catch(() => {});
+          }
           onCompleteRef.current?.();
         } else {
           setSecondsRemaining(Math.max(0, Math.ceil((targetEndTimeMs - now) / 1000)));
@@ -74,23 +82,29 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
       }
     });
     return () => sub.remove();
-  }, [targetEndTimeMs]);
+  }, [targetEndTimeMs, disableOsNotification, disableExpirySensoryCue]);
 
   useEffect(() => {
     if (!targetEndTimeMs) {
       setSecondsRemaining(0);
       completedRef.current = false;
-      cancelRestTimerNotification().catch(() => {});
+      if (!disableOsNotification) {
+        cancelRestTimerNotification().catch(() => {});
+      }
       return;
     }
 
     const initialDiff = Math.ceil((targetEndTimeMs - Date.now()) / 1000);
     if (initialDiff <= 0) {
       setSecondsRemaining(0);
-      cancelRestTimerNotification().catch(() => {});
+      if (!disableOsNotification) {
+        cancelRestTimerNotification().catch(() => {});
+      }
       if (!completedRef.current) {
         completedRef.current = true;
-        triggerSensoryCue('REST_TIMER_EXPIRED');
+        if (!disableExpirySensoryCue) {
+          triggerSensoryCue('REST_TIMER_EXPIRED');
+        }
         onCompleteRef.current?.();
       }
       return;
@@ -100,16 +114,19 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
     setSecondsRemaining(initialDiff);
 
     // Schedule local push notification for background wakeups with high-importance channel
-    const notifTitle =
-      mode === 'SUPERSET_TRANSITION'
-        ? '⚡ Superset Transition Ready!'
-        : mode === 'DROP_SET_TRANSITION'
-        ? '🔥 Drop-Set Ready — Strip Weight!'
-        : '⏱️ Rest Over — Next Set Ready!';
-    const notifBody = headlineRef.current
-      ? `${headlineRef.current} • Let's crush this set.`
-      : 'Step up and begin your next set.';
-    scheduleRestTimerNotification(initialDiff, notifTitle, notifBody).catch(() => {});
+    if (!disableOsNotification) {
+      const exactSec = Math.max(1, Math.round((targetEndTimeMs - Date.now()) / 1000));
+      const notifTitle =
+        mode === 'SUPERSET_TRANSITION'
+          ? '⚡ Superset Transition Ready!'
+          : mode === 'DROP_SET_TRANSITION'
+          ? '🔥 Drop-Set Ready — Strip Weight!'
+          : '⏱️ Rest Over — Next Set Ready!';
+      const notifBody = headlineRef.current
+        ? `${headlineRef.current} • Let's crush this set.`
+        : 'Step up and begin your next set.';
+      scheduleRestTimerNotification(exactSec, notifTitle, notifBody, targetEndTimeMs).catch(() => {});
+    }
 
     const interval = setInterval(() => {
       const now = Date.now();
@@ -120,8 +137,12 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
         clearInterval(interval);
         if (!completedRef.current) {
           completedRef.current = true;
-          triggerSensoryCue('REST_TIMER_EXPIRED');
-          cancelRestTimerNotification().catch(() => {});
+          if (!disableExpirySensoryCue) {
+            triggerSensoryCue('REST_TIMER_EXPIRED');
+          }
+          if (!disableOsNotification) {
+            cancelRestTimerNotification().catch(() => {});
+          }
           onCompleteRef.current?.();
         }
       }
@@ -130,7 +151,7 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
     return () => {
       clearInterval(interval);
     };
-  }, [targetEndTimeMs, mode]);
+  }, [targetEndTimeMs, mode, disableOsNotification, disableExpirySensoryCue]);
 
   const modeBadge = useMemo(() => {
     switch (mode) {
@@ -166,7 +187,9 @@ export const DynamicRestTimer: React.FC<DynamicRestTimerProps> = ({
   };
 
   const handleSkip = () => {
-    cancelRestTimerNotification().catch(() => {});
+    if (!disableOsNotification) {
+      cancelRestTimerNotification().catch(() => {});
+    }
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
     onSkip();
   };

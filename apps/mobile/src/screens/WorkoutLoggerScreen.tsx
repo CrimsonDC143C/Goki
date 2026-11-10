@@ -243,7 +243,11 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     arrivalBanner,
     startHybridSession,
     logHybridSet,
+    unlogHybridSet,
+    updateHybridSet,
     recordHybridCardioSegment,
+    adjustHybridRestTimer,
+    skipHybridRest,
     finishHybridSession,
     proceedToHybridLootReview,
     openHybridLootChest,
@@ -334,21 +338,29 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     const firstEx = resistanceCatalog[0];
     const initialId = firstEx?.id ?? 'bench_press';
     const initialName = firstEx?.name ?? 'Barbell Bench Press';
+    const initialUnit = resolveExerciseWeightUnit(
+      exerciseGymPreferences,
+      initialId,
+      selectedGym.id,
+      defaultWeightUnit
+    );
     return [
       {
         blockId: `blk_${stamp}_1`,
         exerciseId: initialId,
         exerciseName: initialName,
+        weightUnit: initialUnit,
         sets: [
           {
             id: `set_${stamp}_1_1`,
-            weightKgStr: '80',
+            weightKgStr: formatCleanWeightNumber(convertKgToDisplayWeight(80, initialUnit)),
+            canonicalWeightKg: 80,
             repsStr: '8',
             isWarmup: false,
             setType: 'NORMAL',
             rpe: 8.5,
             completed: false,
-          },
+          } as OfflineDraftSetRow,
         ],
       },
     ];
@@ -563,6 +575,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   };
 
   const handleRemoveSecondarySegment = (category: WorkoutCategory) => {
+    clearActiveDragState();
     const remaining = orderedSegments.filter((c) => c !== category);
     if (remaining.length === 0) {
       setActiveCategory(null);
@@ -621,25 +634,75 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         exerciseName: b.exerciseName,
         supersetGroupId: b.supersetGroupId ?? null,
         weightUnit: unit,
-        sets: b.sets.map((s, sIdx) => ({
-          id: `set_${stamp}_${bIdx + 1}_${sIdx + 1}`,
-          weightKgStr: formatCleanWeightNumber(
-            convertKgToDisplayWeight(s.targetWeightKg || 60, unit)
-          ),
-          repsStr: String(s.targetReps || 8),
-          isWarmup: s.setType === 'WARMUP',
-          setType: s.setType || 'NORMAL',
-          rpe: s.targetRpe ?? 8.5,
-          supersetGroupId: b.supersetGroupId ?? null,
-          completed: false,
-        })),
+        sets: b.sets.map((s, sIdx) => {
+          const canonKg = s.targetWeightKg || 60;
+          return {
+            id: `set_${stamp}_${bIdx + 1}_${sIdx + 1}`,
+            weightKgStr: formatCleanWeightNumber(
+              convertKgToDisplayWeight(canonKg, unit)
+            ),
+            canonicalWeightKg: canonKg,
+            repsStr: String(s.targetReps || 8),
+            isWarmup: s.setType === 'WARMUP',
+            setType: s.setType || 'NORMAL',
+            rpe: s.targetRpe ?? 8.5,
+            supersetGroupId: b.supersetGroupId ?? null,
+            completed: false,
+          } as OfflineDraftSetRow;
+        }),
+      };
+    });
+
+    const rawCardioSegs = preset.blocks?.cardioSegments ?? [];
+    const hydratedCardio: OfflineDraftCardioItem[] = rawCardioSegs.map((seg, idx) => {
+      const exMatch = exercises.find((e) => e.id === seg.exerciseSlug);
+      const segCategory: WorkoutCategory =
+        exMatch?.workoutCategory && exMatch.workoutCategory !== 'GYM'
+          ? exMatch.workoutCategory
+          : preset.category !== 'GYM'
+            ? preset.category
+            : seg.activityType === 'RECOVERY_MOBILITY' || seg.activityType === 'recovery'
+              ? 'RECOVERY'
+              : 'CARDIO';
+      return {
+        id: seg.segmentId || `cardio_preset_${stamp}_${idx + 1}`,
+        exerciseId: seg.exerciseSlug,
+        exerciseName: seg.exerciseName || exMatch?.name || seg.exerciseSlug,
+        activityType: seg.activityType || 'CARDIO',
+        workoutCategory: segCategory,
+        durationSeconds: Math.max(60, Math.round((seg.targetDurationMinutes || 20) * 60)),
+        averageHrZone: seg.targetHrZone || 2,
+        rpe: seg.targetRpe ?? 7.5,
       };
     });
 
     if (blocks.length > 0) {
       setExerciseBlocks(blocks);
     }
-    setActiveCategory(preset.category || 'GYM');
+    setCardioEntries(hydratedCardio);
+
+    const nextSegments: WorkoutCategory[] = [];
+    if (blocks.length > 0) {
+      nextSegments.push('GYM');
+    }
+    for (const c of hydratedCardio) {
+      const cat = c.workoutCategory ?? (preset.category !== 'GYM' ? preset.category : 'CARDIO');
+      if (!nextSegments.includes(cat)) {
+        nextSegments.push(cat);
+      }
+    }
+    if (nextSegments.length === 0) {
+      nextSegments.push(preset.category || 'GYM');
+    }
+
+    const primaryCat = nextSegments.includes(preset.category)
+      ? preset.category
+      : nextSegments[0]!;
+    const secondaryCats = nextSegments.filter((c) => c !== primaryCat);
+
+    setActiveCategory(primaryCat);
+    setSecondaryCategories(secondaryCats);
+    setSegmentOrder(nextSegments);
     triggerSensoryCue('WORKOUT_PRESET_LOADED');
   };
 
@@ -659,18 +722,22 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           exerciseName: ex.exerciseName || ex.exerciseId,
           supersetGroupId: null,
           weightUnit: unit,
-          sets: (ex.sets || []).map((s, sIdx) => ({
-            id: `set_hist_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
-            weightKgStr: formatCleanWeightNumber(
-              convertKgToDisplayWeight(s.weightKg ?? 0, unit)
-            ),
-            repsStr: String(s.reps ?? 0),
-            isWarmup: s.setType === 'WARMUP' || !!s.isWarmup,
-            setType: s.setType || 'NORMAL',
-            rpe: s.rpe ?? 8.5,
-            supersetGroupId: null,
-            completed: false,
-          })),
+          sets: (ex.sets || []).map((s, sIdx) => {
+            const canonKg = s.weightKg ?? 0;
+            return {
+              id: `set_hist_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
+              weightKgStr: formatCleanWeightNumber(
+                convertKgToDisplayWeight(canonKg, unit)
+              ),
+              canonicalWeightKg: canonKg,
+              repsStr: String(s.reps ?? 0),
+              isWarmup: s.setType === 'WARMUP' || !!s.isWarmup,
+              setType: s.setType || 'NORMAL',
+              rpe: s.rpe ?? 8.5,
+              supersetGroupId: null,
+              completed: false,
+            } as OfflineDraftSetRow;
+          }),
         };
       });
 
@@ -699,6 +766,17 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       activeGymId,
     });
 
+    const syncedUpdates: Array<{
+      setId: string;
+      exerciseId: string;
+      reps: number;
+      weightKg: number;
+      rpe: number | null;
+      isWarmup: boolean;
+      setType: SetType;
+      supersetGroupId: string | null;
+    }> = [];
+
     setExerciseBlocks((prev) =>
       prev.map((b) => {
         if (b.blockId !== blockId) return b;
@@ -707,18 +785,42 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           exerciseId,
           exerciseName: ex?.name ?? exerciseId,
           weightUnit: nextUnit,
-          sets: b.sets.map((s) =>
-            s.completed
-              ? s
-              : {
-                  ...s,
-                  weightKgStr: prevLookup.found ? '' : '60',
-                  repsStr: prevLookup.found ? '' : '8',
-                }
-          ),
+          sets: b.sets.map((s) => {
+            if (s.completed) {
+              const parsedDisplayWeight = Math.max(0, Number(s.weightKgStr) || 0);
+              const parsedReps = Math.max(0, Math.floor(Number(s.repsStr) || 0));
+              const canonicalWeightKg =
+                (s as any).canonicalWeightKg !== undefined
+                  ? Number((s as any).canonicalWeightKg)
+                  : convertDisplayWeightToKg(parsedDisplayWeight, nextUnit);
+              const nextRpe = s.rpe ?? 8.5;
+              const nextSetType = s.setType || (s.isWarmup ? 'WARMUP' : 'NORMAL');
+              syncedUpdates.push({
+                setId: s.id,
+                exerciseId,
+                reps: parsedReps,
+                weightKg: canonicalWeightKg,
+                rpe: nextRpe,
+                isWarmup: nextSetType === 'WARMUP',
+                setType: nextSetType,
+                supersetGroupId: b.supersetGroupId ?? null,
+              });
+              return s;
+            }
+            const nextStr = prevLookup.found ? '' : '60';
+            return {
+              ...s,
+              weightKgStr: nextStr,
+              canonicalWeightKg: nextStr ? convertDisplayWeightToKg(60, nextUnit) : undefined,
+              repsStr: prevLookup.found ? '' : '8',
+            } as OfflineDraftSetRow;
+          }),
         };
       })
     );
+    for (const upd of syncedUpdates) {
+      updateHybridSet(upd);
+    }
     recordRecentActivity(exerciseId);
     setOpenExercisePickerBlockId(null);
   };
@@ -734,6 +836,16 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     Partial<Record<WorkoutCategory, ReturnType<typeof PanResponder.create>>>
   >({});
 
+  const clearDragHoldTimer = useCallback(() => {
+    if (dragHoldTimerRef.current) {
+      clearTimeout(dragHoldTimerRef.current);
+      dragHoldTimerRef.current = null;
+    }
+    if (!activeDragBlockIdRef.current && !activeDragSegmentRef.current) {
+      setIsHoldingDragTarget(false);
+    }
+  }, []);
+
   const clearActiveDragState = useCallback(() => {
     if (dragHoldTimerRef.current) {
       clearTimeout(dragHoldTimerRef.current);
@@ -748,6 +860,26 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     setDraggingSegment(null);
     setIsHoldingDragTarget(false);
   }, [blockDragAnimY, segmentDragAnimY]);
+
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const activeSessionRef = useRef(activeSession);
+  activeSessionRef.current = activeSession;
+
+  useEffect(() => {
+    return () => {
+      if (dragHoldTimerRef.current) {
+        clearTimeout(dragHoldTimerRef.current);
+        dragHoldTimerRef.current = null;
+      }
+      if (
+        phaseRef.current !== 'Resting' &&
+        !activeSessionRef.current?.restTimer?.isActive
+      ) {
+        cancelRestTimerNotification().catch(() => {});
+      }
+    };
+  }, []);
 
   const getBlockPanHandlers = useCallback(
     (blockId: string) => {
@@ -773,10 +905,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           onPanResponderMove: (_evt, gestureState) => {
             if (activeDragBlockIdRef.current !== blockId) {
               if (Math.abs(gestureState.dx) > 12 || Math.abs(gestureState.dy) > 12) {
-                if (dragHoldTimerRef.current) {
-                  clearTimeout(dragHoldTimerRef.current);
-                  dragHoldTimerRef.current = null;
-                }
+                clearDragHoldTimer();
               }
               return;
             }
@@ -827,7 +956,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       }
       return blockPanRespondersRef.current[blockId]!.panHandlers;
     },
-    [blockDragAnimY, clearActiveDragState]
+    [blockDragAnimY, clearActiveDragState, clearDragHoldTimer]
   );
 
   const getSegmentPanHandlers = useCallback(
@@ -853,10 +982,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           onPanResponderMove: (_evt, gestureState) => {
             if (activeDragSegmentRef.current !== segmentCategory) {
               if (Math.abs(gestureState.dx) > 12 || Math.abs(gestureState.dy) > 12) {
-                if (dragHoldTimerRef.current) {
-                  clearTimeout(dragHoldTimerRef.current);
-                  dragHoldTimerRef.current = null;
-                }
+                clearDragHoldTimer();
               }
               return;
             }
@@ -905,7 +1031,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       }
       return segmentPanRespondersRef.current[segmentCategory]!.panHandlers;
     },
-    [clearActiveDragState, segmentDragAnimY]
+    [clearActiveDragState, clearDragHoldTimer, segmentDragAnimY]
   );
 
   const handleSetOrAppendDesignation = (blockId: string, targetType: SetType) => {
@@ -943,12 +1069,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             {
               id: `set_${stamp}`,
               weightKgStr: lastRow?.weightKgStr ?? '',
+              canonicalWeightKg: (lastRow as any)?.canonicalWeightKg,
               repsStr: lastRow?.repsStr ?? '',
               isWarmup: targetType === 'WARMUP',
               setType: targetType,
               rpe: targetType === 'FAILURE' || targetType === 'AMRAP' ? 10 : (lastRow?.rpe ?? 8.5),
               completed: false,
-            },
+            } as OfflineDraftSetRow,
           ],
         };
       })
@@ -1052,11 +1179,16 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           weightUnit: nextUnit,
           sets: b.sets.map((s) => {
             if (!s.weightKgStr.trim()) return s;
-            const kg = convertDisplayWeightToKg(Number(s.weightKgStr) || 0, oldUnit);
+            const rawVal = Math.max(0, Number(s.weightKgStr) || 0);
+            const canonKg =
+              (s as any).canonicalWeightKg !== undefined
+                ? Number((s as any).canonicalWeightKg)
+                : convertDisplayWeightToKg(rawVal, oldUnit);
             return {
               ...s,
-              weightKgStr: formatCleanWeightNumber(convertKgToDisplayWeight(kg, nextUnit)),
-            };
+              canonicalWeightKg: canonKg,
+              weightKgStr: formatCleanWeightNumber(convertKgToDisplayWeight(canonKg, nextUnit)),
+            } as OfflineDraftSetRow;
           }),
         };
       })
@@ -1072,6 +1204,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     unit: WeightUnit
   ) => {
     const weightStr = formatCleanWeightNumber(targetDisplayWeight);
+    const canonKg = convertDisplayWeightToKg(Math.max(0, targetDisplayWeight || 0), unit);
     const repsStr = String(Math.max(1, Math.floor(targetReps)));
     setExerciseBlocks((prev) =>
       prev.map((b) => {
@@ -1086,9 +1219,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             return {
               ...s,
               weightKgStr: weightStr,
+              canonicalWeightKg: canonKg,
               repsStr,
               rpe: targetRpe,
-            };
+            } as OfflineDraftSetRow;
           }),
         };
       })
@@ -1104,50 +1238,108 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     rpe: number | null
   ) => {
     setValidationError(null);
+    let syncedUpdate: {
+      setId: string;
+      exerciseId: string;
+      reps: number;
+      weightKg: number;
+      rpe: number | null;
+      isWarmup: boolean;
+      setType: SetType;
+      supersetGroupId: string | null;
+    } | null = null;
+
     setExerciseBlocks((prev) =>
-      prev.map((b) =>
-        b.blockId === blockId
-          ? {
-              ...b,
-              sets: b.sets.map((s) =>
-                s.id === setId
-                  ? {
-                      ...s,
-                      weightKgStr: displayWeightStr,
-                      repsStr,
-                      rpe: rpe ?? s.rpe,
-                    }
-                  : s
-              ),
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        const blockUnit = resolveBlockUnit(b);
+        return {
+          ...b,
+          sets: b.sets.map((s) => {
+            if (s.id !== setId) return s;
+            const nextRpe = rpe ?? s.rpe ?? 8.5;
+            const nextSetType = s.setType || (s.isWarmup ? 'WARMUP' : 'NORMAL');
+            const parsedDisplayWeight = Math.max(0, Number(displayWeightStr) || 0);
+            const canonicalWeightKg = convertDisplayWeightToKg(parsedDisplayWeight, blockUnit);
+            if (s.completed) {
+              const parsedReps = Math.max(0, Math.floor(Number(repsStr) || 0));
+              syncedUpdate = {
+                setId: s.id,
+                exerciseId: b.exerciseId,
+                reps: parsedReps,
+                weightKg: canonicalWeightKg,
+                rpe: nextRpe,
+                isWarmup: nextSetType === 'WARMUP',
+                setType: nextSetType,
+                supersetGroupId: b.supersetGroupId ?? null,
+              };
             }
-          : b
-      )
+            return {
+              ...s,
+              weightKgStr: displayWeightStr,
+              canonicalWeightKg,
+              repsStr,
+              rpe: nextRpe,
+            } as OfflineDraftSetRow;
+          }),
+        };
+      })
     );
+    if (syncedUpdate) {
+      updateHybridSet(syncedUpdate);
+    }
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
   const handleInsertWarmupSets = (
     blockId: string,
     warmupSets: GeneratedWarmupSet[],
-    unit: WeightUnit
+    unit: WeightUnit,
+    targetWorkingWeightDisplay?: number
   ) => {
     if (warmupSets.length === 0) return;
     const stamp = Date.now();
     setExerciseBlocks((prev) =>
       prev.map((b) => {
         if (b.blockId !== blockId) return b;
-        const keptSets = b.sets.filter(
-          (s) => s.completed || !isWarmupSetType(s.setType, s.isWarmup)
-        );
+        let syncedFirstWorking = false;
+        const keptSets = b.sets
+          .filter((s) => s.completed || !isWarmupSetType(s.setType, s.isWarmup))
+          .map((s) => {
+            if (
+              !syncedFirstWorking &&
+              !s.completed &&
+              s.setType !== 'WARMUP' &&
+              !s.isWarmup &&
+              targetWorkingWeightDisplay !== undefined &&
+              targetWorkingWeightDisplay > 0
+            ) {
+              syncedFirstWorking = true;
+              const currentW = Number(s.weightKgStr) || 0;
+              const targetStr = formatCleanWeightNumber(targetWorkingWeightDisplay);
+              if (currentW <= 0 || s.weightKgStr !== targetStr) {
+                return {
+                  ...s,
+                  weightKgStr: targetStr,
+                  canonicalWeightKg: convertDisplayWeightToKg(targetWorkingWeightDisplay, unit),
+                } as OfflineDraftSetRow;
+              }
+            }
+            return s;
+          });
         const generatedRows: OfflineDraftSetRow[] = warmupSets.map((ws, idx) => ({
           id: `set_wu_${stamp}_${idx + 1}`,
           weightKgStr: formatCleanWeightNumber(ws.displayWeight),
+          canonicalWeightKg:
+            ws.weightKg !== undefined
+              ? ws.weightKg
+              : convertDisplayWeightToKg(ws.displayWeight, unit),
           repsStr: String(ws.reps),
           isWarmup: true,
           setType: 'WARMUP',
           rpe: ws.rpe,
           completed: false,
-        }));
+        } as OfflineDraftSetRow));
         return {
           ...b,
           weightUnit: unit,
@@ -1166,16 +1358,64 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   ) => {
     const cleaned = value.replace(/[^0-9.]/g, '');
     setValidationError(null);
+    let syncedUpdate: {
+      setId: string;
+      exerciseId: string;
+      reps: number;
+      weightKg: number;
+      rpe: number | null;
+      isWarmup: boolean;
+      setType: SetType;
+      supersetGroupId: string | null;
+    } | null = null;
+
     setExerciseBlocks((prev) =>
-      prev.map((b) =>
-        b.blockId === blockId
-          ? {
-              ...b,
-              sets: b.sets.map((s) => (s.id === setId ? { ...s, [field]: cleaned } : s)),
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        const blockUnit = resolveBlockUnit(b);
+        return {
+          ...b,
+          sets: b.sets.map((s) => {
+            if (s.id !== setId) return s;
+            const nextRow: OfflineDraftSetRow = {
+              ...s,
+              [field]: cleaned,
+              ...(field === 'weightKgStr'
+                ? {
+                    canonicalWeightKg: cleaned.trim()
+                      ? convertDisplayWeightToKg(Math.max(0, Number(cleaned) || 0), blockUnit)
+                      : undefined,
+                  }
+                : {}),
+            } as OfflineDraftSetRow;
+            if (nextRow.completed) {
+              const parsedDisplayWeight = Math.max(0, Number(nextRow.weightKgStr) || 0);
+              const parsedReps = Math.max(0, Math.floor(Number(nextRow.repsStr) || 0));
+              const canonicalWeightKg =
+                (nextRow as any).canonicalWeightKg !== undefined
+                  ? Number((nextRow as any).canonicalWeightKg)
+                  : convertDisplayWeightToKg(parsedDisplayWeight, blockUnit);
+              const nextRpe = nextRow.rpe ?? 8.5;
+              const nextSetType = nextRow.setType || (nextRow.isWarmup ? 'WARMUP' : 'NORMAL');
+              syncedUpdate = {
+                setId: nextRow.id,
+                exerciseId: b.exerciseId,
+                reps: parsedReps,
+                weightKg: canonicalWeightKg,
+                rpe: nextRpe,
+                isWarmup: nextSetType === 'WARMUP',
+                setType: nextSetType,
+                supersetGroupId: b.supersetGroupId ?? null,
+              };
             }
-          : b
-      )
+            return nextRow;
+          }),
+        };
+      })
     );
+    if (syncedUpdate) {
+      updateHybridSet(syncedUpdate);
+    }
   };
 
   const handleToggleSuperset = (blockIndex: number) => {
@@ -1207,41 +1447,121 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   };
 
   const handleCycleSetType = (blockId: string, setId: string) => {
+    let syncedUpdate: {
+      setId: string;
+      exerciseId: string;
+      reps: number;
+      weightKg: number;
+      rpe: number | null;
+      isWarmup: boolean;
+      setType: SetType;
+      supersetGroupId: string | null;
+    } | null = null;
+
     setExerciseBlocks((prev) =>
-      prev.map((b) =>
-        b.blockId === blockId
-          ? {
-              ...b,
-              sets: b.sets.map((s) => {
-                if (s.id === setId) {
-                  const nextType = cycleSetType(s.setType || (s.isWarmup ? 'WARMUP' : 'NORMAL'));
-                  return {
-                    ...s,
-                    setType: nextType,
-                    isWarmup: nextType === 'WARMUP',
-                    rpe: nextType === 'FAILURE' || nextType === 'AMRAP' ? 10 : s.rpe,
-                  };
-                }
-                return s;
-              }),
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        const blockUnit = resolveExerciseWeightUnit(
+          exerciseGymPreferences,
+          b.exerciseId,
+          activeGymId,
+          defaultWeightUnit
+        );
+        return {
+          ...b,
+          sets: b.sets.map((s) => {
+            if (s.id === setId) {
+              const nextSetType = cycleSetType(s.setType || (s.isWarmup ? 'WARMUP' : 'NORMAL'));
+              const nextRpe =
+                nextSetType === 'FAILURE' || nextSetType === 'AMRAP' ? 10 : (s.rpe ?? 8.5);
+              if (s.completed) {
+                const parsedDisplayWeight = Math.max(0, Number(s.weightKgStr) || 0);
+                const parsedReps = Math.max(0, Math.floor(Number(s.repsStr) || 0));
+                const canonicalWeightKg =
+                  (s as any).canonicalWeightKg !== undefined
+                    ? Number((s as any).canonicalWeightKg)
+                    : convertDisplayWeightToKg(parsedDisplayWeight, blockUnit);
+                syncedUpdate = {
+                  setId: s.id,
+                  exerciseId: b.exerciseId,
+                  reps: parsedReps,
+                  weightKg: canonicalWeightKg,
+                  rpe: nextRpe,
+                  isWarmup: nextSetType === 'WARMUP',
+                  setType: nextSetType,
+                  supersetGroupId: b.supersetGroupId ?? null,
+                };
+              }
+              return {
+                ...s,
+                setType: nextSetType,
+                isWarmup: nextSetType === 'WARMUP',
+                rpe: nextRpe,
+              };
             }
-          : b
-      )
+            return s;
+          }),
+        };
+      })
     );
+    if (syncedUpdate) {
+      updateHybridSet(syncedUpdate);
+    }
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
   const handleSetRpeValue = (blockId: string, setId: string, nextRpe: number) => {
+    let syncedUpdate: {
+      setId: string;
+      exerciseId: string;
+      reps: number;
+      weightKg: number;
+      rpe: number | null;
+      isWarmup: boolean;
+      setType: SetType;
+      supersetGroupId: string | null;
+    } | null = null;
+
     setExerciseBlocks((prev) =>
-      prev.map((b) =>
-        b.blockId === blockId
-          ? {
-              ...b,
-              sets: b.sets.map((s) => (s.id === setId ? { ...s, rpe: nextRpe } : s)),
+      prev.map((b) => {
+        if (b.blockId !== blockId) return b;
+        const blockUnit = resolveExerciseWeightUnit(
+          exerciseGymPreferences,
+          b.exerciseId,
+          activeGymId,
+          defaultWeightUnit
+        );
+        return {
+          ...b,
+          sets: b.sets.map((s) => {
+            if (s.id !== setId) return s;
+            if (s.completed) {
+              const parsedDisplayWeight = Math.max(0, Number(s.weightKgStr) || 0);
+              const parsedReps = Math.max(0, Math.floor(Number(s.repsStr) || 0));
+              const canonicalWeightKg =
+                (s as any).canonicalWeightKg !== undefined
+                  ? Number((s as any).canonicalWeightKg)
+                  : convertDisplayWeightToKg(parsedDisplayWeight, blockUnit);
+              const nextSetType = s.setType || (s.isWarmup ? 'WARMUP' : 'NORMAL');
+              syncedUpdate = {
+                setId: s.id,
+                exerciseId: b.exerciseId,
+                reps: parsedReps,
+                weightKg: canonicalWeightKg,
+                rpe: nextRpe,
+                isWarmup: nextSetType === 'WARMUP',
+                setType: nextSetType,
+                supersetGroupId: b.supersetGroupId ?? null,
+              };
             }
-          : b
-      )
+            return { ...s, rpe: nextRpe };
+          }),
+        };
+      })
     );
+    if (syncedUpdate) {
+      updateHybridSet(syncedUpdate);
+    }
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
 
@@ -1263,19 +1583,28 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           workoutHistory,
           activeGymId,
         });
+        const blockUnit = resolveBlockUnit(b);
+        const fallbackWeightStr = lastRow?.weightKgStr ?? (prevLookup.found ? '' : '60');
+        const fallbackCanonKg =
+          (lastRow as any)?.canonicalWeightKg !== undefined
+            ? Number((lastRow as any).canonicalWeightKg)
+            : fallbackWeightStr.trim()
+              ? convertDisplayWeightToKg(Number(fallbackWeightStr) || 0, blockUnit)
+              : undefined;
         return {
           ...b,
           sets: [
             ...b.sets,
             {
               id: `set_${stamp}`,
-              weightKgStr: lastRow?.weightKgStr ?? (prevLookup.found ? '' : '60'),
+              weightKgStr: fallbackWeightStr,
+              canonicalWeightKg: fallbackCanonKg,
               repsStr: lastRow?.repsStr ?? (prevLookup.found ? '' : '8'),
               isWarmup: false,
               setType: 'NORMAL',
               rpe: lastRow?.rpe ?? 8.5,
               completed: false,
-            },
+            } as OfflineDraftSetRow,
           ],
         };
       });
@@ -1284,6 +1613,29 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   };
 
   const handleRemoveSetRow = (blockId: string, setId: string) => {
+    const targetBlock = exerciseBlocks.find((b) => b.blockId === blockId);
+    if (!targetBlock || targetBlock.sets.length <= 1) return;
+    const removedSet = targetBlock.sets.find((s) => s.id === setId);
+    if (removedSet?.completed) {
+      unlogHybridSet(setId);
+      setLiveSetsCount((prev) => Math.max(0, prev - 1));
+      const blockUnit = resolveBlockUnit(targetBlock);
+      const weightKg =
+        (removedSet as any).canonicalWeightKg !== undefined
+          ? Number((removedSet as any).canonicalWeightKg)
+          : convertDisplayWeightToKg(
+              Math.max(0, Number(removedSet.weightKgStr) || 0),
+              blockUnit
+            );
+      const reps = Number(removedSet.repsStr) || 0;
+      const rowSetType = removedSet.setType || 'NORMAL';
+      const rowIsWarmup = removedSet.isWarmup || rowSetType === 'WARMUP';
+      const baseDmg = Math.round(
+        weightKg * reps * (rowIsWarmup ? 0.35 : 1.0) * (rowSetType === 'DROP_SET' ? 1.15 : 1.0)
+      );
+      const bossDmg = Math.max(15, baseDmg);
+      setBossDamageAccumulated((prev) => Math.max(0, prev - bossDmg));
+    }
     setExerciseBlocks((prev) =>
       prev.map((b) => {
         if (b.blockId !== blockId || b.sets.length <= 1) return b;
@@ -1324,17 +1676,19 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         sets: Array.from({ length: setCount }, (_, idx) => ({
           id: `set_${stamp}_${idx + 1}`,
           weightKgStr: prevLookup.found ? '' : '60',
+          canonicalWeightKg: prevLookup.found ? undefined : convertDisplayWeightToKg(60, nextUnit),
           repsStr: prevLookup.found ? '' : '8',
           isWarmup: false,
           setType: 'NORMAL',
           rpe: prevLookup.workingSets[idx]?.rpe ?? 8.5,
           completed: false,
-        })),
+        } as OfflineDraftSetRow)),
       },
     ]);
   };
 
   const handleRemoveExerciseBlock = (blockId: string) => {
+    clearActiveDragState();
     setExerciseBlocks((prev) => {
       if (prev.length <= 1) return prev;
       return prev.filter((b) => b.blockId !== blockId);
@@ -1383,12 +1737,19 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           warmupOrderIndex: wuIdx,
         });
 
-        const filledWeightStr =
-          s.weightKgStr.trim().length > 0
-            ? s.weightKgStr
-            : ghost
-              ? formatCleanWeightNumber(convertKgToDisplayWeight(ghost.weightKg, unit))
-              : '60';
+        const hasManualWeight = s.weightKgStr.trim().length > 0;
+        const filledWeightStr = hasManualWeight
+          ? s.weightKgStr
+          : ghost
+            ? formatCleanWeightNumber(convertKgToDisplayWeight(ghost.weightKg, unit))
+            : '60';
+        const filledCanonKg = hasManualWeight
+          ? (s as any).canonicalWeightKg !== undefined
+            ? Number((s as any).canonicalWeightKg)
+            : convertDisplayWeightToKg(Math.max(0, Number(s.weightKgStr) || 0), unit)
+          : ghost
+            ? ghost.weightKg
+            : convertDisplayWeightToKg(60, unit);
         const filledRepsStr =
           s.repsStr.trim().length > 0
             ? s.repsStr
@@ -1400,10 +1761,11 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         const nextRow: OfflineDraftSetRow = {
           ...s,
           weightKgStr: filledWeightStr,
+          canonicalWeightKg: filledCanonKg,
           repsStr: filledRepsStr,
           rpe: filledRpe,
           completed: true,
-        };
+        } as OfflineDraftSetRow;
         completedRow = nextRow;
         return nextRow;
       });
@@ -1415,8 +1777,31 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 
     setExerciseBlocks(nextBlocks);
 
-    // If user unchecked a set: cancel any running rest timer
+    // If user unchecked a set: unlog from context machine, adjust local counters, and cancel any running rest timer
     if (!justCompleted) {
+      unlogHybridSet(setId);
+      skipHybridRest();
+      setLiveSetsCount((prev) => Math.max(0, prev - 1));
+      if (completedRow && completedBlock) {
+        const exBlock = completedBlock as OfflineDraftExerciseBlock;
+        const setRow = completedRow as OfflineDraftSetRow;
+        const blockUnit = resolveBlockUnit(exBlock);
+        const weightKg =
+          (setRow as any).canonicalWeightKg !== undefined
+            ? Number((setRow as any).canonicalWeightKg)
+            : convertDisplayWeightToKg(
+                Math.max(0, Number(setRow.weightKgStr) || 0),
+                blockUnit
+              );
+        const reps = Number(setRow.repsStr) || 0;
+        const rowSetType = setRow.setType || 'NORMAL';
+        const rowIsWarmup = setRow.isWarmup || rowSetType === 'WARMUP';
+        const baseDmg = Math.round(
+          weightKg * reps * (rowIsWarmup ? 0.35 : 1.0) * (rowSetType === 'DROP_SET' ? 1.15 : 1.0)
+        );
+        const bossDmg = Math.max(15, baseDmg);
+        setBossDamageAccumulated((prev) => Math.max(0, prev - bossDmg));
+      }
       setRestTargetEndTimeMs(null);
       setRestStartedAtMs(null);
       setRestCenterModalVisible(false);
@@ -1434,10 +1819,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       const exBlock = completedBlock as OfflineDraftExerciseBlock;
       const setRow = completedRow as OfflineDraftSetRow;
       const blockUnit = resolveBlockUnit(exBlock);
-      const weightKg = convertDisplayWeightToKg(
-        Math.max(0, Number(setRow.weightKgStr) || 0),
-        blockUnit
-      );
+      const weightKg =
+        (setRow as any).canonicalWeightKg !== undefined
+          ? Number((setRow as any).canonicalWeightKg)
+          : convertDisplayWeightToKg(
+              Math.max(0, Number(setRow.weightKgStr) || 0),
+              blockUnit
+            );
       const reps = Number(setRow.repsStr) || 0;
       const rowRpe = setRow.rpe ?? 8.5;
       const rowSetType = setRow.setType || 'NORMAL';
@@ -1475,49 +1863,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         setLastDamageDealt(null);
       }, 1800);
 
-      // Log Hybrid Set to Context Machine
-      logHybridSet({
-        exerciseId: exBlock.exerciseId,
-        reps,
-        weightKg,
-        rpe: rowRpe,
-        isWarmup: rowIsWarmup,
-        setType: rowSetType,
-        supersetGroupId: exBlock.supersetGroupId,
-        nextSetHint: {
-          exerciseId: exBlock.exerciseId,
-          exerciseName: exBlock.exerciseName ?? exBlock.exerciseId,
-          weightKg,
-          reps,
-        },
-      });
-
-      // Check PR unlockables
-      const liveE1rm = rowIsWarmup ? 0 : calculateE1RM(weightKg, reps);
-      const priorPr = historicalPRs[exBlock.exerciseId]?.bestE1RM ?? 0;
-      const prBadge = evaluateUnlockables(
-        exBlock.exerciseName ?? exBlock.exerciseId,
-        weightKg,
-        reps,
-        liveE1rm,
-        priorPr
-      );
-      if (prBadge) {
-        setCelebrationBadge(prBadge);
-        triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
-      }
-
       // Check if all sets across all exercises are complete
       const hasRemainingSets = nextBlocks.some((b) => b.sets.some((s) => !s.completed));
-      if (!hasRemainingSets) {
-        setRestTargetEndTimeMs(null);
-        setRestStartedAtMs(null);
-        setRestCenterModalVisible(false);
-        setRestTimerPinned(false);
-        cancelRestTimerNotification().catch(() => {});
-        triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
-        return;
-      }
 
       // Dynamic Rest Transition Resolution
       const transition = resolveSetCompletionTransition({
@@ -1543,6 +1890,53 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         customRestDurationSec !== null && plan.mode === 'WORKING_REST'
           ? customRestDurationSec
           : plan.seconds + spiritBonusSec;
+
+      // Log Hybrid Set to Context Machine
+      logHybridSet({
+        setId: setRow.id,
+        exerciseId: exBlock.exerciseId,
+        exerciseName: exBlock.exerciseName,
+        reps,
+        weightKg,
+        rpe: rowRpe,
+        isWarmup: rowIsWarmup,
+        setType: rowSetType,
+        supersetGroupId: exBlock.supersetGroupId,
+        plannedRestSeconds: effectiveSec,
+        nextSetHint: {
+          exerciseId: exBlock.exerciseId,
+          exerciseName: exBlock.exerciseName ?? exBlock.exerciseId,
+          weightKg,
+          reps,
+        },
+      });
+
+      // Check PR unlockables
+      const liveE1rm = rowIsWarmup ? 0 : calculateE1RM(weightKg, reps);
+      const priorPr = historicalPRs[exBlock.exerciseId]?.bestE1RM ?? 0;
+      const prBadge = evaluateUnlockables(
+        exBlock.exerciseName ?? exBlock.exerciseId,
+        weightKg,
+        reps,
+        liveE1rm,
+        priorPr
+      );
+      if (prBadge) {
+        setCelebrationBadge(prBadge);
+        triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
+      }
+
+      if (!hasRemainingSets) {
+        setRestTargetEndTimeMs(null);
+        setRestStartedAtMs(null);
+        setRestCenterModalVisible(false);
+        setRestTimerPinned(false);
+        skipHybridRest();
+        cancelRestTimerNotification().catch(() => {});
+        triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
+        return;
+      }
+
       const startedMs = Date.now();
 
       setRestRecommendedSec(plan.seconds);
@@ -1677,6 +2071,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   const handleRestSelectPreset = useCallback(
     (targetSec: number) => {
       setCustomRestDurationSec(targetSec);
+      adjustHybridRestTimer({ newDurationSeconds: targetSec });
       const now = Date.now();
       const anchorStartMs =
         restStartedAtMs ??
@@ -1690,19 +2085,19 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         setRestCenterModalVisible(false);
         setRestTimerPinned(false);
         cancelRestTimerNotification().catch(() => {});
-        triggerSensoryCue('REST_TIMER_EXPIRED');
       } else {
         setRestStartedAtMs(anchorStartMs);
         setRestTotalSeconds(targetSec);
         setRestTargetEndTimeMs(nextEndMs);
       }
     },
-    [restStartedAtMs, restTargetEndTimeMs, restTotalSeconds]
+    [adjustHybridRestTimer, restStartedAtMs, restTargetEndTimeMs, restTotalSeconds]
   );
 
   const handleRestAdjustDelta = useCallback(
     (delta: number) => {
       if (restTargetEndTimeMs === null) return;
+      adjustHybridRestTimer({ deltaSeconds: delta });
       const now = Date.now();
       const anchorStartMs = restStartedAtMs ?? (restTargetEndTimeMs - restTotalSeconds * 1000);
       const rawNextEndMs = restTargetEndTimeMs + delta * 1000;
@@ -1713,7 +2108,6 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         setRestCenterModalVisible(false);
         setRestTimerPinned(false);
         cancelRestTimerNotification().catch(() => {});
-        triggerSensoryCue('REST_TIMER_EXPIRED');
       } else {
         const remainingMs = rawNextEndMs - now;
         const cappedRemainingMs = Math.min(600_000, remainingMs);
@@ -1727,18 +2121,24 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         setRestTargetEndTimeMs(nextEndMs);
       }
     },
-    [restStartedAtMs, restTargetEndTimeMs, restTotalSeconds]
+    [adjustHybridRestTimer, restStartedAtMs, restTargetEndTimeMs, restTotalSeconds]
   );
 
   const handleRestSkip = useCallback(() => {
+    skipHybridRest();
     setRestTargetEndTimeMs(null);
     setRestStartedAtMs(null);
     setRestCenterModalVisible(false);
     setRestTimerPinned(false);
     cancelRestTimerNotification().catch(() => {});
-  }, []);
+  }, [skipHybridRest]);
 
-  const handleRestComplete = useCallback(() => {}, []);
+  const handleRestComplete = useCallback(() => {
+    setRestTargetEndTimeMs(null);
+    setRestStartedAtMs(null);
+    setRestCenterModalVisible(false);
+    setRestTimerPinned(false);
+  }, []);
 
   // Finish Workout Action -> Transition to Celebratory Spoils Receipt
   const handleFinishWorkout = async () => {
@@ -1807,7 +2207,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           exerciseName: exMeta?.name ?? block.exerciseName ?? block.exerciseId,
           sets: completedRows.map((s, idx) => ({
             setNumber: idx + 1,
-            weightKg: convertDisplayWeightToKg(Math.max(0, Number(s.weightKgStr) || 0), bUnit),
+            weightKg:
+              (s as any).canonicalWeightKg !== undefined
+                ? Number((s as any).canonicalWeightKg)
+                : convertDisplayWeightToKg(Math.max(0, Number(s.weightKgStr) || 0), bUnit),
             reps: Math.floor(Number(s.repsStr) || 0),
             rpe: s.rpe ?? null,
             setType: s.setType,
@@ -1852,6 +2255,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       cardioSegmentCount: cardioEntries.length,
     });
 
+    const includeGymInPreset =
+      orderedSegments.includes('GYM') ||
+      exerciseBlocks.some((b) => b.sets.some((s) => s.completed));
+
     const draftTemplate: WorkoutPresetDefinition = {
       id: '',
       slug: '',
@@ -1860,26 +2267,33 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       notes: '',
       isSystemSeed: false,
       blocks: {
-        exerciseBlocks: exerciseBlocks.map((b) => {
-          const bUnit = resolveBlockUnit(b);
-          const completedSets = b.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
-          const chosenSets = completedSets.length > 0 ? completedSets : b.sets;
-          return {
-            blockId: b.blockId,
-            exerciseSlug: b.exerciseId,
-            exerciseName: b.exerciseName || b.exerciseId,
-            supersetGroupId: b.supersetGroupId ?? undefined,
-            sets: chosenSets.map((s) => ({
-              targetWeightKg: convertDisplayWeightToKg(
-                Math.max(0, Number(s.weightKgStr) || 0),
-                bUnit
-              ),
-              targetReps: Math.max(1, Math.floor(Number(s.repsStr) || 0)),
-              setType: s.setType || 'NORMAL',
-              targetRpe: s.rpe ?? 8.5,
-            })),
-          };
-        }),
+        exerciseBlocks: includeGymInPreset
+          ? exerciseBlocks.map((b) => {
+              const bUnit = resolveBlockUnit(b);
+              const completedSets = b.sets.filter(
+                (s) => s.completed && (Number(s.repsStr) || 0) > 0
+              );
+              const chosenSets = completedSets.length > 0 ? completedSets : b.sets;
+              return {
+                blockId: b.blockId,
+                exerciseSlug: b.exerciseId,
+                exerciseName: b.exerciseName || b.exerciseId,
+                supersetGroupId: b.supersetGroupId ?? undefined,
+                sets: chosenSets.map((s) => ({
+                  targetWeightKg:
+                    (s as any).canonicalWeightKg !== undefined
+                      ? Number((s as any).canonicalWeightKg)
+                      : convertDisplayWeightToKg(
+                          Math.max(0, Number(s.weightKgStr) || 0),
+                          bUnit
+                        ),
+                  targetReps: Math.max(1, Math.floor(Number(s.repsStr) || 0)),
+                  setType: s.setType || 'NORMAL',
+                  targetRpe: s.rpe ?? 8.5,
+                })),
+              };
+            })
+          : [],
         cardioSegments: cardioEntries.map((c, idx) => ({
           segmentId: c.id || `seg_${idx + 1}`,
           exerciseSlug: c.exerciseId,
@@ -2407,6 +2821,55 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         <Pressable
           style={styles.finishWorkoutBtn}
           onPress={() => {
+            const stamp = Date.now();
+            const firstEx = resistanceCatalog[0];
+            const initialId = firstEx?.id ?? 'bench_press';
+            const initialName = firstEx?.name ?? 'Barbell Bench Press';
+            const initialUnit = resolveExerciseWeightUnit(
+              exerciseGymPreferences,
+              initialId,
+              selectedGym.id,
+              defaultWeightUnit
+            );
+            setRestTargetEndTimeMs(null);
+            setRestStartedAtMs(null);
+            setRestCenterModalVisible(false);
+            setRestTimerPinned(false);
+            cancelRestTimerNotification().catch(() => {});
+            setActiveCategory(null);
+            setSecondaryCategories([]);
+            setSegmentOrder([]);
+            setCardioEntries([]);
+            setBossDamageAccumulated(0);
+            setLiveSetsCount(0);
+            setLastDamageDealt(null);
+            setPostWorkoutSummary(null);
+            setLastCompletedWorkout(null);
+            setLastCompletedSummary(null);
+            setShowShareReceipt(false);
+            setSessionPresetTemplate(null);
+            setEditingPresetDraft(null);
+            setPresetSavedInSession(false);
+            setExerciseBlocks([
+              {
+                blockId: `blk_${stamp}_1`,
+                exerciseId: initialId,
+                exerciseName: initialName,
+                weightUnit: initialUnit,
+                sets: [
+                  {
+                    id: `set_${stamp}_1_1`,
+                    weightKgStr: formatCleanWeightNumber(convertKgToDisplayWeight(80, initialUnit)),
+                    canonicalWeightKg: 80,
+                    repsStr: '8',
+                    isWarmup: false,
+                    setType: 'NORMAL',
+                    rpe: 8.5,
+                    completed: false,
+                  } as OfflineDraftSetRow,
+                ],
+              },
+            ]);
             completeHybridReview();
             if (onFinishAndReturn) {
               onFinishAndReturn();
@@ -2493,6 +2956,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             onSelectPreset={handleRestSelectPreset}
             recommendedSeconds={restRecommendedSec}
             scrollOffsetY={scrollOffsetY}
+            disableOsNotification={true}
+            disableExpirySensoryCue={true}
           />
         </View>
       ) : null}
@@ -2674,13 +3139,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                   },
                 ]}
               >
-                <View
-                  style={styles.sectionHeaderRow}
-                  {...getSegmentPanHandlers('GYM')}
-                >
+                <View style={styles.sectionHeaderRow}>
                   <View style={styles.sectionHeadingGroup}>
                     {orderedSegments.length > 1 && (
-                      <View style={styles.dragHandleBadge}>
+                      <View
+                        style={styles.dragHandleBadge}
+                        {...getSegmentPanHandlers('GYM')}
+                      >
                         <Text style={styles.dragHandleIcon}>⠿</Text>
                       </View>
                     )}
@@ -3429,13 +3894,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                 },
               ]}
             >
-              <View
-                style={styles.sectionHeaderRow}
-                {...getSegmentPanHandlers(modalityTarget)}
-              >
+              <View style={styles.sectionHeaderRow}>
                 <View style={styles.sectionHeadingGroup}>
                   {orderedSegments.length > 1 && (
-                    <View style={styles.dragHandleBadge}>
+                    <View
+                      style={styles.dragHandleBadge}
+                      {...getSegmentPanHandlers(modalityTarget)}
+                    >
                       <Text style={styles.dragHandleIcon}>⠿</Text>
                     </View>
                   )}
@@ -3709,6 +4174,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
               }}
               onSelectPreset={handleRestSelectPreset}
               recommendedSeconds={restRecommendedSec}
+              disableOsNotification={true}
+              disableExpirySensoryCue={true}
             />
 
             <Pressable
@@ -3813,8 +4280,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             warmupPresetCount={warmupPresetCount}
             onSelectBarWeightKg={(barKg) => saveExerciseBarWeightKg(targetBlk.exerciseId, barKg)}
             onSelectWarmupPresetCount={setWarmupPresetCount}
-            onInsertWarmupSets={(sets) =>
-              handleInsertWarmupSets(targetBlk.blockId, sets, bUnit)
+            onInsertWarmupSets={(sets, _barWeight, targetWorkingWeightDisplay) =>
+              handleInsertWarmupSets(
+                targetBlk.blockId,
+                sets,
+                bUnit,
+                targetWorkingWeightDisplay
+              )
             }
             onClose={() => setPlatesModalTarget(null)}
           />

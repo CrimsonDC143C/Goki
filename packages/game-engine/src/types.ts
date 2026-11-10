@@ -109,6 +109,7 @@ export interface LootDrop {
     SPR?: number;
   };
   uniquePassive?: {
+    id?: string;
     uniqueName: string;
     uniqueLore: string;
     passiveId: string;
@@ -130,6 +131,68 @@ export interface CoreStatBlock {
   constitutionLevel?: number;
   wisdomLevel?: number;
   spiritLevel?: number;
+}
+
+export interface NormalizedCoreStatBlock {
+  strengthLevel: number;
+  enduranceLevel: number;
+  agilityLevel: number;
+  dexLevel: number;
+  conLevel: number;
+  wisLevel: number;
+  sprLevel: number;
+  dexterityLevel: number;
+  constitutionLevel: number;
+  wisdomLevel: number;
+  spiritLevel: number;
+  hasHolisticStats: boolean;
+}
+
+/**
+ * Normalizes a `CoreStatBlock` across both abbreviated (`dexLevel`, `conLevel`, `wisLevel`, `sprLevel`)
+ * and full (`dexterityLevel`, `constitutionLevel`, `wisdomLevel`, `spiritLevel`) 7-stat field conventions.
+ */
+export function normalizeCoreStatBlock(
+  block: Partial<CoreStatBlock> | null | undefined,
+  defaultHolisticLevel = 1
+): NormalizedCoreStatBlock {
+  const safeFinite = (val: number | undefined, fallback: number): number =>
+    typeof val === 'number' && Number.isFinite(val) ? Math.max(0, val) : fallback;
+
+  const strengthLevel = safeFinite(block?.strengthLevel, 1);
+  const enduranceLevel = safeFinite(block?.enduranceLevel, 1);
+  const agilityLevel = safeFinite(block?.agilityLevel, 1);
+
+  const rawDex = block?.dexLevel ?? block?.dexterityLevel;
+  const rawCon = block?.conLevel ?? block?.constitutionLevel;
+  const rawWis = block?.wisLevel ?? block?.wisdomLevel;
+  const rawSpr = block?.sprLevel ?? block?.spiritLevel;
+
+  const hasHolisticStats =
+    rawDex !== undefined ||
+    rawCon !== undefined ||
+    rawWis !== undefined ||
+    rawSpr !== undefined;
+
+  const dexLevel = safeFinite(rawDex, defaultHolisticLevel);
+  const conLevel = safeFinite(rawCon, defaultHolisticLevel);
+  const wisLevel = safeFinite(rawWis, defaultHolisticLevel);
+  const sprLevel = safeFinite(rawSpr, defaultHolisticLevel);
+
+  return {
+    strengthLevel,
+    enduranceLevel,
+    agilityLevel,
+    dexLevel,
+    conLevel,
+    wisLevel,
+    sprLevel,
+    dexterityLevel: dexLevel,
+    constitutionLevel: conLevel,
+    wisdomLevel: wisLevel,
+    spiritLevel: sprLevel,
+    hasHolisticStats,
+  };
 }
 
 export interface CharacterStats {

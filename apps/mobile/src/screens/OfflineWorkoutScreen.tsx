@@ -417,11 +417,19 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   ): OfflineDraftExerciseBlock[] => {
     if (category !== 'GYM' || blocks.length > 0) return blocks;
     const now = Date.now();
+    const defaultExId = 'bench_press';
+    const blockUnit = resolveExerciseWeightUnit(
+      exerciseGymPreferences,
+      defaultExId,
+      activeGymId,
+      defaultWeightUnit
+    );
     return [
       {
         blockId: `blk_${now}_1`,
-        exerciseId: 'bench_press',
+        exerciseId: defaultExId,
         exerciseName: 'Barbell Bench Press',
+        weightUnit: blockUnit,
         sets: [
           {
             id: `set_${now}_1`,
@@ -469,6 +477,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   };
 
   const handleRemoveSecondarySegment = (category: WorkoutCategory) => {
+    clearActiveDragState();
     updateOfflineDraft((prev) => {
       const curActive = prev.category;
       const curSecondary = prev.secondaryCategories || [];
@@ -548,11 +557,14 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
               sets: b.sets.map((s) =>
                 s.completed
                   ? s
-                  : {
+                  : ({
                       ...s,
                       weightKgStr: prevLookup.found ? '' : '60',
+                      canonicalWeightKg: prevLookup.found
+                        ? undefined
+                        : convertDisplayWeightToKg(60, nextUnit),
                       repsStr: prevLookup.found ? '' : '8',
-                    }
+                    } as OfflineDraftSetRow)
               ),
             }
           : b
@@ -574,6 +586,16 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     Partial<Record<WorkoutCategory, ReturnType<typeof PanResponder.create>>>
   >({});
 
+  const clearDragHoldTimer = useCallback(() => {
+    if (dragHoldTimerRef.current) {
+      clearTimeout(dragHoldTimerRef.current);
+      dragHoldTimerRef.current = null;
+    }
+    if (!activeDragBlockIdRef.current && !activeDragSegmentRef.current) {
+      setIsHoldingDragTarget(false);
+    }
+  }, []);
+
   const clearActiveDragState = useCallback(() => {
     if (dragHoldTimerRef.current) {
       clearTimeout(dragHoldTimerRef.current);
@@ -588,6 +610,16 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     setDraggingSegment(null);
     setIsHoldingDragTarget(false);
   }, [blockDragAnimY, segmentDragAnimY]);
+
+  useEffect(() => {
+    return () => {
+      if (dragHoldTimerRef.current) {
+        clearTimeout(dragHoldTimerRef.current);
+        dragHoldTimerRef.current = null;
+      }
+      cancelRestTimerNotification().catch(() => {});
+    };
+  }, []);
 
   const getBlockPanHandlers = useCallback(
     (blockId: string) => {
@@ -613,10 +645,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           onPanResponderMove: (_evt, gestureState) => {
             if (activeDragBlockIdRef.current !== blockId) {
               if (Math.abs(gestureState.dx) > 12 || Math.abs(gestureState.dy) > 12) {
-                if (dragHoldTimerRef.current) {
-                  clearTimeout(dragHoldTimerRef.current);
-                  dragHoldTimerRef.current = null;
-                }
+                clearDragHoldTimer();
               }
               return;
             }
@@ -673,7 +702,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       }
       return blockPanRespondersRef.current[blockId]!.panHandlers;
     },
-    [blockDragAnimY, clearActiveDragState, updateOfflineDraft]
+    [blockDragAnimY, clearActiveDragState, clearDragHoldTimer, updateOfflineDraft]
   );
 
   const getSegmentPanHandlers = useCallback(
@@ -699,10 +728,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           onPanResponderMove: (_evt, gestureState) => {
             if (activeDragSegmentRef.current !== segmentCategory) {
               if (Math.abs(gestureState.dx) > 12 || Math.abs(gestureState.dy) > 12) {
-                if (dragHoldTimerRef.current) {
-                  clearTimeout(dragHoldTimerRef.current);
-                  dragHoldTimerRef.current = null;
-                }
+                clearDragHoldTimer();
               }
               return;
             }
@@ -757,7 +783,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       }
       return segmentPanRespondersRef.current[segmentCategory]!.panHandlers;
     },
-    [clearActiveDragState, segmentDragAnimY, updateOfflineDraft]
+    [clearActiveDragState, clearDragHoldTimer, segmentDragAnimY, updateOfflineDraft]
   );
 
   const handleSetOrAppendDesignation = (blockId: string, targetType: SetType) => {
@@ -797,12 +823,13 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
             {
               id: `set_${stamp}`,
               weightKgStr: lastRow?.weightKgStr ?? '',
+              canonicalWeightKg: (lastRow as any)?.canonicalWeightKg,
               repsStr: lastRow?.repsStr ?? '',
               isWarmup: targetType === 'WARMUP',
               setType: targetType,
               rpe: targetType === 'FAILURE' || targetType === 'AMRAP' ? 10 : (lastRow?.rpe ?? 8.5),
               completed: false,
-            },
+            } as OfflineDraftSetRow,
           ],
         };
       }),
@@ -832,11 +859,16 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           weightUnit: nextUnit,
           sets: b.sets.map((s) => {
             if (!s.weightKgStr.trim()) return s;
-            const kg = convertDisplayWeightToKg(Number(s.weightKgStr) || 0, oldUnit);
+            const rawVal = Math.max(0, Number(s.weightKgStr) || 0);
+            const canonKg =
+              (s as any).canonicalWeightKg !== undefined
+                ? Number((s as any).canonicalWeightKg)
+                : convertDisplayWeightToKg(rawVal, oldUnit);
             return {
               ...s,
-              weightKgStr: formatCleanWeightNumber(convertKgToDisplayWeight(kg, nextUnit)),
-            };
+              canonicalWeightKg: canonKg,
+              weightKgStr: formatCleanWeightNumber(convertKgToDisplayWeight(canonKg, nextUnit)),
+            } as OfflineDraftSetRow;
           }),
         };
       }),
@@ -852,6 +884,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     unit: WeightUnit
   ) => {
     const weightStr = formatCleanWeightNumber(targetDisplayWeight);
+    const canonKg = convertDisplayWeightToKg(Math.max(0, targetDisplayWeight || 0), unit);
     const repsStr = String(Math.max(1, Math.floor(targetReps)));
     updateOfflineDraft((prev) => ({
       ...prev,
@@ -867,9 +900,10 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
             return {
               ...s,
               weightKgStr: weightStr,
+              canonicalWeightKg: canonKg,
               repsStr,
               rpe: targetRpe,
-            };
+            } as OfflineDraftSetRow;
           }),
         };
       }),
@@ -887,23 +921,26 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     setValidationError(null);
     updateOfflineDraft((prev) => ({
       ...prev,
-      exerciseBlocks: prev.exerciseBlocks.map((b) =>
-        b.blockId === blockId
-          ? {
-              ...b,
-              sets: b.sets.map((s) =>
-                s.id === setId
-                  ? {
-                      ...s,
-                      weightKgStr: displayWeightStr,
-                      repsStr,
-                      rpe: rpe ?? s.rpe,
-                    }
-                  : s
-              ),
-            }
-          : b
-      ),
+      exerciseBlocks: prev.exerciseBlocks.map((b) => {
+        if (b.blockId !== blockId) return b;
+        const blockUnit = resolveBlockUnit(b);
+        const parsedDisplayWeight = Math.max(0, Number(displayWeightStr) || 0);
+        const canonicalWeightKg = convertDisplayWeightToKg(parsedDisplayWeight, blockUnit);
+        return {
+          ...b,
+          sets: b.sets.map((s) =>
+            s.id === setId
+              ? ({
+                  ...s,
+                  weightKgStr: displayWeightStr,
+                  canonicalWeightKg,
+                  repsStr,
+                  rpe: rpe ?? s.rpe,
+                } as OfflineDraftSetRow)
+              : s
+          ),
+        };
+      }),
     }));
     triggerSensoryCue('SET_MICRO_REWARD_TICK');
   };
@@ -911,7 +948,8 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   const handleInsertWarmupSets = (
     blockId: string,
     warmupSets: GeneratedWarmupSet[],
-    unit: WeightUnit
+    unit: WeightUnit,
+    targetWorkingWeightDisplay?: number
   ) => {
     if (warmupSets.length === 0) return;
     const stamp = Date.now();
@@ -919,18 +957,44 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       ...prev,
       exerciseBlocks: prev.exerciseBlocks.map((b) => {
         if (b.blockId !== blockId) return b;
-        const keptSets = b.sets.filter(
-          (s) => s.completed || !isWarmupSetType(s.setType, s.isWarmup)
-        );
+        let syncedFirstWorking = false;
+        const keptSets = b.sets
+          .filter((s) => s.completed || !isWarmupSetType(s.setType, s.isWarmup))
+          .map((s) => {
+            if (
+              !syncedFirstWorking &&
+              !s.completed &&
+              s.setType !== 'WARMUP' &&
+              !s.isWarmup &&
+              targetWorkingWeightDisplay !== undefined &&
+              targetWorkingWeightDisplay > 0
+            ) {
+              syncedFirstWorking = true;
+              const currentW = Number(s.weightKgStr) || 0;
+              const targetStr = formatCleanWeightNumber(targetWorkingWeightDisplay);
+              if (currentW <= 0 || s.weightKgStr !== targetStr) {
+                return {
+                  ...s,
+                  weightKgStr: targetStr,
+                  canonicalWeightKg: convertDisplayWeightToKg(targetWorkingWeightDisplay, unit),
+                } as OfflineDraftSetRow;
+              }
+            }
+            return s;
+          });
         const generatedRows: OfflineDraftSetRow[] = warmupSets.map((ws, idx) => ({
           id: `set_wu_${stamp}_${idx + 1}`,
           weightKgStr: formatCleanWeightNumber(ws.displayWeight),
+          canonicalWeightKg:
+            ws.weightKg !== undefined
+              ? ws.weightKg
+              : convertDisplayWeightToKg(ws.displayWeight, unit),
           repsStr: String(ws.reps),
           isWarmup: true,
           setType: 'WARMUP',
           rpe: ws.rpe,
           completed: false,
-        }));
+        } as OfflineDraftSetRow));
         return {
           ...b,
           weightUnit: unit,
@@ -951,14 +1015,28 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
     setValidationError(null);
     updateOfflineDraft((prev) => ({
       ...prev,
-      exerciseBlocks: prev.exerciseBlocks.map((b) =>
-        b.blockId === blockId
-          ? {
-              ...b,
-              sets: b.sets.map((s) => (s.id === setId ? { ...s, [field]: cleaned } : s)),
-            }
-          : b
-      ),
+      exerciseBlocks: prev.exerciseBlocks.map((b) => {
+        if (b.blockId !== blockId) return b;
+        const blockUnit = resolveBlockUnit(b);
+        return {
+          ...b,
+          sets: b.sets.map((s) =>
+            s.id === setId
+              ? ({
+                  ...s,
+                  [field]: cleaned,
+                  ...(field === 'weightKgStr'
+                    ? {
+                        canonicalWeightKg: cleaned.trim()
+                          ? convertDisplayWeightToKg(Math.max(0, Number(cleaned) || 0), blockUnit)
+                          : undefined,
+                      }
+                    : {}),
+                } as OfflineDraftSetRow)
+              : s
+          ),
+        };
+      }),
     }));
   };
 
@@ -1003,12 +1081,19 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           warmupOrderIndex: wuIdx,
         });
 
-        const filledWeightStr =
-          s.weightKgStr.trim().length > 0
-            ? s.weightKgStr
-            : ghost
-              ? formatCleanWeightNumber(convertKgToDisplayWeight(ghost.weightKg, unit))
-              : '60';
+        const hasManualWeight = s.weightKgStr.trim().length > 0;
+        const filledWeightStr = hasManualWeight
+          ? s.weightKgStr
+          : ghost
+            ? formatCleanWeightNumber(convertKgToDisplayWeight(ghost.weightKg, unit))
+            : '60';
+        const filledCanonKg = hasManualWeight
+          ? (s as any).canonicalWeightKg !== undefined
+            ? Number((s as any).canonicalWeightKg)
+            : convertDisplayWeightToKg(Math.max(0, Number(s.weightKgStr) || 0), unit)
+          : ghost
+            ? ghost.weightKg
+            : convertDisplayWeightToKg(60, unit);
         const filledRepsStr =
           s.repsStr.trim().length > 0
             ? s.repsStr
@@ -1020,10 +1105,11 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
         const nextRow: OfflineDraftSetRow = {
           ...s,
           weightKgStr: filledWeightStr,
+          canonicalWeightKg: filledCanonKg,
           repsStr: filledRepsStr,
           rpe: filledRpe,
           completed: true,
-        };
+        } as OfflineDraftSetRow;
         completedRow = nextRow;
         return nextRow;
       });
@@ -1215,19 +1301,28 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
             workoutHistory,
             activeGymId,
           });
+          const bUnit = resolveBlockUnit(b);
+          const nextWeightStr = lastRow?.weightKgStr ?? (prevLookup.found ? '' : '60');
+          const nextCanonKg =
+            (lastRow as any)?.canonicalWeightKg !== undefined
+              ? (lastRow as any).canonicalWeightKg
+              : nextWeightStr.trim() !== ''
+                ? convertDisplayWeightToKg(Math.max(0, Number(nextWeightStr) || 0), bUnit)
+                : undefined;
           return {
             ...b,
             sets: [
               ...b.sets,
               {
                 id: `set_${stamp}`,
-                weightKgStr: lastRow?.weightKgStr ?? (prevLookup.found ? '' : '60'),
+                weightKgStr: nextWeightStr,
+                canonicalWeightKg: nextCanonKg,
                 repsStr: lastRow?.repsStr ?? (prevLookup.found ? '' : '8'),
                 isWarmup: false,
                 setType: 'NORMAL',
                 rpe: lastRow?.rpe ?? 8.5,
                 completed: false,
-              },
+              } as OfflineDraftSetRow,
             ],
           };
         }),
@@ -1281,18 +1376,20 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           sets: Array.from({ length: setCount }, (_, idx) => ({
             id: `set_${stamp}_${idx + 1}`,
             weightKgStr: prevLookup.found ? '' : '60',
+            canonicalWeightKg: prevLookup.found ? undefined : convertDisplayWeightToKg(60, nextUnit),
             repsStr: prevLookup.found ? '' : '8',
             isWarmup: false,
             setType: 'NORMAL',
             rpe: prevLookup.workingSets[idx]?.rpe ?? 8.5,
             completed: false,
-          })),
+          } as OfflineDraftSetRow)),
         },
       ],
     }));
   };
 
   const handleRemoveExerciseBlock = (blockId: string) => {
+    clearActiveDragState();
     updateOfflineDraft((prev) => {
       if (prev.exerciseBlocks.length <= 1) return prev;
       return {
@@ -1418,22 +1515,39 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
   const handleLoadSessionIntoWorkout = useCallback(
     (workout: CompletedWorkoutRecord) => {
       const nowMs = Date.now();
-      const blocks: OfflineDraftExerciseBlock[] = (workout.exercises || []).map((ex, bIdx) => ({
-        blockId: `blk_hist_${nowMs}_${bIdx + 1}`,
-        exerciseId: ex.exerciseId,
-        exerciseName: ex.exerciseName || ex.exerciseId,
-        supersetGroupId: null,
-        sets: (ex.sets || []).map((s, sIdx) => ({
-          id: `set_hist_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
-          weightKgStr: String(s.weightKg ?? 0),
-          repsStr: String(s.reps ?? 0),
-          isWarmup: s.setType === 'WARMUP' || !!s.isWarmup,
-          setType: s.setType || 'NORMAL',
-          rpe: s.rpe ?? 8.5,
+      const blocks: OfflineDraftExerciseBlock[] = (workout.exercises || []).map((ex, bIdx) => {
+        const blockUnit = resolveExerciseWeightUnit(
+          exerciseGymPreferences,
+          ex.exerciseId,
+          activeGymId,
+          defaultWeightUnit
+        );
+        return {
+          blockId: `blk_hist_${nowMs}_${bIdx + 1}`,
+          exerciseId: ex.exerciseId,
+          exerciseName: ex.exerciseName || ex.exerciseId,
           supersetGroupId: null,
-          completed: false,
-        })),
-      }));
+          weightUnit: blockUnit,
+          sets: (ex.sets || []).map((s, sIdx) => {
+            const rawKg = s.weightKg ?? 0;
+            const displayW =
+              rawKg > 0
+                ? formatCleanWeightNumber(convertKgToDisplayWeight(rawKg, blockUnit))
+                : '0';
+            return {
+              id: `set_hist_${nowMs}_${bIdx + 1}_${sIdx + 1}`,
+              weightKgStr: displayW,
+              canonicalWeightKg: rawKg,
+              repsStr: String(s.reps ?? 0),
+              isWarmup: s.setType === 'WARMUP' || !!s.isWarmup,
+              setType: s.setType || 'NORMAL',
+              rpe: s.rpe ?? 8.5,
+              supersetGroupId: null,
+              completed: false,
+            } as OfflineDraftSetRow;
+          }),
+        };
+      });
 
       updateOfflineDraft((prev) => ({
         ...prev,
@@ -1444,7 +1558,7 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       setShowTrainingHistory(false);
       triggerSensoryCue('WORKOUT_PRESET_LOADED');
     },
-    [updateOfflineDraft]
+    [activeGymId, defaultWeightUnit, exerciseGymPreferences, updateOfflineDraft]
   );
 
   const handleRestSelectPreset = useCallback(
@@ -1529,7 +1643,11 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
           exerciseName: block.exerciseName || block.exerciseId,
           sets: completedRows.map((s, idx) => ({
             setNumber: idx + 1,
-            weightKg: convertDisplayWeightToKg(Math.max(0, Number(s.weightKgStr) || 0), bUnit),
+            weightKg:
+              typeof (s as any).canonicalWeightKg === 'number' &&
+              Number.isFinite((s as any).canonicalWeightKg)
+                ? (s as any).canonicalWeightKg
+                : convertDisplayWeightToKg(Math.max(0, Number(s.weightKgStr) || 0), bUnit),
             reps: Math.floor(Number(s.repsStr) || 0),
             rpe: s.rpe ?? null,
             setType: s.setType,
@@ -1574,6 +1692,10 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       cardioSegmentCount: validCardio.length,
     });
 
+    const includeGymInPreset =
+      orderedSegments.includes('GYM') ||
+      offlineDraft.exerciseBlocks.some((b) => b.sets.some((s) => s.completed));
+
     const draftTemplate: WorkoutPresetDefinition = {
       id: '',
       slug: '',
@@ -1582,26 +1704,34 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
       notes: '',
       isSystemSeed: false,
       blocks: {
-        exerciseBlocks: offlineDraft.exerciseBlocks.map((b) => {
-          const bUnit = resolveBlockUnit(b);
-          const completedSets = b.sets.filter((s) => s.completed && (Number(s.repsStr) || 0) > 0);
-          const chosenSets = completedSets.length > 0 ? completedSets : b.sets;
-          return {
-            blockId: b.blockId,
-            exerciseSlug: b.exerciseId,
-            exerciseName: b.exerciseName || b.exerciseId,
-            supersetGroupId: b.supersetGroupId ?? undefined,
-            sets: chosenSets.map((s) => ({
-              targetWeightKg: convertDisplayWeightToKg(
-                Math.max(0, Number(s.weightKgStr) || 0),
-                bUnit
-              ),
-              targetReps: Math.max(1, Math.floor(Number(s.repsStr) || 0)),
-              setType: s.setType || 'NORMAL',
-              targetRpe: s.rpe ?? 8.5,
-            })),
-          };
-        }),
+        exerciseBlocks: includeGymInPreset
+          ? offlineDraft.exerciseBlocks.map((b) => {
+              const bUnit = resolveBlockUnit(b);
+              const completedSets = b.sets.filter(
+                (s) => s.completed && (Number(s.repsStr) || 0) > 0
+              );
+              const chosenSets = completedSets.length > 0 ? completedSets : b.sets;
+              return {
+                blockId: b.blockId,
+                exerciseSlug: b.exerciseId,
+                exerciseName: b.exerciseName || b.exerciseId,
+                supersetGroupId: b.supersetGroupId ?? undefined,
+                sets: chosenSets.map((s) => ({
+                  targetWeightKg:
+                    typeof (s as any).canonicalWeightKg === 'number' &&
+                    Number.isFinite((s as any).canonicalWeightKg)
+                      ? (s as any).canonicalWeightKg
+                      : convertDisplayWeightToKg(
+                          Math.max(0, Number(s.weightKgStr) || 0),
+                          bUnit
+                        ),
+                  targetReps: Math.max(1, Math.floor(Number(s.repsStr) || 0)),
+                  setType: s.setType || 'NORMAL',
+                  targetRpe: s.rpe ?? 8.5,
+                })),
+              };
+            })
+          : [],
         cardioSegments: offlineDraft.cardioEntries.map((c, idx) => ({
           segmentId: c.id || `seg_${idx + 1}`,
           exerciseSlug: c.exerciseId,
@@ -1743,13 +1873,13 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
                   },
                 ]}
               >
-                <View
-                  style={styles.sectionHeaderRow}
-                  {...getSegmentPanHandlers('GYM')}
-                >
+                <View style={styles.sectionHeaderRow}>
                   <View style={styles.sectionHeadingGroup}>
                     {orderedSegments.length > 1 && (
-                      <View style={styles.dragHandleBadge}>
+                      <View
+                        style={styles.dragHandleBadge}
+                        {...getSegmentPanHandlers('GYM')}
+                      >
                         <Text style={styles.dragHandleIcon}>⠿</Text>
                       </View>
                     )}
@@ -2490,13 +2620,13 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
                 },
               ]}
             >
-              <View
-                style={styles.sectionHeaderRow}
-                {...getSegmentPanHandlers(modalityTarget)}
-              >
+              <View style={styles.sectionHeaderRow}>
                 <View style={styles.sectionHeadingGroup}>
                   {orderedSegments.length > 1 && (
-                    <View style={styles.dragHandleBadge}>
+                    <View
+                      style={styles.dragHandleBadge}
+                      {...getSegmentPanHandlers(modalityTarget)}
+                    >
                       <Text style={styles.dragHandleIcon}>⠿</Text>
                     </View>
                   )}
@@ -2967,8 +3097,13 @@ export const OfflineWorkoutScreen: React.FC<OfflineWorkoutScreenProps> = ({
             warmupPresetCount={warmupPresetCount}
             onSelectBarWeightKg={(barKg) => saveExerciseBarWeightKg(targetBlk.exerciseId, barKg)}
             onSelectWarmupPresetCount={setWarmupPresetCount}
-            onInsertWarmupSets={(sets) =>
-              handleInsertWarmupSets(targetBlk.blockId, sets, bUnit)
+            onInsertWarmupSets={(sets, _barWeight, targetWorkingWeightDisplay) =>
+              handleInsertWarmupSets(
+                targetBlk.blockId,
+                sets,
+                bUnit,
+                targetWorkingWeightDisplay
+              )
             }
             onClose={() => setPlatesModalTarget(null)}
           />

@@ -5,13 +5,15 @@ import { buildServerApp } from '../src/app';
 import { WebSocketManager, safeSerializeWsPayload } from '../src/services/websocket-manager';
 
 describe('WebSocketManager (Room PubSub & BigInt Safe Serialization)', () => {
-  it('safely serializes BigInt values into JSON numbers without throwing', () => {
+  it('safely serializes BigInt values into JSON numbers without throwing, and preserves unsafe BigInts (> 2^53 - 1) as strings', () => {
+    const unsafeBigInt = 9_007_199_254_740_993n; // 2^53 + 1
     const payload = {
       type: 'RAID_HP_UPDATE',
       bossId: 'malakor',
       maxHp: 10_000_000n,
       currentHp: 8_750_000n,
       delta: 125_000n,
+      colossalWorldBossHp: unsafeBigInt,
     };
 
     const serialized = safeSerializeWsPayload(payload);
@@ -20,6 +22,58 @@ describe('WebSocketManager (Room PubSub & BigInt Safe Serialization)', () => {
     expect(parsed.maxHp).toBe(10_000_000);
     expect(parsed.currentHp).toBe(8_750_000);
     expect(parsed.delta).toBe(125_000);
+    expect(parsed.colossalWorldBossHp).toBe('9007199254740993');
+  });
+
+  it('tracks socket liveness and terminates unresponsive sockets during sweepLiveness', () => {
+    const manager = new WebSocketManager(0);
+    let pingCount = 0;
+    let terminated = false;
+    let pongHandler: (() => void) | undefined;
+
+    const mockLiveSocket = {
+      readyState: 1,
+      send: () => {},
+      ping: () => {
+        pingCount += 1;
+      },
+      on: (event: string, cb: () => void) => {
+        if (event === 'pong') pongHandler = cb;
+      },
+    } as unknown as WebSocket;
+
+    const mockDeadSocket = {
+      readyState: 1,
+      send: () => {},
+      ping: () => {},
+      terminate: () => {
+        terminated = true;
+      },
+    } as unknown as WebSocket;
+
+    const clientLive = manager.registerClient(mockLiveSocket);
+    const clientDead = manager.registerClient(mockDeadSocket);
+    manager.joinRoom(mockDeadSocket, 'raid:all');
+
+    expect(clientLive.isAlive).toBe(true);
+    expect(clientDead.isAlive).toBe(true);
+
+    // 1st sweep marks both as false and sends ping
+    manager.sweepLiveness();
+    expect(pingCount).toBe(1);
+    expect(clientLive.isAlive).toBe(false);
+    expect(clientDead.isAlive).toBe(false);
+
+    // Live socket responds with pong
+    pongHandler?.();
+    expect(clientLive.isAlive).toBe(true);
+
+    // 2nd sweep terminates dead socket and removes it from rooms/registry
+    manager.sweepLiveness();
+    expect(terminated).toBe(true);
+    expect(manager.getClientCount()).toBe(1);
+    expect(manager.getRoomCount()).toBe(0);
+    manager.shutdown();
   });
 
   it('manages client connections, room memberships, and isolates broadcasts', () => {
@@ -230,6 +284,18 @@ describe('Fastify WebSocket Server & Integration Protocol', () => {
     // Verify Client C did not receive the boss_1 message
     await new Promise((r) => setTimeout(r, 100));
     expect(clientCReceived).toBe(false);
+
+    // 7. Unauthenticated Client C cannot subscribe to private dungeon/guild/character rooms
+    clientC.send(JSON.stringify({ type: 'SUBSCRIBE', room: 'dungeon:private_run_99' }));
+    const privateErr = await helperC.nextMessage();
+    expect(privateErr.type).toBe('ERROR');
+    expect(privateErr.error).toBe('Authentication required to subscribe to private rooms.');
+
+    // Authenticated Client A CAN subscribe to private dungeon rooms
+    clientA.send(JSON.stringify({ type: 'SUBSCRIBE', room: 'dungeon:private_run_99' }));
+    const privateOk = await helperA.nextMessage();
+    expect(privateOk.type).toBe('SUBSCRIBED');
+    expect(privateOk.room).toBe('dungeon:private_run_99');
   });
 
   it('broadcasts RAID_HP_UPDATE to subscribed clients when an attack is posted to REST endpoint', async () => {
@@ -259,6 +325,8 @@ describe('Fastify WebSocket Server & Integration Protocol', () => {
       character: {
         findUnique: async () => ({
           id: characterId,
+          userId: 'user_ws_hero_1',
+          deletedAt: null,
           name: 'WarriorVal',
           stats: {
             strengthLevel: 10,
@@ -302,11 +370,17 @@ describe('Fastify WebSocket Server & Integration Protocol', () => {
 
     // Setup listener promise before making REST attack call
     const eventPromise = helper.nextMessage();
+    const token = app.jwt.sign({
+      userId: 'user_ws_hero_1',
+      email: 'hero@gokirpg.com',
+      username: 'WarriorVal',
+    });
 
     // Call REST endpoint POST /api/raids/:raidId/attack
     const attackRes = await app.inject({
       method: 'POST',
       url: `/api/raids/${raidId}/attack`,
+      headers: { authorization: `Bearer ${token}` },
       payload: { characterId },
     });
 

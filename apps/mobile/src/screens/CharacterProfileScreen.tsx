@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   ImageSourcePropType,
@@ -274,6 +274,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     equipItemToSlot,
     unequipSlot,
     toggleEquipItem,
+    consumeInventoryItem,
     gameMode,
     activeCharacterId,
     currentUser,
@@ -287,7 +288,36 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   const [isSatchelOpen, setIsSatchelOpen] = useState(true);
   const [satchelFilter, setSatchelFilter] = useState<SatchelFilter>('ALL');
   const [inventorySort, setInventorySort] = useState<InventorySort>('RARITY');
-  const [inspectedItem, setInspectedItem] = useState<InventoryEntry | null>(null);
+  const [inspectedItemSlug, setInspectedItemSlug] = useState<string | null>(null);
+  const inspectedItem = useMemo(
+    () => (inspectedItemSlug ? inventory.find((i) => i.slug === inspectedItemSlug) ?? null : null),
+    [inventory, inspectedItemSlug]
+  );
+  const setInspectedItem = useCallback(
+    (
+      action:
+        | InventoryEntry
+        | null
+        | ((prev: InventoryEntry | null) => InventoryEntry | null)
+    ) => {
+      if (typeof action === 'function') {
+        setInspectedItemSlug((prevSlug) => {
+          const prevEntry = prevSlug
+            ? inventory.find((i) => i.slug === prevSlug) ?? null
+            : null;
+          const nextEntry = action(prevEntry);
+          return nextEntry?.slug ?? null;
+        });
+      } else {
+        setInspectedItemSlug(action?.slug ?? null);
+      }
+    },
+    [inventory]
+  );
+
+  useEffect(() => {
+    setInspectedItemSlug(null);
+  }, [activeCharacterId]);
   const [showCompare, setShowCompare] = useState<boolean>(false);
   const [gearFeedback, setGearFeedback] = useState<{
     tone: 'error' | 'info';
@@ -301,10 +331,21 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   const [devSanctumUnlockToast, setDevSanctumUnlockToast] = useState<string | null>(null);
   const versionTapCountRef = useRef<number>(0);
   const versionTapResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const itemTapResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [updateState, setUpdateState] = useState<AutoUpdateState>(() =>
     autoUpdateManager.getState()
   );
   const [isMuted, setIsMuted] = useState<boolean>(audioManager.isMuted());
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (versionTapResetTimerRef.current) clearTimeout(versionTapResetTimerRef.current);
+      if (itemTapResetTimerRef.current) clearTimeout(itemTapResetTimerRef.current);
+    },
+    []
+  );
 
   const isAdminUser = useMemo(() => {
     const email = currentUser?.email?.trim().toLowerCase() ?? '';
@@ -343,7 +384,10 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
       }
       triggerSensoryCue('CHEST_OPEN_REVEAL');
       setDevSanctumUnlockToast('🛠️ Developer Sanctum Unlocked');
-      setTimeout(() => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+      toastTimerRef.current = setTimeout(() => {
         setDevSanctumUnlockToast(null);
       }, 4000);
       return;
@@ -681,10 +725,24 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           { borderColor: rarityBorder },
           isSelected && styles.paperdollSlotTileSelected,
         ]}
+        onPressIn={() => {
+          if (item) {
+            itemTappedRef.current = true;
+            if (itemTapResetTimerRef.current) {
+              clearTimeout(itemTapResetTimerRef.current);
+            }
+            itemTapResetTimerRef.current = setTimeout(() => {
+              itemTappedRef.current = false;
+            }, 60);
+          }
+        }}
         onPress={() => {
           if (item) {
             itemTappedRef.current = true;
-            setTimeout(() => {
+            if (itemTapResetTimerRef.current) {
+              clearTimeout(itemTapResetTimerRef.current);
+            }
+            itemTapResetTimerRef.current = setTimeout(() => {
               itemTappedRef.current = false;
             }, 60);
             setInspectedItem((prev) => (prev?.slug === item.slug ? null : item));
@@ -1192,9 +1250,21 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                   <Pressable
                     key={item.slug}
                     style={[styles.bagItemRow, isInspecting && styles.bagItemRowInspecting]}
+                    onPressIn={() => {
+                      itemTappedRef.current = true;
+                      if (itemTapResetTimerRef.current) {
+                        clearTimeout(itemTapResetTimerRef.current);
+                      }
+                      itemTapResetTimerRef.current = setTimeout(() => {
+                        itemTappedRef.current = false;
+                      }, 60);
+                    }}
                     onPress={() => {
                       itemTappedRef.current = true;
-                      setTimeout(() => {
+                      if (itemTapResetTimerRef.current) {
+                        clearTimeout(itemTapResetTimerRef.current);
+                      }
+                      itemTapResetTimerRef.current = setTimeout(() => {
                         itemTappedRef.current = false;
                       }, 60);
                       setInspectedItem((prev) => (prev?.slug === item.slug ? null : item));
@@ -1595,11 +1665,14 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                       <Pressable
                         style={[styles.tooltipActionBtn, styles.tooltipConsumableBtn]}
                         onPress={() => {
+                          const res = consumeInventoryItem(item.slug);
                           setGearFeedback({
-                            tone: 'info',
-                            text: `Consumed ${item.name}! Vitality replenished.`,
+                            tone: res.ok ? 'info' : 'error',
+                            text: res.message,
                           });
-                          setInspectedItem(null);
+                          if (res.ok) {
+                            setInspectedItem(null);
+                          }
                         }}
                       >
                         <Text style={styles.tooltipConsumableBtnText}>🧪 Use Consumable</Text>

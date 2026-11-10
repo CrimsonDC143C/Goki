@@ -24,6 +24,7 @@ export class GokiWebSocketClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private explicitDisconnect = false;
   private authToken: string | null = null;
+  private isConnecting = false;
 
   constructor() {
     this.status = 'disconnected';
@@ -65,15 +66,26 @@ export class GokiWebSocketClient {
    * Establishes real-time bi-directional connection to the Goki server.
    */
   public async connect(): Promise<void> {
-    if (this.socket && (this.socket.readyState === 0 || this.socket.readyState === 1)) {
+    if (
+      this.isConnecting ||
+      this.status === 'connecting' ||
+      this.status === 'connected' ||
+      (this.socket && (this.socket.readyState === 0 || this.socket.readyState === 1))
+    ) {
       return;
     }
 
+    this.isConnecting = true;
     this.explicitDisconnect = false;
     this.updateStatus(this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
 
     try {
       const token = this.authToken ?? (await getStoredAuthToken());
+      if (this.explicitDisconnect) {
+        this.isConnecting = false;
+        return;
+      }
+
       const wsBase = resolveWsBaseUrl();
       const url = token
         ? `${wsBase}/api/ws/connect?token=${encodeURIComponent(token)}`
@@ -82,6 +94,7 @@ export class GokiWebSocketClient {
       // Native React Native and Browser standard WebSocket
       const ws = new (globalThis.WebSocket as any)(url);
       this.socket = ws;
+      this.isConnecting = false;
 
       ws.onopen = () => {
         this.reconnectAttempts = 0;
@@ -119,6 +132,7 @@ export class GokiWebSocketClient {
         // Error triggers onclose in standard WebSocket
       };
     } catch {
+      this.isConnecting = false;
       this.updateStatus('disconnected');
       this.scheduleReconnect();
     }
@@ -129,6 +143,7 @@ export class GokiWebSocketClient {
    */
   public disconnect(): void {
     this.explicitDisconnect = true;
+    this.isConnecting = false;
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

@@ -139,7 +139,7 @@ let memoryFallbackBundle: PersistedOfflineBundle = {
   warmupPresetCount: 2,
 };
 
-let writeChain: Promise<void> = Promise.resolve();
+let writeQueuePromise: Promise<void> = Promise.resolve();
 
 export function createDefaultOfflineDraft(
   nowMs: number = Date.now(),
@@ -299,19 +299,19 @@ export function savePersistedOfflineBundle(bundle: PersistedOfflineBundle): Prom
     return Promise.resolve();
   }
 
-  writeChain = writeChain
-    .then(async () => {
-      try {
-        const file = new File(Paths.document, NATIVE_FILENAME);
-        if (!file.exists) {
-          file.create({ overwrite: true });
-        }
-        await file.write(serialized);
-      } catch {
-        // Ignore filesystem transient errors; memoryFallbackBundle remains up-to-date
+  const doWrite = async (): Promise<void> => {
+    try {
+      const file = new File(Paths.document, NATIVE_FILENAME);
+      if (!file.exists) {
+        file.create({ overwrite: true });
       }
-    })
-    .catch(() => {});
+      await file.write(serialized);
+    } catch {
+      // Ignore filesystem transient errors; memoryFallbackBundle remains up-to-date
+    }
+  };
 
-  return writeChain;
+  const next = writeQueuePromise.then(() => doWrite(), () => doWrite());
+  writeQueuePromise = next.catch(() => {});
+  return next;
 }

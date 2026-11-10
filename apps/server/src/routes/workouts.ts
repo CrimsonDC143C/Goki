@@ -30,8 +30,10 @@ import {
 } from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { assertCharacterActiveAndOwned, requireAuth } from '../middleware/auth';
 import { GameTimerScheduler } from '../queues/bullmq-workers';
-import { depositLootToInventory } from '../services/game-operations';
+import { depositLootToInventory, withDbTransaction } from '../services/game-operations';
+import { WebSocketManager, websocketManager } from '../services/websocket-manager';
 
 const workoutTypeEnum = z.enum([
   'RESISTANCE',
@@ -52,6 +54,8 @@ const verificationSourceEnum = z.enum([
 
 const startWorkoutSessionSchema = z.object({
   workoutType: workoutTypeEnum.default('RESISTANCE'),
+  workoutCategory: z.string().optional(),
+  sourcePresetId: z.string().nullable().optional(),
   arrivalTrigger: z.enum(['GEOFENCE_GYM', 'MANUAL_OPEN_WORLD']).default('MANUAL_OPEN_WORLD'),
   gymId: z.string().optional(),
   gymName: z.string().max(120).optional(),
@@ -154,14 +158,10 @@ export function registerWorkoutRoutes(
   });
 
   // Phase 1 ("Crossing the Threshold"): Start Live Hybrid Workout Session & Grant 1.25x Arrival Boon
-  app.post('/api/characters/:characterId/workout-sessions/start', async (request, reply) => {
+  app.post('/api/characters/:characterId/workout-sessions/start', { preHandler: [requireAuth] }, async (request, reply) => {
     const { characterId } = z.object({ characterId: z.string() }).parse(request.params);
     const body = startWorkoutSessionSchema.parse(request.body);
-
-    const character = await db.character.findUnique({ where: { id: characterId } });
-    if (!character) {
-      return reply.status(404).send({ error: 'Character not found.' });
-    }
+    const character = await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
     let matchedGymId = body.gymId ?? null;
     let matchedGymName = body.gymName ?? null;
@@ -229,7 +229,7 @@ export function registerWorkoutRoutes(
   });
 
   // Phase 2 ("Set-by-Set Operant Conditioning"): Log Live Set, Trigger Micro-Reward & Auto-Start Rest
-  app.post('/api/workout-sessions/:sessionId/sets', async (request, reply) => {
+  app.post('/api/workout-sessions/:sessionId/sets', { preHandler: [requireAuth] }, async (request, reply) => {
     const { sessionId } = z.object({ sessionId: z.string() }).parse(request.params);
     const body = logSessionSetSchema.parse(request.body);
 
@@ -240,6 +240,7 @@ export function registerWorkoutRoutes(
     if (!session) {
       return reply.status(404).send({ error: 'Workout session not found.' });
     }
+    await assertCharacterActiveAndOwned(db, session.characterId, request.user.userId);
     if (session.phase !== 'DUNGEON_ACTIVE' && session.phase !== 'RESTING') {
       return reply.status(409).send({ error: `Cannot log sets in phase '${session.phase}'.` });
     }
@@ -356,10 +357,11 @@ export function registerWorkoutRoutes(
   });
 
   // Phase 3 ("Delayed Gratification Consolidation"): Finish & Consolidate Hybrid Workout
-  app.post('/api/characters/:characterId/workouts', async (request, reply) => {
+  app.post('/api/characters/:characterId/workouts', { preHandler: [requireAuth] }, async (request, reply) => {
     const { characterId } = z.object({ characterId: z.string() }).parse(request.params);
     const body = logWorkoutSchema.parse(request.body);
     const performedAt = body.performedAt ?? new Date();
+    await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
     const character = await db.character.findUnique({
       where: { id: characterId },
@@ -533,7 +535,7 @@ export function registerWorkoutRoutes(
     const isMindBodyModality =
       ['YOGA', 'PILATES', 'MEDITATION', 'BREATHWORK', 'SAUNA', 'COLD_PLUNGE'].includes(modalityNormalized) ||
       (body.osActivityClassification != null &&
-        ['YOGA', 'PILATES', 'MEDITATION', 'MIND', 'BREATH'].some((t) =>
+        ['YOGA', 'PILATES', 'MEDITATION', 'MIND', 'BREATH', 'SAUNA', 'COLD_PLUNGE', 'THERMAL'].some((t) =>
           body.osActivityClassification!.toUpperCase().includes(t)
         ));
 
@@ -550,10 +552,10 @@ export function registerWorkoutRoutes(
         osActivityClassification: body.osActivityClassification ?? null,
       });
 
+      verificationResultDetails = mbResult as unknown as Record<string, unknown>;
       if (mbResult.verified) {
         effectiveVerificationSource = body.verificationSource ?? 'WEARABLE_TELEMETRY';
         effectiveIsHardwareVerified = true;
-        verificationResultDetails = mbResult as unknown as Record<string, unknown>;
         telemetrySummaryRef = JSON.stringify({
           verified: true,
           confidenceScore: mbResult.confidenceScore,
@@ -569,13 +571,13 @@ export function registerWorkoutRoutes(
         sleepStages: body.sleepStages,
         totalSleepHours: body.durationSeconds > 0 ? body.durationSeconds / 3600 : undefined,
         stepCount: body.stepCount,
-        stepTrackingDurationSeconds: body.durationSeconds > 0 ? body.durationSeconds : undefined,
+        stepTrackingDurationSeconds: body.durationSeconds,
       });
 
+      verificationResultDetails = recResult as unknown as Record<string, unknown>;
       if (recResult.verified) {
         effectiveVerificationSource = body.verificationSource ?? 'WEARABLE_TELEMETRY';
         effectiveIsHardwareVerified = true;
-        verificationResultDetails = recResult as unknown as Record<string, unknown>;
         telemetrySummaryRef = JSON.stringify({
           verified: true,
           confidenceScore: recResult.confidenceScore,
@@ -596,10 +598,10 @@ export function registerWorkoutRoutes(
         }
       );
 
+      verificationResultDetails = verificationResult as unknown as Record<string, unknown>;
       if (verificationResult.verified) {
         effectiveVerificationSource = body.verificationSource ?? 'WEARABLE_TELEMETRY';
         effectiveIsHardwareVerified = true;
-        verificationResultDetails = verificationResult as unknown as Record<string, unknown>;
         telemetrySummaryRef = JSON.stringify({
           confidenceScore: verificationResult.confidenceScore,
           averageBpm: verificationResult.averageBpm,
@@ -608,13 +610,18 @@ export function registerWorkoutRoutes(
           sampleCount: verificationResult.sampleCount,
         });
       }
-    } else if (
-      body.isHardwareVerified &&
-      body.verificationSource &&
-      body.verificationSource !== 'MANUAL_HONESTY'
-    ) {
-      effectiveVerificationSource = body.verificationSource;
-      effectiveIsHardwareVerified = true;
+    }
+
+    if (character.gameMode === 'IRONMAN_VERIFIED' && !effectiveIsHardwareVerified) {
+      return reply.status(400).send({
+        error: 'Ironman Verified heroes require valid hardware biometric telemetry to log workouts.',
+        ironmanVerification: {
+          verified: false,
+          status: 'UNVERIFIED',
+          source: effectiveVerificationSource,
+          details: verificationResultDetails,
+        },
+      });
     }
 
     // 3. Apply Core Stat Leveling & 7-Stat Progression
@@ -809,11 +816,11 @@ export function registerWorkoutRoutes(
     });
 
     // 5B. Verify channeled raid boss foreign key exists in DB (defensive safeguard against stale/mock IDs)
-    let validRaid: { id: string; status: string; currentHp: bigint } | null = null;
+    let validRaid: { id: string; status: string; currentHp: bigint; maxHp?: bigint } | null = null;
     if (body.channeledRaidInstanceId) {
       validRaid = await db.raidBossInstance.findUnique({
         where: { id: body.channeledRaidInstanceId },
-        select: { id: true, status: true, currentHp: true },
+        select: { id: true, status: true, currentHp: true, maxHp: true },
       });
     }
 
@@ -1016,52 +1023,76 @@ export function registerWorkoutRoutes(
         triggeredPrCrit: evalResult.criticalTrainingBonus.triggered,
       });
       const dmgBig = BigInt(raidEnergyDamageDealt);
-      const nextHp = validRaid.currentHp > dmgBig ? validRaid.currentHp - dmgBig : 0n;
 
-      await db.raidBossInstance.update({
-        where: { id: validRaid.id },
-        data: {
-          currentHp: nextHp,
-          totalRaidDamage: { increment: dmgBig },
-          isDefeated: nextHp === 0n,
-          status: nextHp === 0n ? 'DEFEATED' : 'ACTIVE',
-        },
-      });
+      const raidTxResult = await withDbTransaction(
+        db,
+        async (tx) => {
+          const freshRaid =
+            (await tx.raidBossInstance.findUnique({
+              where: { id: validRaid!.id },
+            })) ?? validRaid!;
+          const safeCurrentHp =
+            freshRaid.currentHp !== undefined && freshRaid.currentHp > 0n
+              ? freshRaid.currentHp
+              : 0n;
+          const nextHp = safeCurrentHp > dmgBig ? safeCurrentHp - dmgBig : 0n;
+          const maxHp =
+            (freshRaid as { maxHp?: bigint }).maxHp ??
+            validRaid!.maxHp ??
+            safeCurrentHp;
 
-      await db.raidParticipantContribution.upsert({
-        where: {
-          raidInstanceId_characterId: { raidInstanceId: validRaid.id, characterId },
-        },
-        update: {
-          workoutEnergyDamage: { increment: dmgBig },
-          totalContributionScore: { increment: dmgBig },
-          workoutsChanneled: { increment: 1 },
-        },
-        create: {
-          raidInstanceId: validRaid.id,
-          characterId,
-          workoutEnergyDamage: dmgBig,
-          totalContributionScore: dmgBig,
-          workoutsChanneled: 1,
-        },
-      });
-    }
+          await tx.raidBossInstance.update({
+            where: { id: validRaid!.id },
+            data: {
+              currentHp: nextHp,
+              totalRaidDamage: { increment: dmgBig },
+              isDefeated: nextHp === 0n,
+              status: nextHp === 0n ? 'DEFEATED' : 'ACTIVE',
+            },
+          });
 
-    // 10B. If verified via wearable hardware telemetry, tag Ironman mode if account has no existing Ironman character
-    let characterGameMode = character.gameMode;
-    if (effectiveIsHardwareVerified && character.gameMode !== 'IRONMAN_VERIFIED') {
-      const existingIronman = typeof db.character.findFirst === 'function'
-        ? await db.character.findFirst({
-            where: { userId: character.userId, gameMode: 'IRONMAN_VERIFIED' },
-          })
-        : null;
-      if (!existingIronman) {
-        const updatedChar = await db.character.update({
-          where: { id: characterId },
-          data: { gameMode: 'IRONMAN_VERIFIED' },
-        });
-        characterGameMode = updatedChar.gameMode;
-      }
+          await tx.raidParticipantContribution.upsert({
+            where: {
+              raidInstanceId_characterId: { raidInstanceId: validRaid!.id, characterId },
+            },
+            update: {
+              workoutEnergyDamage: { increment: dmgBig },
+              totalContributionScore: { increment: dmgBig },
+              workoutsChanneled: { increment: 1 },
+            },
+            create: {
+              raidInstanceId: validRaid!.id,
+              characterId,
+              workoutEnergyDamage: dmgBig,
+              totalContributionScore: dmgBig,
+              workoutsChanneled: 1,
+            },
+          });
+
+          return { nextHp, maxHp };
+        },
+        `raid:${validRaid.id}`
+      );
+
+      const wsManager: WebSocketManager =
+        (app as unknown as { websocketManager?: WebSocketManager }).websocketManager ??
+        websocketManager;
+      const raidHpEvent = {
+        type: 'RAID_HP_UPDATE' as const,
+        raidId: validRaid.id,
+        currentHp: Number(raidTxResult.nextHp),
+        maxHp: Number(raidTxResult.maxHp),
+        isDefeated: raidTxResult.nextHp === 0n,
+        attacker: {
+          characterId: character.id,
+          characterName: character.name ?? 'Hero',
+          damage: raidEnergyDamageDealt,
+          workoutEnergyDamage: raidEnergyDamageDealt,
+        },
+        timestamp: Date.now(),
+      };
+      wsManager.broadcastToRoom(`raid:${validRaid.id}`, raidHpEvent);
+      wsManager.broadcastToRoom('raid:all', raidHpEvent);
     }
 
     return reply.status(201).send({
@@ -1081,7 +1112,7 @@ export function registerWorkoutRoutes(
       updatedStats,
       injectedDungeonBuffs,
       raidEnergyDamageDealt,
-      gameMode: characterGameMode,
+      gameMode: character.gameMode,
       isHardwareVerified: effectiveIsHardwareVerified,
       verificationSource: effectiveVerificationSource,
       ironmanVerification: {

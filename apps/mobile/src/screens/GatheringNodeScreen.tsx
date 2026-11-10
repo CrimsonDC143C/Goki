@@ -189,9 +189,9 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
   const tickCalc = useMemo(() => {
     return calculateGatheringTick(
       {
-        strengthLevel: stats.STRENGTH.level,
-        enduranceLevel: stats.ENDURANCE.level,
-        agilityLevel: stats.AGILITY.level,
+        strengthLevel: stats?.STRENGTH?.level ?? 1,
+        enduranceLevel: stats?.ENDURANCE?.level ?? 1,
+        agilityLevel: stats?.AGILITY?.level ?? 1,
       },
       overallLevel,
       selectedNode.requiredStatLevel,
@@ -237,7 +237,7 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
 
   // Check if character meets stat requirements
   const requiredStatLevel = selectedNode.requiredStatLevel;
-  const currentStatLevel = stats[selectedNode.requiredStatType].level;
+  const currentStatLevel = stats?.[selectedNode.requiredStatType]?.level ?? 1;
   const meetsRequirements = currentStatLevel >= requiredStatLevel;
 
   // Active state calculations

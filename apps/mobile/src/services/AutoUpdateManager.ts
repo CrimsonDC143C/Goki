@@ -203,9 +203,12 @@ class AutoUpdateManagerService {
     try {
       // 1. Fetch Backend Version Manifest
       let manifest: VersionManifest | null = null;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
         const resp = await fetch(`${API_BASE_URL}/api/version`, {
           headers: { Accept: 'application/json' },
+          signal: controller.signal,
         });
         if (resp.ok) {
           manifest = (await resp.json()) as VersionManifest;
@@ -217,6 +220,8 @@ class AutoUpdateManagerService {
           'Failed to query version manifest from server',
           { error: String(manifestErr) }
         );
+      } finally {
+        clearTimeout(timeoutId);
       }
 
       // 2. Check Forced Binary Upgrade first (only triggers when minRequiredVersion > currentVersion)

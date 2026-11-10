@@ -197,14 +197,19 @@ class DiagnosticLoggerService {
     if (globalObj.ErrorUtils?.setGlobalHandler) {
       const prevHandler = globalObj.ErrorUtils.getGlobalHandler?.();
       globalObj.ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+        const errorMessage = error?.message || 'Unknown Native Exception';
+        const source = isFatal ? 'ErrorUtils.fatal' : 'ErrorUtils.nonFatal';
+        this.addBreadcrumb('error', source, errorMessage, {
+          isFatal: Boolean(isFatal),
+        });
         void this.persistCrashReportImmediately({
           timestamp: Date.now(),
-          errorMessage: error?.message || 'Unknown Native Exception',
+          errorMessage,
           stackTrace: error?.stack,
           breadcrumbs: this.getBreadcrumbs(),
           stateSnapshot: this.getStateSnapshot(),
           deviceMetadata: this.getDeviceMetadata(),
-          source: isFatal ? 'ErrorUtils.fatal' : 'ErrorUtils.nonFatal',
+          source,
         });
         if (prevHandler) {
           prevHandler(error, isFatal);
@@ -216,9 +221,11 @@ class DiagnosticLoggerService {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.addEventListener('error', (event) => {
         const error = event.error as Error | undefined;
+        const errorMessage = error?.message || event.message || 'Window Global Error';
+        this.addBreadcrumb('error', 'window.onerror', errorMessage);
         void this.persistCrashReportImmediately({
           timestamp: Date.now(),
-          errorMessage: error?.message || event.message || 'Window Global Error',
+          errorMessage,
           stackTrace: error?.stack,
           breadcrumbs: this.getBreadcrumbs(),
           stateSnapshot: this.getStateSnapshot(),
@@ -236,6 +243,7 @@ class DiagnosticLoggerService {
             ? reason
             : 'Unhandled Promise Rejection';
         const stack = reason instanceof Error ? reason.stack : undefined;
+        this.addBreadcrumb('error', 'window.unhandledrejection', msg);
         void this.persistCrashReportImmediately({
           timestamp: Date.now(),
           errorMessage: msg,

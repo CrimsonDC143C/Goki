@@ -246,7 +246,8 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
       Alert.alert('Name Required', 'Please enter a routine name.');
       return;
     }
-    if (blocks.length === 0) {
+    const cardioSegs = editingPreset?.blocks?.cardioSegments ?? [];
+    if (blocks.length === 0 && cardioSegs.length === 0) {
       Alert.alert('Exercises Required', 'Please add at least one exercise to the routine.');
       return;
     }
@@ -268,7 +269,7 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
       isSystemSeed: false,
       blocks: {
         exerciseBlocks: blocks,
-        cardioSegments: editingPreset?.blocks?.cardioSegments || [],
+        cardioSegments: cardioSegs,
         sessionRpeTarget: editingPreset?.blocks?.sessionRpeTarget ?? null,
       },
     };
@@ -277,6 +278,8 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
     triggerSensoryCue('WORKOUT_PRESET_LOADED');
     onClose();
   };
+
+  const cardioSegs = editingPreset?.blocks?.cardioSegments ?? [];
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -358,6 +361,22 @@ export const PresetDesignerModal: React.FC<PresetDesignerModalProps> = ({
                 onChangeText={setNotes}
               />
             </View>
+
+            {/* Conditioning Segments Summary Badge */}
+            {cardioSegs.length > 0 ? (
+              <View style={styles.cardioSummaryBadge}>
+                <Text style={styles.cardioSummaryBadgeTitle}>
+                  🏃 Conditioning Segments Included ({cardioSegs.length})
+                </Text>
+                {cardioSegs.map((seg, idx) => (
+                  <Text key={seg.segmentId || `seg_${idx}`} style={styles.cardioSummaryBadgeItem}>
+                    • {seg.exerciseName || seg.exerciseSlug} — {seg.targetDurationMinutes} mins (Zone{' '}
+                    {seg.targetHrZone}
+                    {seg.targetRpe ? ` • RPE ${seg.targetRpe}` : ''})
+                  </Text>
+                ))}
+              </View>
+            ) : null}
 
             {/* Exercise Blocks */}
             <View style={styles.blocksHeaderRow}>
@@ -728,6 +747,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 14,
     marginBottom: 10,
+  },
+  cardioSummaryBadge: {
+    backgroundColor: '#19222C',
+    borderColor: '#38BDF8',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  cardioSummaryBadgeTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#38BDF8',
+    marginBottom: 4,
+  },
+  cardioSummaryBadgeItem: {
+    fontSize: 11,
+    color: '#D1D5DB',
+    marginTop: 2,
   },
   sectionTitle: {
     fontSize: 13,

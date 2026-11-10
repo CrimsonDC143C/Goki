@@ -6,6 +6,8 @@ export type WearableTelemetrySource =
   | 'GOOGLE_HEALTH_CONNECT'
   | 'WEARABLE_TELEMETRY';
 
+export const MAX_RECORDED_TELEMETRY_SAMPLES = 7200;
+
 export interface WearableService {
   isAvailable(): Promise<boolean>;
   requestPermissions(): Promise<boolean>;
@@ -447,6 +449,9 @@ class UnifiedWearableService implements WearableService {
       timestamp: Date.now(),
     };
 
+    if (this.recordedSamples.length >= MAX_RECORDED_TELEMETRY_SAMPLES) {
+      this.recordedSamples.shift();
+    }
     this.recordedSamples.push(sample);
     if (this.liveUpdateCallback) {
       try {

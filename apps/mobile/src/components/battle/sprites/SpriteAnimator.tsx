@@ -121,6 +121,15 @@ const ReanimatedSpriteAnimator: React.FC<ResolvedSpriteAnimatorProps> = ({
     };
   }, [state, actionTriggerKey, effectivePaused, playbackRate, activeClip, frameProgress, Reanimated]);
 
+  useEffect(
+    () => () => {
+      Reanimated.cancelAnimation(frameProgress);
+    },
+    [Reanimated, frameProgress]
+  );
+
+  const effectiveTintColor = hitFlash ? '#FF3B30' : tintColor;
+
   const animatedTranslateStyle = Reanimated.useAnimatedStyle(() => {
     const frameIdx = Math.min(activeClip.frameCount - 1, Math.max(0, Math.floor(frameProgress.value)));
     return {
@@ -174,7 +183,7 @@ const ReanimatedSpriteAnimator: React.FC<ResolvedSpriteAnimatorProps> = ({
                   maxWidth: stripWidth,
                   flexShrink: 0,
                 },
-                tintColor ? { tintColor } : undefined,
+                effectiveTintColor ? { tintColor: effectiveTintColor } : undefined,
                 imagePixelatedStyle,
               ]}
             />
@@ -322,6 +331,17 @@ const NativeDriverSpriteAnimator: React.FC<ResolvedSpriteAnimatorProps> = ({
     }
   }, [state, actionTriggerKey, effectivePaused, playbackRate, activeClip, progressByState]);
 
+  useEffect(
+    () => () => {
+      for (const s of ALL_STATES) {
+        progressByState[s].stopAnimation();
+      }
+    },
+    [progressByState]
+  );
+
+  const effectiveTintColor = hitFlash ? '#FF3B30' : tintColor;
+
   return (
     <View
       style={[
@@ -368,7 +388,7 @@ const NativeDriverSpriteAnimator: React.FC<ResolvedSpriteAnimatorProps> = ({
                   maxWidth: stripWidth,
                   flexShrink: 0,
                 },
-                tintColor ? { tintColor } : undefined,
+                effectiveTintColor ? { tintColor: effectiveTintColor } : undefined,
                 imagePixelatedStyle,
               ]}
             />

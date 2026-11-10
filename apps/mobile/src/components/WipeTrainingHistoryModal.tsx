@@ -120,16 +120,29 @@ export const WipeTrainingHistoryModal: React.FC<WipeTrainingHistoryModalProps> =
     return list;
   }, [workoutHistory, registeredGyms]);
 
-  // Discover all exercises logged in workoutHistory
+  // Discover all exercises and conditioning activities logged in workoutHistory
   const loggedExerciseOptions = useMemo(() => {
     const map = new Map<string, { name: string; count: number }>();
     for (const wk of workoutHistory) {
+      const seenInSession = new Set<string>();
       for (const ex of wk.exercises) {
+        if (!ex.exerciseId || seenInSession.has(ex.exerciseId)) continue;
+        seenInSession.add(ex.exerciseId);
         const prev = map.get(ex.exerciseId);
         if (prev) {
           prev.count += 1;
         } else {
-          map.set(ex.exerciseId, { name: ex.exerciseName, count: 1 });
+          map.set(ex.exerciseId, { name: ex.exerciseName || ex.exerciseId, count: 1 });
+        }
+      }
+      for (const ce of wk.cardioEntries ?? []) {
+        if (!ce.exerciseId || seenInSession.has(ce.exerciseId)) continue;
+        seenInSession.add(ce.exerciseId);
+        const prev = map.get(ce.exerciseId);
+        if (prev) {
+          prev.count += 1;
+        } else {
+          map.set(ce.exerciseId, { name: ce.exerciseName || ce.exerciseId, count: 1 });
         }
       }
     }

@@ -1,3 +1,4 @@
+import { PrismaClient } from '@goki/database';
 import { FastifyReply, FastifyRequest } from 'fastify';
 
 export interface AuthJwtPayload {
@@ -11,6 +12,35 @@ declare module '@fastify/jwt' {
     payload: AuthJwtPayload;
     user: AuthJwtPayload;
   }
+}
+
+/**
+ * Verifies that a character exists, is not soft-deleted, and belongs to `userId`.
+ * Throws HTTP status errors (404, 400, 403) caught by the Fastify error handler.
+ */
+export async function assertCharacterActiveAndOwned(
+  db: PrismaClient,
+  characterId: string,
+  userId: string
+) {
+  const character = await db.character.findUnique({
+    where: { id: characterId },
+  });
+  if (!character) {
+    throw Object.assign(new Error('Character not found.'), { statusCode: 404 });
+  }
+  if (character.deletedAt !== null && character.deletedAt !== undefined) {
+    throw Object.assign(
+      new Error('Character is archived and cannot perform gameplay actions.'),
+      { statusCode: 400 }
+    );
+  }
+  if (character.userId !== userId) {
+    throw Object.assign(new Error('Forbidden: You do not own this character.'), {
+      statusCode: 403,
+    });
+  }
+  return character;
 }
 
 /**

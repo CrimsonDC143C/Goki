@@ -1,4 +1,5 @@
 import type { WebSocket } from 'ws';
+import { serializeBigInts } from '../config';
 import type { AuthJwtPayload } from '../middleware/auth';
 
 export interface WebSocketClient {
@@ -7,6 +8,7 @@ export interface WebSocketClient {
   user?: AuthJwtPayload;
   rooms: Set<string>;
   connectedAt: Date;
+  isAlive: boolean;
 }
 
 export type WebSocketEventType =
@@ -30,15 +32,10 @@ export interface WebSocketEvent<T = Record<string, unknown>> {
 
 /**
  * Safely stringifies payloads to JSON, converting any BigInt fields
- * (like boss HP or cumulative damage) to Numbers.
+ * (like boss HP or cumulative damage) to safe Numbers or strings via `serializeBigInts`.
  */
 export function safeSerializeWsPayload(data: unknown): string {
-  return JSON.stringify(data, (_key, value) => {
-    if (typeof value === 'bigint') {
-      return Number(value);
-    }
-    return value;
-  });
+  return JSON.stringify(serializeBigInts(data));
 }
 
 /**
@@ -51,6 +48,43 @@ export class WebSocketManager {
   private clients = new Map<WebSocket, WebSocketClient>();
   private rooms = new Map<string, Set<WebSocket>>();
   private idCounter = 0;
+  private livenessInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor(livenessIntervalMs = 30_000) {
+    if (livenessIntervalMs > 0) {
+      this.livenessInterval = setInterval(() => {
+        this.sweepLiveness();
+      }, livenessIntervalMs);
+      this.livenessInterval.unref?.();
+    }
+  }
+
+  /**
+   * Sweeps connected clients: terminates unresponsive sockets (`!client.isAlive`)
+   * and sends a WebSocket protocol `ping` to active sockets.
+   */
+  public sweepLiveness(): void {
+    for (const [socket, client] of Array.from(this.clients.entries())) {
+      if (!client.isAlive) {
+        if (typeof (socket as { terminate?: () => void }).terminate === 'function') {
+          socket.terminate();
+        } else if (typeof (socket as { close?: () => void }).close === 'function') {
+          socket.close();
+        }
+        this.removeClient(socket);
+        continue;
+      }
+
+      if (typeof (socket as { ping?: () => void }).ping === 'function') {
+        client.isAlive = false;
+        try {
+          socket.ping();
+        } catch {
+          // Handled on next sweep or close/error
+        }
+      }
+    }
+  }
 
   /**
    * Registers an incoming WebSocket connection and associates optional JWT user data.
@@ -65,7 +99,14 @@ export class WebSocketManager {
       user,
       rooms: new Set<string>(),
       connectedAt: new Date(),
+      isAlive: true,
     };
+
+    if (typeof (socket as { on?: (event: string, cb: () => void) => void }).on === 'function') {
+      socket.on('pong', () => {
+        client.isAlive = true;
+      });
+    }
 
     this.clients.set(socket, client);
     return client;
@@ -275,6 +316,17 @@ export class WebSocketManager {
   public clear(): void {
     this.clients.clear();
     this.rooms.clear();
+  }
+
+  /**
+   * Stops the periodic liveness sweep interval and clears all active socket/room state.
+   */
+  public shutdown(): void {
+    if (this.livenessInterval) {
+      clearInterval(this.livenessInterval);
+      this.livenessInterval = null;
+    }
+    this.clear();
   }
 }
 

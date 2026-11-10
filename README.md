@@ -17,7 +17,7 @@ goki/
 │   ├── mobile/                 # React Native (Expo SDK 58) + Expo Web client & 2D Auto-Battler replay viewer
 │   └── server/                 # Fastify + Zod REST & WebSocket API, BullMQ timer workers
 └── packages/
-    ├── database/               # PostgreSQL Prisma ORM 6.4 schema (31 models, 26 enums), seed & client
+    ├── database/               # PostgreSQL Prisma ORM 6.4 schema (32 models, 27 enums), seed & client
     └── game-engine/            # Pure, deterministic, zero-dependency RPG & fitness mathematical engine
 ```
 
@@ -37,7 +37,7 @@ npm run build
 # Start local Postgres (5432) and Redis (6379)
 docker compose up -d
 
-# Push Prisma schema (31 models, 26 enums) & populate starter Exercises, 10 Talent Trees, Nodes, Dungeons, Guild & 7d Raids
+# Push Prisma schema (32 models, 27 enums) & populate starter Exercises, 10 Talent Trees, Nodes, Dungeons, Guild & 7d Raids
 npm run db:push
 npm run db:seed
 
@@ -59,7 +59,7 @@ npm run dev:mobile
 ```bash
 npm run db:validate   # Validate Prisma schema
 npm run typecheck     # Strict TypeScript check across all 4 workspaces
-npm test              # Run Vitest unit & API tests (85 passing tests across game-engine & server)
+npm test              # Run Vitest unit & API tests (22 test files, 188 passing tests across game-engine & server)
 npm run test:e2e      # Run Playwright full-stack E2E tests (auth, offline logging, background sync)
 ```
 

@@ -8,7 +8,14 @@ export default async function globalSetup(): Promise<void> {
   const prisma = new PrismaClient();
   try {
     await prisma.$connect();
-    console.log(' Connected to PostgreSQL. Seeding exercises, talents, and raids...');
+    console.log(' Connected to PostgreSQL. Applying partial unique index and seeding catalog...');
+
+    await prisma.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "Character_userId_gameMode_active_key"
+      ON "Character"("userId", "gameMode")
+      WHERE "deletedAt" IS NULL;
+    `);
+
     await runSeed(prisma);
 
     const testEmail = 'e2e-seed-hero@gokirpg.local';
@@ -25,16 +32,31 @@ export default async function globalSetup(): Promise<void> {
     });
 
     await prisma.character.upsert({
-      where: { userId: user.id },
-      update: {},
+      where: { name: 'CrimsonE2E' },
+      update: {
+        userId: user.id,
+        deletedAt: null,
+        gameMode: 'STANDARD',
+        overallLevel: 1,
+        gold: 350,
+      },
       create: {
         userId: user.id,
         name: 'CrimsonE2E',
-        level: 1,
-        strengthLevel: 1,
-        enduranceLevel: 1,
-        agilityLevel: 1,
+        gameMode: 'STANDARD',
+        appearanceId: 'oni_warlord',
+        avatarSpriteId: 'oni_warlord',
+        overallLevel: 1,
         gold: 350,
+        stats: {
+          create: {
+            strengthLevel: 1,
+            enduranceLevel: 1,
+            agilityLevel: 1,
+          },
+        },
+        fatigueState: { create: {} },
+        equipmentLoadout: { create: {} },
       },
     });
 

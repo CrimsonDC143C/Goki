@@ -206,6 +206,7 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
   visible = true,
   onLoadSessionIntoWorkout,
 }) => {
+  const game = useGame();
   const {
     workoutHistory,
     presets,
@@ -215,7 +216,9 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
     registeredGyms,
     pruneWorkoutHistory,
     restoreSampleWorkoutHistory,
-  } = useGame();
+  } = game;
+  const userBodyweightKg =
+    Number((game as any).bodyWeightKg ?? (game as any).userBodyweightKg ?? 75) || 75;
   const insets = useSafeAreaInsets();
   const safeTop =
     Platform.OS === 'web'
@@ -260,9 +263,10 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
       currentWorkout: receiptWorkout,
       previousWorkouts: olderWorkouts,
       consistencyStreak: Math.max(1, consistencyStreak),
-      cardioSegmentCount: 0,
+      cardioSegmentCount: receiptWorkout.cardioEntries?.length ?? 0,
+      ...( { bodyWeightKg: userBodyweightKg } as any ),
     });
-  }, [receiptWorkout, workoutHistory, consistencyStreak]);
+  }, [receiptWorkout, workoutHistory, consistencyStreak, userBodyweightKg]);
 
   // Routine Scope Options
   const routineOptions = useMemo(

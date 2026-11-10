@@ -3,7 +3,13 @@ import {
   SetType,
   WorkoutPresetDefinition,
 } from './workout-presets-rest';
-import { HistoricalExercisePR } from './workout-calculator';
+import {
+  HistoricalExercisePR,
+  calculateE1RM,
+  formatWeightBracketKey,
+} from './workout-calculator';
+import { normalizeGymId } from './intra-workout-ergonomics';
+import { HeartRateZone } from './types';
 
 // ============================================================================
 // TRAINING HISTORY DATA STRUCTURES & PROTOCOL
@@ -1245,294 +1251,311 @@ export function countWorkoutsForCharacter(
   return filterWorkoutsForCharacter(workouts, characterId).length;
 }
 
+export type LoggedCardioEntry = CompletedCardioEntry;
+export type LoggedWorkoutSessionRecord = CompletedWorkoutRecord;
+
 // ============================================================================
 // DEFAULT REALISTIC SAMPLE WORKOUT HISTORY (6 SESSIONS ACROSS 3 ROUTINES)
 // ============================================================================
 
-const NOW = Date.now();
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-export const DEFAULT_SAMPLE_WORKOUT_HISTORY: CompletedWorkoutRecord[] = [
-  // Session 1: Upper Body Push (1 day ago) - PRs set
-  {
-    id: 'sample_wk_push_3',
-    gymId: 'iron-sanctum',
-    gymName: 'Iron Sanctum Barbell Club',
-    source: 'OFFLINE',
-    performedAtIso: new Date(NOW - ONE_DAY_MS * 1).toISOString(),
-    durationSeconds: 3240, // 54 mins
-    workoutCategory: 'GYM',
-    presetName: 'Upper Body Push Preset',
-    exercises: [
-      {
-        exerciseId: 'bench_press',
-        exerciseName: 'Barbell Flat Bench Press',
-        sets: [
-          { setNumber: 1, weightKg: 80, reps: 8, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 85, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 85, reps: 8, rpe: 9.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'pepin_db_incline_press',
-        exerciseName: 'Pepin Adjustable DB Incline Press',
-        sets: [
-          { setNumber: 1, weightKg: 32, reps: 10, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 36, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 36, reps: 8, rpe: 9.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'cable_face_pulls',
-        exerciseName: 'Cable Face Pulls',
-        sets: [
-          { setNumber: 1, weightKg: 27.5, reps: 15, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 30, reps: 15, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 32.5, reps: 12, rpe: 9, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'parallel_bar_dips',
-        exerciseName: 'Parallel Bar Dips',
-        sets: [
-          { setNumber: 1, weightKg: 0, reps: 12, rpe: 7.5, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 10, reps: 10, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 10, reps: 10, rpe: 9, setType: 'NORMAL' },
-        ],
-      },
-    ],
-  },
+/**
+ * Deterministically builds the default 6-session sample workout history relative to `anchorNowMs`
+ * (avoiding impure `Date.now()` evaluation at module import).
+ */
+export function createDefaultSampleWorkoutHistory(
+  anchorNowMs: number = Date.UTC(2026, 0, 15, 12, 0, 0)
+): LoggedWorkoutSessionRecord[] {
+  const safeAnchorMs = Number.isFinite(anchorNowMs)
+    ? anchorNowMs
+    : Date.UTC(2026, 0, 15, 12, 0, 0);
 
-  // Session 2: Heavy Back & Pull (3 days ago) - PRs set
-  {
-    id: 'sample_wk_pull_2',
-    gymId: 'iron-sanctum',
-    gymName: 'Iron Sanctum Barbell Club',
-    source: 'ONLINE',
-    performedAtIso: new Date(NOW - ONE_DAY_MS * 3).toISOString(),
-    durationSeconds: 3600, // 60 mins
-    workoutCategory: 'GYM',
-    presetName: 'Heavy Back & Pull Protocol',
-    exercises: [
-      {
-        exerciseId: 'weighted_pullup',
-        exerciseName: 'Weighted Pull-Ups',
-        sets: [
-          { setNumber: 1, weightKg: 15, reps: 6, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 15, reps: 6, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 15, reps: 6, rpe: 9.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'landmine_meadows_row',
-        exerciseName: 'Landmine Single-Arm Meadows Row',
-        sets: [
-          { setNumber: 1, weightKg: 42.5, reps: 8, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 45, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 45, reps: 8, rpe: 9, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'cable_face_pulls',
-        exerciseName: 'Cable Face Pulls',
-        sets: [
-          { setNumber: 1, weightKg: 27.5, reps: 15, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 27.5, reps: 15, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 27.5, reps: 15, rpe: 9, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'cable_lateral_raise',
-        exerciseName: 'Cable Lateral Raise',
-        sets: [
-          { setNumber: 1, weightKg: 10, reps: 12, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 10, reps: 12, rpe: 9, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 7.5, reps: 15, rpe: 10, setType: 'DROP_SET' },
-        ],
-      },
-    ],
-  },
+  return [
+    // Session 1: Upper Body Push (1 day ago) - PRs set
+    {
+      id: 'sample_wk_push_3',
+      gymId: 'iron-sanctum',
+      gymName: 'Iron Sanctum Barbell Club',
+      source: 'OFFLINE',
+      performedAtIso: new Date(safeAnchorMs - ONE_DAY_MS * 1).toISOString(),
+      durationSeconds: 3240, // 54 mins
+      workoutCategory: 'GYM',
+      presetName: 'Upper Body Push Preset',
+      exercises: [
+        {
+          exerciseId: 'bench_press',
+          exerciseName: 'Barbell Flat Bench Press',
+          sets: [
+            { setNumber: 1, weightKg: 80, reps: 8, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 85, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 85, reps: 8, rpe: 9.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'pepin_db_incline_press',
+          exerciseName: 'Pepin Adjustable DB Incline Press',
+          sets: [
+            { setNumber: 1, weightKg: 32, reps: 10, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 36, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 36, reps: 8, rpe: 9.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'cable_face_pulls',
+          exerciseName: 'Cable Face Pulls',
+          sets: [
+            { setNumber: 1, weightKg: 27.5, reps: 15, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 30, reps: 15, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 32.5, reps: 12, rpe: 9, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'parallel_bar_dips',
+          exerciseName: 'Parallel Bar Dips',
+          sets: [
+            { setNumber: 1, weightKg: 0, reps: 12, rpe: 7.5, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 10, reps: 10, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 10, reps: 10, rpe: 9, setType: 'NORMAL' },
+          ],
+        },
+      ],
+    },
 
-  // Session 3: Upper Body Push/Pull Supersets (4 days ago)
-  {
-    id: 'sample_wk_push_pull_1',
-    gymId: 'home-outpost',
-    gymName: 'Home Outpost',
-    source: 'OFFLINE',
-    performedAtIso: new Date(NOW - ONE_DAY_MS * 4).toISOString(),
-    durationSeconds: 3120, // 52 mins
-    workoutCategory: 'GYM',
-    presetName: 'Upper Body Strength & Hypertrophy A (Push/Pull Supersets)',
-    exercises: [
-      {
-        exerciseId: 'smith_incline_bench_press',
-        exerciseName: 'Smith Machine Incline Bench Press',
-        sets: [
-          { setNumber: 1, weightKg: 70, reps: 8, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 75, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 75, reps: 8, rpe: 9, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'weighted_pullup',
-        exerciseName: 'Weighted Pull-Ups',
-        sets: [
-          { setNumber: 1, weightKg: 15, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 15, reps: 8, rpe: 9, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'pepin_db_incline_press',
-        exerciseName: 'Pepin Adjustable DB Incline Press',
-        sets: [
-          { setNumber: 1, weightKg: 32.5, reps: 10, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 32.5, reps: 10, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'landmine_meadows_row',
-        exerciseName: 'Landmine Single-Arm Meadows Row',
-        sets: [
-          { setNumber: 1, weightKg: 40, reps: 10, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 40, reps: 10, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-    ],
-  },
+    // Session 2: Heavy Back & Pull (3 days ago) - PRs set
+    {
+      id: 'sample_wk_pull_2',
+      gymId: 'iron-sanctum',
+      gymName: 'Iron Sanctum Barbell Club',
+      source: 'ONLINE',
+      performedAtIso: new Date(safeAnchorMs - ONE_DAY_MS * 3).toISOString(),
+      durationSeconds: 3600, // 60 mins
+      workoutCategory: 'GYM',
+      presetName: 'Heavy Back & Pull Protocol',
+      exercises: [
+        {
+          exerciseId: 'weighted_pullup',
+          exerciseName: 'Weighted Pull-Ups',
+          sets: [
+            { setNumber: 1, weightKg: 15, reps: 6, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 15, reps: 6, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 15, reps: 6, rpe: 9.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'landmine_meadows_row',
+          exerciseName: 'Landmine Single-Arm Meadows Row',
+          sets: [
+            { setNumber: 1, weightKg: 42.5, reps: 8, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 45, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 45, reps: 8, rpe: 9, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'cable_face_pulls',
+          exerciseName: 'Cable Face Pulls',
+          sets: [
+            { setNumber: 1, weightKg: 27.5, reps: 15, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 27.5, reps: 15, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 27.5, reps: 15, rpe: 9, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'cable_lateral_raise',
+          exerciseName: 'Cable Lateral Raise',
+          sets: [
+            { setNumber: 1, weightKg: 10, reps: 12, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 10, reps: 12, rpe: 9, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 7.5, reps: 15, rpe: 10, setType: 'DROP_SET' },
+          ],
+        },
+      ],
+    },
 
-  // Session 4: Upper Body Push (7 days ago)
-  {
-    id: 'sample_wk_push_2',
-    source: 'OFFLINE',
-    performedAtIso: new Date(NOW - ONE_DAY_MS * 7).toISOString(),
-    durationSeconds: 3000, // 50 mins
-    workoutCategory: 'GYM',
-    presetName: 'Upper Body Push Preset',
-    exercises: [
-      {
-        exerciseId: 'bench_press',
-        exerciseName: 'Barbell Flat Bench Press',
-        sets: [
-          { setNumber: 1, weightKg: 80, reps: 8, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 80, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 3, weightKg: 80, reps: 8, rpe: 9, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'pepin_db_incline_press',
-        exerciseName: 'Pepin Adjustable DB Incline Press',
-        sets: [
-          { setNumber: 1, weightKg: 32, reps: 10, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 32, reps: 10, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'cable_face_pulls',
-        exerciseName: 'Cable Face Pulls',
-        sets: [
-          { setNumber: 1, weightKg: 27.5, reps: 15, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 27.5, reps: 15, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'parallel_bar_dips',
-        exerciseName: 'Parallel Bar Dips',
-        sets: [
-          { setNumber: 1, weightKg: 0, reps: 10, rpe: 7, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 10, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-    ],
-  },
+    // Session 3: Upper Body Push/Pull Supersets (4 days ago)
+    {
+      id: 'sample_wk_push_pull_1',
+      gymId: 'home-outpost',
+      gymName: 'Home Outpost',
+      source: 'OFFLINE',
+      performedAtIso: new Date(safeAnchorMs - ONE_DAY_MS * 4).toISOString(),
+      durationSeconds: 3120, // 52 mins
+      workoutCategory: 'GYM',
+      presetName: 'Upper Body Strength & Hypertrophy A (Push/Pull Supersets)',
+      exercises: [
+        {
+          exerciseId: 'smith_incline_bench_press',
+          exerciseName: 'Smith Machine Incline Bench Press',
+          sets: [
+            { setNumber: 1, weightKg: 70, reps: 8, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 75, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 75, reps: 8, rpe: 9, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'weighted_pullup',
+          exerciseName: 'Weighted Pull-Ups',
+          sets: [
+            { setNumber: 1, weightKg: 15, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 15, reps: 8, rpe: 9, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'pepin_db_incline_press',
+          exerciseName: 'Pepin Adjustable DB Incline Press',
+          sets: [
+            { setNumber: 1, weightKg: 32.5, reps: 10, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 32.5, reps: 10, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'landmine_meadows_row',
+          exerciseName: 'Landmine Single-Arm Meadows Row',
+          sets: [
+            { setNumber: 1, weightKg: 40, reps: 10, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 40, reps: 10, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+      ],
+    },
 
-  // Session 5: Heavy Back & Pull (8 days ago)
-  {
-    id: 'sample_wk_pull_1',
-    source: 'ONLINE',
-    performedAtIso: new Date(NOW - ONE_DAY_MS * 8).toISOString(),
-    durationSeconds: 3480, // 58 mins
-    workoutCategory: 'GYM',
-    presetName: 'Heavy Back & Pull Protocol',
-    exercises: [
-      {
-        exerciseId: 'weighted_pullup',
-        exerciseName: 'Weighted Pull-Ups',
-        sets: [
-          { setNumber: 1, weightKg: 12.5, reps: 6, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 12.5, reps: 6, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'landmine_meadows_row',
-        exerciseName: 'Landmine Single-Arm Meadows Row',
-        sets: [
-          { setNumber: 1, weightKg: 40, reps: 8, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 40, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'cable_face_pulls',
-        exerciseName: 'Cable Face Pulls',
-        sets: [
-          { setNumber: 1, weightKg: 25, reps: 15, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 25, reps: 15, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'cable_lateral_raise',
-        exerciseName: 'Cable Lateral Raise',
-        sets: [
-          { setNumber: 1, weightKg: 7.5, reps: 15, rpe: 8.5, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 7.5, reps: 15, rpe: 9, setType: 'NORMAL' },
-        ],
-      },
-    ],
-  },
+    // Session 4: Upper Body Push (7 days ago)
+    {
+      id: 'sample_wk_push_2',
+      source: 'OFFLINE',
+      performedAtIso: new Date(safeAnchorMs - ONE_DAY_MS * 7).toISOString(),
+      durationSeconds: 3000, // 50 mins
+      workoutCategory: 'GYM',
+      presetName: 'Upper Body Push Preset',
+      exercises: [
+        {
+          exerciseId: 'bench_press',
+          exerciseName: 'Barbell Flat Bench Press',
+          sets: [
+            { setNumber: 1, weightKg: 80, reps: 8, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 80, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 3, weightKg: 80, reps: 8, rpe: 9, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'pepin_db_incline_press',
+          exerciseName: 'Pepin Adjustable DB Incline Press',
+          sets: [
+            { setNumber: 1, weightKg: 32, reps: 10, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 32, reps: 10, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'cable_face_pulls',
+          exerciseName: 'Cable Face Pulls',
+          sets: [
+            { setNumber: 1, weightKg: 27.5, reps: 15, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 27.5, reps: 15, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'parallel_bar_dips',
+          exerciseName: 'Parallel Bar Dips',
+          sets: [
+            { setNumber: 1, weightKg: 0, reps: 10, rpe: 7, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 10, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+      ],
+    },
 
-  // Session 6: Upper Body Push (14 days ago) - Baseline
-  {
-    id: 'sample_wk_push_1',
-    source: 'OFFLINE',
-    performedAtIso: new Date(NOW - ONE_DAY_MS * 14).toISOString(),
-    durationSeconds: 2880, // 48 mins
-    workoutCategory: 'GYM',
-    presetName: 'Upper Body Push Preset',
-    exercises: [
-      {
-        exerciseId: 'bench_press',
-        exerciseName: 'Barbell Flat Bench Press',
-        sets: [
-          { setNumber: 1, weightKg: 77.5, reps: 8, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 77.5, reps: 8, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'pepin_db_incline_press',
-        exerciseName: 'Pepin Adjustable DB Incline Press',
-        sets: [
-          { setNumber: 1, weightKg: 30, reps: 10, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 30, reps: 10, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'cable_face_pulls',
-        exerciseName: 'Cable Face Pulls',
-        sets: [
-          { setNumber: 1, weightKg: 25, reps: 15, rpe: 8, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 25, reps: 15, rpe: 8.5, setType: 'NORMAL' },
-        ],
-      },
-      {
-        exerciseId: 'parallel_bar_dips',
-        exerciseName: 'Parallel Bar Dips',
-        sets: [
-          { setNumber: 1, weightKg: 0, reps: 10, rpe: 7, setType: 'NORMAL' },
-          { setNumber: 2, weightKg: 0, reps: 10, rpe: 7.5, setType: 'NORMAL' },
-        ],
-      },
-    ],
-  },
-];
+    // Session 5: Heavy Back & Pull (8 days ago)
+    {
+      id: 'sample_wk_pull_1',
+      source: 'ONLINE',
+      performedAtIso: new Date(safeAnchorMs - ONE_DAY_MS * 8).toISOString(),
+      durationSeconds: 3480, // 58 mins
+      workoutCategory: 'GYM',
+      presetName: 'Heavy Back & Pull Protocol',
+      exercises: [
+        {
+          exerciseId: 'weighted_pullup',
+          exerciseName: 'Weighted Pull-Ups',
+          sets: [
+            { setNumber: 1, weightKg: 12.5, reps: 6, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 12.5, reps: 6, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'landmine_meadows_row',
+          exerciseName: 'Landmine Single-Arm Meadows Row',
+          sets: [
+            { setNumber: 1, weightKg: 40, reps: 8, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 40, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'cable_face_pulls',
+          exerciseName: 'Cable Face Pulls',
+          sets: [
+            { setNumber: 1, weightKg: 25, reps: 15, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 25, reps: 15, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'cable_lateral_raise',
+          exerciseName: 'Cable Lateral Raise',
+          sets: [
+            { setNumber: 1, weightKg: 7.5, reps: 15, rpe: 8.5, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 7.5, reps: 15, rpe: 9, setType: 'NORMAL' },
+          ],
+        },
+      ],
+    },
+
+    // Session 6: Upper Body Push (14 days ago) - Baseline
+    {
+      id: 'sample_wk_push_1',
+      source: 'OFFLINE',
+      performedAtIso: new Date(safeAnchorMs - ONE_DAY_MS * 14).toISOString(),
+      durationSeconds: 2880, // 48 mins
+      workoutCategory: 'GYM',
+      presetName: 'Upper Body Push Preset',
+      exercises: [
+        {
+          exerciseId: 'bench_press',
+          exerciseName: 'Barbell Flat Bench Press',
+          sets: [
+            { setNumber: 1, weightKg: 77.5, reps: 8, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 77.5, reps: 8, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'pepin_db_incline_press',
+          exerciseName: 'Pepin Adjustable DB Incline Press',
+          sets: [
+            { setNumber: 1, weightKg: 30, reps: 10, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 30, reps: 10, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'cable_face_pulls',
+          exerciseName: 'Cable Face Pulls',
+          sets: [
+            { setNumber: 1, weightKg: 25, reps: 15, rpe: 8, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 25, reps: 15, rpe: 8.5, setType: 'NORMAL' },
+          ],
+        },
+        {
+          exerciseId: 'parallel_bar_dips',
+          exerciseName: 'Parallel Bar Dips',
+          sets: [
+            { setNumber: 1, weightKg: 0, reps: 10, rpe: 7, setType: 'NORMAL' },
+            { setNumber: 2, weightKg: 0, reps: 10, rpe: 7.5, setType: 'NORMAL' },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
+export const DEFAULT_SAMPLE_WORKOUT_HISTORY: CompletedWorkoutRecord[] =
+  createDefaultSampleWorkoutHistory();
 
 // ============================================================================
 // TRAINING HISTORY WIPE / PRUNE ENGINE (MODIFIERS BY TIME, GYM, ACTIVITY, ETC.)
@@ -1585,9 +1608,8 @@ export interface TrainingHistoryPruneResult {
 }
 
 function normalizeFilterGymKey(gymId?: string | null): string {
-  if (!gymId) return 'UNSPECIFIED';
-  const cleaned = gymId.trim().toLowerCase();
-  return cleaned.length > 0 ? cleaned : 'UNSPECIFIED';
+  const normalized = normalizeGymId(gymId);
+  return normalized ?? 'UNSPECIFIED';
 }
 
 /**
@@ -1650,7 +1672,9 @@ export function doesWorkoutMatchPruneFilter(
   // 5. Specific Exercise / Activity Check
   const targetExercise = filter.exerciseId ?? 'ALL';
   if (targetExercise !== 'ALL') {
-    const hasExercise = workout.exercises.some((ex) => ex.exerciseId === targetExercise);
+    const hasExercise =
+      workout.exercises.some((ex) => ex.exerciseId === targetExercise) ||
+      (workout.cardioEntries?.some((entry) => entry.exerciseId === targetExercise) ?? false);
     if (!hasExercise) return false;
   }
 
@@ -1686,16 +1710,23 @@ export function pruneTrainingHistory(
     // If targeting a specific exercise in STRIP_EXERCISE mode, strip only that exercise's entry
     if (targetExercise !== 'ALL' && pruneMode === 'STRIP_EXERCISE') {
       const keptExercises = wk.exercises.filter((ex) => ex.exerciseId !== targetExercise);
-      const strippedCount = wk.exercises.length - keptExercises.length;
+      const prevCardioEntries = wk.cardioEntries ?? [];
+      const keptCardioEntries = prevCardioEntries.filter(
+        (entry) => entry.exerciseId !== targetExercise
+      );
+      const strippedCount =
+        (wk.exercises.length - keptExercises.length) +
+        (prevCardioEntries.length - keptCardioEntries.length);
       removedExerciseEntriesCount += strippedCount;
 
-      if (keptExercises.length === 0) {
+      if (keptExercises.length === 0 && keptCardioEntries.length === 0) {
         removedSessionsCount += 1;
       } else {
         modifiedSessionsCount += 1;
         remainingWorkouts.push({
           ...wk,
           exercises: keptExercises,
+          ...(wk.cardioEntries !== undefined ? { cardioEntries: keptCardioEntries } : {}),
         });
       }
       continue;
@@ -1703,7 +1734,7 @@ export function pruneTrainingHistory(
 
     // Otherwise remove the entire matching workout session
     removedSessionsCount += 1;
-    removedExerciseEntriesCount += wk.exercises.length;
+    removedExerciseEntriesCount += wk.exercises.length + (wk.cardioEntries?.length ?? 0);
   }
 
   return {
@@ -1748,7 +1779,7 @@ export function rebuildHistoricalPRsFromWorkouts(
       for (const s of workingSets) {
         const w = Math.max(0, s.weightKg);
         const r = Math.max(0, s.reps);
-        const e1rm = Math.round(calculateSetE1RM(w, r) * 100) / 100;
+        const e1rm = calculateE1RM(w, r);
         const setVol = Math.round(w * r * 100) / 100;
         sessionVol += setVol;
 
@@ -1758,7 +1789,7 @@ export function rebuildHistoricalPRsFromWorkouts(
         if (setVol > pr.bestSingleSetVolume) {
           pr.bestSingleSetVolume = setVol;
         }
-        const weightKey = w.toFixed(1);
+        const weightKey = formatWeightBracketKey(w);
         const prevMaxReps = pr.maxRepsByWeight[weightKey] ?? 0;
         if (r > prevMaxReps) {
           pr.maxRepsByWeight[weightKey] = r;
@@ -1769,6 +1800,28 @@ export function rebuildHistoricalPRsFromWorkouts(
       if (sessionVol > pr.bestSessionVolume) {
         pr.bestSessionVolume = sessionVol;
       }
+    }
+
+    for (const entry of wk.cardioEntries ?? []) {
+      if (!entry.exerciseId || entry.durationSeconds <= 0) continue;
+      const zone = Math.min(5, Math.max(1, Math.round(entry.averageHrZone ?? 2))) as HeartRateZone;
+      let pr = prs[entry.exerciseId];
+      if (!pr) {
+        pr = {
+          exerciseId: entry.exerciseId,
+          bestE1RM: 0,
+          bestSingleSetVolume: 0,
+          bestSessionVolume: 0,
+          maxRepsByWeight: {},
+          bestCardioDurationSecByZone: {},
+        };
+        prs[entry.exerciseId] = pr;
+      }
+      const prevBest = (pr.bestCardioDurationSecByZone as Record<string, number | undefined>)[String(zone)] ?? 0;
+      (pr.bestCardioDurationSecByZone as Record<string, number | undefined>)[String(zone)] = Math.max(
+        prevBest,
+        entry.durationSeconds
+      );
     }
   }
 

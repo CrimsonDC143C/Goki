@@ -31,3 +31,14 @@ When delegation is permitted:
 - **Never Read Heavy/Asset Files:** Never read `apps/mobile/src/assets/v0Vault.ts`, `apps/mobile/assets/sprites/index.ts`, or scan `apps/mobile/assets/` image directories unless explicitly requested.
 - **Targeted Slicing for Large Files:** When inspecting large files (>500 lines such as `CharacterProfileScreen.tsx`, `WorkoutLoggerScreen.tsx`, `AutoBattlerArena.tsx`, `GameContext.tsx`, `talent-engine.ts`, `item-affix-engine.ts`, `schema.prisma`), ALWAYS use targeted `grep` first and read only the relevant ~100-line slice (`startLine`/`endLine`) rather than reading the entire file.
 - **Minimal Verification Scope:** For targeted UI or single-workspace edits, do NOT run full-monorepo `npm run build` or full test suites; run only `npx tsc --noEmit -p apps/mobile/tsconfig.json` (or the single affected workspace) when verification is needed.
+
+---
+
+## 5. Communication Style: ASD-STE100 (Simplified Technical English)
+In all projects, write and format at least 80% of every response and explanation in compliance with **ASD-STE100 (Simplified Technical English)**:
+- **One Meaning, One Part of Speech:** Use clear, standard words with a single meaning. Avoid idioms, slang, and metaphors.
+- **Active Voice:** Use active verbs rather than passive voice whenever possible.
+- **Short Sentences:** Keep procedural sentences to 20 words or fewer, and descriptive sentences to 25 words or fewer.
+- **One Instruction per Sentence:** State one action per sentence unless two actions happen at the same time.
+- **Noun Clusters:** Limit technical noun clusters to a maximum of 3 words.
+- **Vertical Lists:** Use bulleted or numbered lists for complex sequences and multiple items.

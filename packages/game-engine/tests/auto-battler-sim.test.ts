@@ -390,5 +390,66 @@ describe('auto-battler-sim', () => {
         expect(bossAndCompletionGold).toBeGreaterThan(totalGold * 0.5);
       }
     });
+
+    it('applies 7-stat attributes (DEX, CON, WIS, SPR), equipmentPrimaryStatBonuses, and secondary gear affixes (lifeOnHit, armorPenetrationPct, startOfCombatShieldHp)', () => {
+      const baseHero: CombatantCharacterInput = {
+        characterId: 'hero_3stat',
+        name: 'Base Fighter',
+        coreStats: { strengthLevel: 6, enduranceLevel: 6, agilityLevel: 6 },
+      };
+
+      const enhancedHero: CombatantCharacterInput = {
+        characterId: 'hero_7stat',
+        name: 'Holistic Champion',
+        coreStats: {
+          strengthLevel: 6,
+          enduranceLevel: 6,
+          agilityLevel: 6,
+          dexLevel: 10,
+          conLevel: 10,
+          wisLevel: 10,
+          sprLevel: 10,
+        },
+        equipmentPrimaryStatBonuses: {
+          STR: 4,
+          CON: 5,
+          DEX: 5,
+          SPR: 5,
+        },
+        equipmentBonuses: {
+          lifeOnHit: 18,
+          armorPenetrationPct: 0.35,
+          startOfCombatShieldHp: 75,
+          damageMitigationPct: 0.10,
+          hazardResistancePct: 0.25,
+        },
+        unlockedTalentRanks: {
+          grd_fortress_plating: 3, // defensePct
+          cal_bodyweight_mastery: 3, // attackPowerPct + dodgeChancePct
+        },
+      };
+
+      const baseRun = simulateDungeonRun({
+        dungeon: SAMPLE_DUNGEON,
+        party: [baseHero],
+        seed: '7stat-comparison-seed',
+      });
+
+      const enhancedRun = simulateDungeonRun({
+        dungeon: SAMPLE_DUNGEON,
+        party: [enhancedHero],
+        seed: '7stat-comparison-seed',
+      });
+
+      const baseSummary = baseRun.partySummaries[0]!;
+      const enhancedSummary = enhancedRun.partySummaries[0]!;
+
+      // CON + primary CON bonus boosts maxHp significantly
+      expect(enhancedSummary.maxHp).toBeGreaterThan(baseSummary.maxHp + 200);
+      // Armor penetration + attackPowerPct + STR bonus + DEX crit boosts total damage
+      expect(enhancedSummary.totalDamageDealt).toBeGreaterThan(baseSummary.totalDamageDealt);
+      // lifeOnHit heals the hero on landed strikes after taking damage
+      expect(enhancedSummary.totalHealingDone).toBeGreaterThan(0);
+    });
   });
 });

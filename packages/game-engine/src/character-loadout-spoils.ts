@@ -7,10 +7,12 @@ import { PrimaryStatBonuses } from './item-affix-engine';
 import {
   CoreStatBlock,
   EquipmentStatBonuses,
+  HolisticStatType,
   ItemRarity,
   LootDrop,
   StatType,
   WorkoutSessionType,
+  normalizeCoreStatBlock,
 } from './types';
 import {
   CardioSegmentInput,
@@ -192,7 +194,15 @@ function roundTo2(val: number): number {
  * Computes Overall Character Level consistently across the 7-stat progression formula.
  */
 export function calculateOverallCharacterLevel(coreStats: CoreStatBlock): number {
-  return calculateOverallLevel(coreStats);
+  const normalized = normalizeCoreStatBlock(coreStats, 1);
+  if (normalized.hasHolisticStats) {
+    return calculateOverallLevel(normalized);
+  }
+  return calculateOverallLevel({
+    strengthLevel: normalized.strengthLevel,
+    enduranceLevel: normalized.enduranceLevel,
+    agilityLevel: normalized.agilityLevel,
+  });
 }
 
 export interface DerivedCombatAttributes {
@@ -231,18 +241,38 @@ export function calculateDerivedCombatStats(params: {
   const uniqueMods = params.uniqueItemModifiers ?? {};
   const fatigue = getSystemicFatigueCombatPenalties(params.systemicFatigueStacks ?? 0);
 
-  // Merge unique passive modifiers into talents
+  // Merge unique passive modifiers and 7-stat talent modifiers into talents
   const mergedTalents = {
     ...talents,
-    meleePowerPct: (talents.meleePowerPct ?? 0) + (uniqueMods.meleePowerPct ?? 0),
-    armorPct: (talents.armorPct ?? 0) + (uniqueMods.armorPct ?? 0),
+    meleePowerPct:
+      (talents.meleePowerPct ?? 0) +
+      (talents.attackPowerPct ?? 0) +
+      (uniqueMods.meleePowerPct ?? 0) +
+      (uniqueMods.attackPowerPct ?? 0),
+    armorPct:
+      (talents.armorPct ?? 0) +
+      (talents.defensePct ?? 0) +
+      (uniqueMods.armorPct ?? 0) +
+      (uniqueMods.defensePct ?? 0),
     maxHpPct: (talents.maxHpPct ?? 0) + (uniqueMods.maxHpPct ?? 0),
     maxStaminaPct: (talents.maxStaminaPct ?? 0) + (uniqueMods.maxStaminaPct ?? 0),
     damageMitigationPct: (talents.damageMitigationPct ?? 0) + (uniqueMods.damageMitigationPct ?? 0),
     attackSpeedPct: (talents.attackSpeedPct ?? 0) + (uniqueMods.attackSpeedPct ?? 0),
-    critChanceBonus: (talents.critChanceBonus ?? 0) + (uniqueMods.critChanceBonus ?? 0),
-    critDamageBonus: (talents.critDamageBonus ?? 0) + (uniqueMods.critDamageBonus ?? 0),
-    dodgeRatingBonus: (talents.dodgeRatingBonus ?? 0) + (uniqueMods.dodgeRatingBonus ?? 0),
+    critChanceBonus:
+      (talents.critChanceBonus ?? 0) +
+      (talents.critChancePct ?? 0) +
+      (uniqueMods.critChanceBonus ?? 0) +
+      (uniqueMods.critChancePct ?? 0),
+    critDamageBonus:
+      (talents.critDamageBonus ?? 0) +
+      (talents.critDamagePct ?? 0) +
+      (uniqueMods.critDamageBonus ?? 0) +
+      (uniqueMods.critDamagePct ?? 0),
+    dodgeRatingBonus:
+      (talents.dodgeRatingBonus ?? 0) +
+      (talents.dodgeChancePct ?? 0) +
+      (uniqueMods.dodgeRatingBonus ?? 0) +
+      (uniqueMods.dodgeChancePct ?? 0),
     hazardResistancePct: (talents.hazardResistancePct ?? 0) + (uniqueMods.hazardResistancePct ?? 0),
   };
 
@@ -254,13 +284,19 @@ export function calculateDerivedCombatStats(params: {
   const wisBonus = gearPrim.WIS ?? 0;
   const sprBonus = gearPrim.SPR ?? 0;
 
-  const effStr = (params.coreStats.strengthLevel + strBonus) * fatigue.statEffectivenessMultiplier;
-  const effEnd = (params.coreStats.enduranceLevel + endBonus) * fatigue.statEffectivenessMultiplier;
-  const effAgi = (params.coreStats.agilityLevel + agiBonus) * fatigue.statEffectivenessMultiplier;
-  const effCon = conBonus * fatigue.statEffectivenessMultiplier;
-  const effDex = dexBonus * fatigue.statEffectivenessMultiplier;
-  const effWis = wisBonus * fatigue.statEffectivenessMultiplier;
-  const effSpr = sprBonus * fatigue.statEffectivenessMultiplier;
+  const normalizedStats = normalizeCoreStatBlock(params.coreStats, 0);
+  const baseCon = normalizedStats.conLevel;
+  const baseDex = normalizedStats.dexLevel;
+  const baseWis = normalizedStats.wisLevel;
+  const baseSpr = normalizedStats.sprLevel;
+
+  const effStr = (normalizedStats.strengthLevel + strBonus) * fatigue.statEffectivenessMultiplier;
+  const effEnd = (normalizedStats.enduranceLevel + endBonus) * fatigue.statEffectivenessMultiplier;
+  const effAgi = (normalizedStats.agilityLevel + agiBonus) * fatigue.statEffectivenessMultiplier;
+  const effCon = (baseCon + conBonus) * fatigue.statEffectivenessMultiplier;
+  const effDex = (baseDex + dexBonus) * fatigue.statEffectivenessMultiplier;
+  const effWis = (baseWis + wisBonus) * fatigue.statEffectivenessMultiplier;
+  const effSpr = (baseSpr + sprBonus) * fatigue.statEffectivenessMultiplier;
 
   const rawMaxHp = 220 + effEnd * 28 + effStr * 10 + effCon * 15 + (gear.maxHp ?? 0);
   const maxHp = Math.max(100, Math.round(rawMaxHp * (1 + mergedTalents.maxHpPct)));
@@ -384,6 +420,7 @@ export interface WorkoutSpoilsReceipt {
   totalTonnageKg: number;
   cardioDurationSeconds: number;
   xpGained: Record<StatType, number>;
+  finalXpByHolisticStat?: Record<HolisticStatType, number>;
   goldAwarded: number;
   effectiveMultiplier: number;
   statProgressions: Record<StatType, StatLevelProgressionResult>;
@@ -484,19 +521,18 @@ export function inferOfflineWorkoutType(params: {
   return 'CARDIO_LOW_MOD';
 }
 
-function mergeLootDrops(drops: readonly LootDrop[]): LootDrop[] {
+export function mergeLootDrops(drops: readonly LootDrop[]): LootDrop[] {
   const map = new Map<string, LootDrop>();
   for (const d of drops) {
-    const existing = map.get(d.itemSlug);
+    const key =
+      d.tier || d.prefixId || d.suffixId || d.uniquePassive
+        ? `${d.itemSlug}:${d.tier ?? ''}:${d.prefixId ?? ''}:${d.suffixId ?? ''}:${d.uniquePassive?.passiveId ?? (d.uniquePassive as { id?: string } | null | undefined)?.id ?? ''}`
+        : d.itemSlug;
+    const existing = map.get(key);
     if (existing) {
       existing.quantity += d.quantity;
     } else {
-      map.set(d.itemSlug, {
-        itemSlug: d.itemSlug,
-        itemName: d.itemName,
-        rarity: d.rarity as ItemRarity,
-        quantity: d.quantity,
-      });
+      map.set(key, { ...d });
     }
   }
   return Array.from(map.values());
@@ -525,9 +561,34 @@ export function buildWorkoutSpoilsReceipt(params: {
     ...chestDrops,
   ]);
 
-  const cardioDurationSeconds = rewardPayload.workoutEvaluation.updatedPRs
-    ? Math.max(0, rewardPayload.durationSeconds)
-    : 0;
+  const effectiveWorkoutType = (rewardPayload.workoutType ?? params.workoutType) as string;
+  const isPureCardioWorkout =
+    effectiveWorkoutType === 'CARDIO_LOW_MOD' ||
+    effectiveWorkoutType === 'CARDIO_LOW_INTENSITY' ||
+    effectiveWorkoutType === 'CARDIO_HIGH_INTENSITY' ||
+    params.workoutType === 'CARDIO_LOW_MOD' ||
+    params.workoutType === 'CARDIO_HIGH_INTENSITY';
+
+  const cardioDurationSeconds =
+    rewardPayload.cardioDurationSeconds !== undefined &&
+    Number.isFinite(rewardPayload.cardioDurationSeconds)
+      ? isPureCardioWorkout && rewardPayload.cardioDurationSeconds === 0
+        ? Math.max(0, rewardPayload.durationSeconds)
+        : Math.max(0, rewardPayload.cardioDurationSeconds)
+      : isPureCardioWorkout
+        ? Math.max(0, rewardPayload.durationSeconds)
+        : 0;
+
+  const evalHolistic = rewardPayload.workoutEvaluation.finalXpByHolisticStat;
+  const finalXpByHolisticStat: Record<HolisticStatType, number> = {
+    STRENGTH: rewardPayload.finalXpByStat.STRENGTH,
+    ENDURANCE: rewardPayload.finalXpByStat.ENDURANCE,
+    AGILITY: rewardPayload.finalXpByStat.AGILITY,
+    DEXTERITY: evalHolistic?.DEXTERITY ?? 0,
+    CONSTITUTION: evalHolistic?.CONSTITUTION ?? 0,
+    WISDOM: evalHolistic?.WISDOM ?? 0,
+    SPIRIT: evalHolistic?.SPIRIT ?? 0,
+  };
 
   return {
     receiptId: params.receiptId,
@@ -540,6 +601,7 @@ export function buildWorkoutSpoilsReceipt(params: {
     totalTonnageKg: rewardPayload.totalTonnageKg,
     cardioDurationSeconds,
     xpGained: { ...rewardPayload.finalXpByStat },
+    finalXpByHolisticStat,
     goldAwarded: rewardPayload.totalGoldAwarded,
     effectiveMultiplier: rewardPayload.effectiveTotalMultiplier,
     statProgressions: {

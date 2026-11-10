@@ -1,16 +1,27 @@
 import { PrismaClient } from '@goki/database';
-import { MS_PER_HOUR, aggregateTalentModifiers } from '@goki/game-engine';
+import {
+  MS_PER_HOUR,
+  aggregateTalentModifiers,
+  isAdventurerRankSufficient,
+} from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { env } from '../config';
+import { assertCharacterActiveAndOwned, requireAuth } from '../middleware/auth';
 import { GameTimerScheduler } from '../queues/bullmq-workers';
-import { resolveRaidBossRolloverOperation } from '../services/game-operations';
+import {
+  isPrismaUniqueConstraintError,
+  resolveRaidBossRolloverOperation,
+  withDbTransaction,
+} from '../services/game-operations';
 import { WebSocketManager, websocketManager } from '../services/websocket-manager';
 
 const createGuildSchema = z.object({
   name: z.string().min(3).max(40),
   tag: z.string().min(2).max(6).toUpperCase(),
   description: z.string().max(240).optional(),
-  leaderCharacterId: z.string(),
+  leaderCharacterId: z.string().optional(),
+  founderCharacterId: z.string().optional(),
 });
 
 const spawnRaidSchema = z.object({
@@ -45,18 +56,23 @@ export function registerGuildAndRaidRoutes(
   });
 
   // Create a Social Adventurers' Guild
-  app.post('/api/guilds', async (request, reply) => {
+  app.post('/api/guilds', { preHandler: [requireAuth] }, async (request, reply) => {
     const body = createGuildSchema.parse(request.body);
+    const leaderCharacterId = body.leaderCharacterId ?? body.founderCharacterId;
+    if (!leaderCharacterId) {
+      return reply.status(400).send({ error: 'leaderCharacterId is required.' });
+    }
+    await assertCharacterActiveAndOwned(db, leaderCharacterId, request.user.userId);
 
     const guild = await db.guild.create({
       data: {
         name: body.name,
         tag: body.tag,
         description: body.description ?? null,
-        leaderCharacterId: body.leaderCharacterId,
+        leaderCharacterId,
         members: {
           create: {
-            characterId: body.leaderCharacterId,
+            characterId: leaderCharacterId,
             role: 'LEADER',
           },
         },
@@ -68,9 +84,10 @@ export function registerGuildAndRaidRoutes(
   });
 
   // Join an Adventurers' Guild
-  app.post('/api/guilds/:guildId/join', async (request, reply) => {
+  app.post('/api/guilds/:guildId/join', { preHandler: [requireAuth] }, async (request, reply) => {
     const { guildId } = z.object({ guildId: z.string() }).parse(request.params);
     const { characterId } = z.object({ characterId: z.string() }).parse(request.body);
+    await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
     const guild = await db.guild.findUnique({
       where: { id: guildId },
@@ -93,10 +110,11 @@ export function registerGuildAndRaidRoutes(
   });
 
   // Complete a Guild Bounty or Rank-Up Trial (Copper -> Iron -> Bronze -> Silver -> Gold -> Platinum -> Mythic)
-  app.post('/api/characters/:characterId/bounties/:bountyId/complete', async (request, reply) => {
+  app.post('/api/characters/:characterId/bounties/:bountyId/complete', { preHandler: [requireAuth] }, async (request, reply) => {
     const { characterId, bountyId } = z
       .object({ characterId: z.string(), bountyId: z.string() })
       .parse(request.params);
+    const activeCharacter = await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
     const bounty = await db.guildBounty.findFirst({
       where: { OR: [{ id: bountyId }, { slug: bountyId }] },
@@ -105,42 +123,205 @@ export function registerGuildAndRaidRoutes(
       return reply.status(404).send({ error: 'Guild bounty not found.' });
     }
 
-    const existing = await db.characterBountyCompletion.findUnique({
-      where: { characterId_bountyId: { characterId, bountyId: bounty.id } },
-    });
-    if (existing) {
-      return reply.status(400).send({ error: 'Bounty already completed by this character.' });
-    }
+    let txResult:
+      | { ok: true; character: any; bounty: any }
+      | { ok: false; statusCode: number; error: string };
+    try {
+      txResult = await withDbTransaction(
+        db,
+        async (tx) => {
+          const characterRecord =
+            (await tx.character.findUnique({
+              where: { id: characterId },
+              include: { stats: true },
+            })) ?? (activeCharacter as any);
 
-    const reqs = (bounty.requirements ?? {}) as { workoutsLogged?: number };
-    const minWorkouts = reqs.workoutsLogged ?? (bounty.slug === 'trial_of_iron' ? 3 : 0);
-    if (minWorkouts > 0 && typeof (db as any).workoutLog?.count === 'function') {
-      const charWorkoutCount = await db.workoutLog.count({
-        where: { characterId },
-      });
-      if (charWorkoutCount < minWorkouts) {
-        return reply.status(400).send({
-          error: `Log at least ${minWorkouts} total workouts first (currently ${charWorkoutCount}/${minWorkouts}).`,
-        });
+          if (!characterRecord) {
+            return { ok: false as const, statusCode: 404, error: 'Character not found.' };
+          }
+
+          // 0. Check duplicate bounty completion
+          const existing = await tx.characterBountyCompletion.findUnique({
+            where: { characterId_bountyId: { characterId, bountyId: bounty.id } },
+          });
+          if (existing) {
+            return {
+              ok: false as const,
+              statusCode: 409,
+              error: 'Bounty already completed by this character.',
+            };
+          }
+
+          // 1. Verify required AdventurerRank
+          const currentRank = characterRecord.adventurerRank ?? 'COPPER';
+          const requiredRank = bounty.requiredRank ?? 'COPPER';
+          if (!isAdventurerRankSufficient(currentRank, requiredRank)) {
+            return {
+              ok: false as const,
+              statusCode: 400,
+              error: `Requires Adventurer Rank ${requiredRank} (currently ${currentRank}).`,
+            };
+          }
+
+          const reqs = (bounty.requirements ?? {}) as {
+            workoutsLogged?: number;
+            totalStatLevel?: number;
+            dungeonClears?: number;
+            zone2Minutes?: number;
+            requiresVerifiedMode?: boolean;
+          };
+
+          const isIronmanBounty =
+            Boolean(reqs.requiresVerifiedMode) ||
+            characterRecord.gameMode === 'IRONMAN_VERIFIED';
+
+          // 2. Validate reqs.workoutsLogged
+          const minWorkouts = reqs.workoutsLogged ?? (bounty.slug === 'trial_of_iron' ? 3 : 0);
+          if (minWorkouts > 0) {
+            const workoutWhere = isIronmanBounty
+              ? { characterId, isHardwareVerified: true }
+              : { characterId };
+            let charWorkoutCount = 0;
+            if (typeof (tx as any).workoutLog?.count === 'function') {
+              charWorkoutCount = await tx.workoutLog.count({ where: workoutWhere });
+            } else if (typeof (tx as any).workoutLog?.findMany === 'function') {
+              const logs = await tx.workoutLog.findMany({ where: workoutWhere });
+              charWorkoutCount = logs.length;
+            }
+            if (charWorkoutCount < minWorkouts) {
+              return {
+                ok: false as const,
+                statusCode: 400,
+                error: `Log at least ${minWorkouts} total workouts first (currently ${charWorkoutCount}/${minWorkouts}).`,
+              };
+            }
+          }
+
+          // 3. Validate reqs.totalStatLevel
+          if (typeof reqs.totalStatLevel === 'number' && reqs.totalStatLevel > 0) {
+            const stats = characterRecord.stats ?? {};
+            const str = stats.strengthLevel ?? 1;
+            const end = stats.enduranceLevel ?? 1;
+            const agi = stats.agilityLevel ?? 1;
+            const dex = characterRecord.dexLevel ?? stats.dexLevel ?? 1;
+            const con = characterRecord.conLevel ?? stats.conLevel ?? 1;
+            const wis = characterRecord.wisLevel ?? stats.wisLevel ?? 1;
+            const spr = characterRecord.sprLevel ?? stats.sprLevel ?? 1;
+            const totalStatLevel = str + end + agi + dex + con + wis + spr;
+            if (totalStatLevel < reqs.totalStatLevel) {
+              return {
+                ok: false as const,
+                statusCode: 400,
+                error: `Requires total Stat Level ${reqs.totalStatLevel} (currently ${totalStatLevel}/${reqs.totalStatLevel}).`,
+              };
+            }
+          }
+
+          // 4. Validate reqs.dungeonClears
+          if (typeof reqs.dungeonClears === 'number' && reqs.dungeonClears > 0) {
+            let dungeonClears = 0;
+            const dungeonClearWhere = {
+              characterId,
+              dungeonRun: {
+                OR: [
+                  { status: 'COMPLETED' as any, wasSuccessful: true },
+                  { status: 'COMPLETED' as any },
+                  { status: 'VICTORY' as any },
+                ],
+              },
+            };
+            if (typeof (tx as any).dungeonRunParticipant?.count === 'function') {
+              dungeonClears = await tx.dungeonRunParticipant.count({
+                where: dungeonClearWhere,
+              });
+            } else if (typeof (tx as any).dungeonRunParticipant?.findMany === 'function') {
+              const parts = await tx.dungeonRunParticipant.findMany({
+                where: { characterId },
+                include: { dungeonRun: true },
+              });
+              dungeonClears = parts.filter((p: any) => {
+                const st = p.dungeonRun?.status ?? p.status;
+                const won = p.dungeonRun?.wasSuccessful;
+                return (st === 'COMPLETED' && won !== false) || st === 'VICTORY';
+              }).length;
+            } else if (typeof (tx as any).dungeonRun?.count === 'function') {
+              dungeonClears = await tx.dungeonRun.count({
+                where: {
+                  participants: { some: { characterId } },
+                  status: 'COMPLETED',
+                },
+              });
+            }
+            if (dungeonClears < reqs.dungeonClears) {
+              return {
+                ok: false as const,
+                statusCode: 400,
+                error: `Complete at least ${reqs.dungeonClears} victorious Dungeon Expeditions first (currently ${dungeonClears}/${reqs.dungeonClears}).`,
+              };
+            }
+          }
+
+          // 5. Validate reqs.zone2Minutes
+          if (typeof reqs.zone2Minutes === 'number' && reqs.zone2Minutes > 0) {
+            let totalZone2Minutes = 0;
+            if (typeof (tx as any).workoutLog?.findMany === 'function') {
+              const logs = await tx.workoutLog.findMany({
+                where: isIronmanBounty
+                  ? { characterId, isHardwareVerified: true }
+                  : { characterId },
+              });
+              for (const log of logs) {
+                const zone = log.averageHrZone ?? 0;
+                const isCardioLog =
+                  zone >= 2 ||
+                  log.workoutType === 'CARDIO_LOW_MOD' ||
+                  log.workoutType === 'CARDIO_HIGH_INTENSITY' ||
+                  log.workoutCategory === 'CARDIO';
+                if (isCardioLog && (zone === 0 || zone >= 2)) {
+                  totalZone2Minutes += Math.floor((log.durationSeconds ?? 0) / 60);
+                }
+              }
+            }
+            if (totalZone2Minutes < reqs.zone2Minutes) {
+              return {
+                ok: false as const,
+                statusCode: 400,
+                error: `Log at least ${reqs.zone2Minutes} minutes of HR Zone 2+ cardio training first (currently ${totalZone2Minutes}/${reqs.zone2Minutes} min).`,
+              };
+            }
+          }
+
+          await tx.characterBountyCompletion.create({
+            data: { characterId, bountyId: bounty.id },
+          });
+
+          const updatedCharacter = await tx.character.update({
+            where: { id: characterId },
+            data: {
+              gold: { increment: bounty.goldReward },
+              adventurerReputation: { increment: bounty.reputationReward },
+              ...(bounty.isRankUpTrial && bounty.unlocksRank
+                ? { adventurerRank: bounty.unlocksRank }
+                : {}),
+            },
+          });
+
+          return { ok: true as const, character: updatedCharacter, bounty };
+        },
+        `bounty:${characterId}:${bounty.id}`
+      );
+    } catch (err) {
+      if (isPrismaUniqueConstraintError(err)) {
+        return reply.status(409).send({ error: 'Bounty already completed by this character.' });
       }
+      throw err;
     }
 
-    await db.characterBountyCompletion.create({
-      data: { characterId, bountyId: bounty.id },
-    });
+    if (!txResult.ok) {
+      return reply.status(txResult.statusCode).send({ error: txResult.error });
+    }
 
-    const updatedCharacter = await db.character.update({
-      where: { id: characterId },
-      data: {
-        gold: { increment: bounty.goldReward },
-        adventurerReputation: { increment: bounty.reputationReward },
-        ...(bounty.isRankUpTrial && bounty.unlocksRank
-          ? { adventurerRank: bounty.unlocksRank }
-          : {}),
-      },
-    });
-
-    return reply.send({ character: updatedCharacter, bounty });
+    return reply.send({ character: txResult.character, bounty: txResult.bounty });
   });
 
   // List Active 7-Day Boss Raids (Public World & Guild-Only)
@@ -167,10 +348,23 @@ export function registerGuildAndRaidRoutes(
   });
 
   // Spawn a 7-Day Raid Boss Instance (Public World or Guild-Only) & Schedule 7d BullMQ Rollover
-  app.post('/api/raids', async (request, reply) => {
+  app.post('/api/raids', { preHandler: [requireAuth] }, async (request, reply) => {
     const body = spawnRaidSchema.parse(request.body);
     if (body.accessType === 'GUILD_ONLY' && !body.guildId) {
       return reply.status(400).send({ error: 'GUILD_ONLY raid requires a guildId.' });
+    }
+    if (body.guildId && typeof (db as any).guildMember?.findFirst === 'function') {
+      const member = await db.guildMember.findFirst({
+        where: {
+          guildId: body.guildId,
+          character: { userId: request.user.userId, deletedAt: null },
+        },
+      });
+      if (!member) {
+        return reply.status(403).send({
+          error: 'Forbidden: You must have an active character in this guild to spawn a guild raid.',
+        });
+      }
     }
 
     const startsAt = new Date();
@@ -212,113 +406,152 @@ export function registerGuildAndRaidRoutes(
   });
 
   // Lock in a Daily Combat Strike against an active 7-Day Raid Boss
-  app.post('/api/raids/:raidId/attack', async (request, reply) => {
+  app.post('/api/raids/:raidId/attack', { preHandler: [requireAuth] }, async (request, reply) => {
     const { raidId } = z.object({ raidId: z.string() }).parse(request.params);
     const { characterId } = z.object({ characterId: z.string() }).parse(request.body);
+    await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
-    const raid = await db.raidBossInstance.findUnique({ where: { id: raidId } });
-    if (!raid) {
-      return reply.status(404).send({ error: 'Raid Boss instance not found.' });
-    }
-    if (raid.status !== 'ACTIVE' && raid.status !== 'DEFEATED') {
-      return reply.status(400).send({ error: `Raid is ${raid.status}.` });
-    }
+    const txResult = await withDbTransaction(
+      db,
+      async (tx) => {
+        const raid = await tx.raidBossInstance.findUnique({ where: { id: raidId } });
+        if (!raid) {
+          return { ok: false as const, statusCode: 404, error: 'Raid Boss instance not found.' };
+        }
+        if (raid.status !== 'ACTIVE' && raid.status !== 'DEFEATED') {
+          return { ok: false as const, statusCode: 400, error: `Raid is ${raid.status}.` };
+        }
 
-    const character = await db.character.findUnique({
-      where: { id: characterId },
-      include: {
-        stats: true,
-        guildMembership: true,
-        talentUnlocks: { include: { talentNode: true } },
+        const character = await tx.character.findUnique({
+          where: { id: characterId },
+          include: {
+            stats: true,
+            guildMembership: true,
+            talentUnlocks: { include: { talentNode: true } },
+          },
+        });
+        if (!character || !character.stats) {
+          return { ok: false as const, statusCode: 404, error: 'Character not found.' };
+        }
+
+        if (
+          raid.accessType === 'GUILD_ONLY' &&
+          character.guildMembership?.guildId !== raid.guildId
+        ) {
+          return {
+            ok: false as const,
+            statusCode: 403,
+            error: 'This is a private Guild-Only Raid Boss.',
+          };
+        }
+
+        const existingContrib = await tx.raidParticipantContribution.findUnique({
+          where: { raidInstanceId_characterId: { raidInstanceId: raid.id, characterId } },
+        });
+
+        // Enforce 1 daily combat lock-in per UTC calendar day
+        const todayKey = new Date().toISOString().slice(0, 10);
+        if (
+          existingContrib?.lastAttackAt &&
+          existingContrib.lastAttackAt.toISOString().slice(0, 10) === todayKey
+        ) {
+          return {
+            ok: false as const,
+            statusCode: 400,
+            error:
+              'Daily combat attack already locked in today. Log real-world workouts to channel bonus energy!',
+          };
+        }
+
+        const unlockedRanks: Record<string, number> = {};
+        for (const u of character.talentUnlocks ?? []) {
+          if (u.talentNode?.slug) {
+            unlockedRanks[u.talentNode.slug] = u.currentRank;
+          }
+        }
+        const talents = aggregateTalentModifiers(unlockedRanks);
+
+        // Compute Daily Strike Damage & Warden/Juggernaut Support Score from character power
+        const baseStrike =
+          character.stats.strengthLevel * 4_200 +
+          character.stats.agilityLevel * 3_800 +
+          character.stats.enduranceLevel * 2_200;
+        const combatDamage = Math.round(
+          baseStrike * (1 + talents.meleePowerPct + talents.attackSpeedPct * 0.6)
+        );
+        const supportScore = Math.round(
+          character.stats.enduranceLevel *
+            1_500 *
+            (1 + talents.partyDamageMitigationPct * 3 + talents.healingPowerPct)
+        );
+
+        const dmgBig = BigInt(combatDamage);
+        const supBig = BigInt(supportScore);
+        const totalScoreDelta = dmgBig + supBig;
+        const safeCurrentHp = raid.currentHp > 0n ? raid.currentHp : 0n;
+        const nextHp = safeCurrentHp > dmgBig ? safeCurrentHp - dmgBig : 0n;
+
+        const updatedRaid = await tx.raidBossInstance.update({
+          where: { id: raid.id },
+          data: {
+            currentHp: nextHp,
+            totalRaidDamage: { increment: dmgBig },
+            isDefeated: nextHp === 0n,
+            status: nextHp === 0n ? 'DEFEATED' : raid.status,
+          },
+        });
+
+        const contribution = await tx.raidParticipantContribution.upsert({
+          where: { raidInstanceId_characterId: { raidInstanceId: raid.id, characterId } },
+          update: {
+            combatDamageDealt: { increment: dmgBig },
+            supportScore: { increment: supBig },
+            totalContributionScore: { increment: totalScoreDelta },
+            dailyAttacksUsed: { increment: 1 },
+            lastAttackAt: new Date(),
+          },
+          create: {
+            raidInstanceId: raid.id,
+            characterId,
+            combatDamageDealt: dmgBig,
+            supportScore: supBig,
+            totalContributionScore: totalScoreDelta,
+            dailyAttacksUsed: 1,
+            lastAttackAt: new Date(),
+          },
+        });
+
+        return {
+          ok: true as const,
+          raid,
+          character,
+          combatDamage,
+          supportScore,
+          nextHp,
+          updatedRaid,
+          contribution,
+        };
       },
-    });
-    if (!character || !character.stats) {
-      return reply.status(404).send({ error: 'Character not found.' });
-    }
-
-    if (
-      raid.accessType === 'GUILD_ONLY' &&
-      character.guildMembership?.guildId !== raid.guildId
-    ) {
-      return reply.status(403).send({
-        error: 'This is a private Guild-Only Raid Boss.',
-      });
-    }
-
-    const existingContrib = await db.raidParticipantContribution.findUnique({
-      where: { raidInstanceId_characterId: { raidInstanceId: raid.id, characterId } },
-    });
-
-    // Enforce 1 daily combat lock-in per UTC calendar day
-    const todayKey = new Date().toISOString().slice(0, 10);
-    if (
-      existingContrib?.lastAttackAt &&
-      existingContrib.lastAttackAt.toISOString().slice(0, 10) === todayKey
-    ) {
-      return reply.status(400).send({
-        error: 'Daily combat attack already locked in today. Log real-world workouts to channel bonus energy!',
-      });
-    }
-
-    const unlockedRanks: Record<string, number> = {};
-    for (const u of character.talentUnlocks) {
-      unlockedRanks[u.talentNode.slug] = u.currentRank;
-    }
-    const talents = aggregateTalentModifiers(unlockedRanks);
-
-    // Compute Daily Strike Damage & Warden/Juggernaut Support Score from character power
-    const baseStrike =
-      character.stats.strengthLevel * 4_200 +
-      character.stats.agilityLevel * 3_800 +
-      character.stats.enduranceLevel * 2_200;
-    const combatDamage = Math.round(
-      baseStrike * (1 + talents.meleePowerPct + talents.attackSpeedPct * 0.6)
+      `raid:${raidId}`
     );
-    const supportScore = Math.round(
-      character.stats.enduranceLevel * 1_500 * (1 + talents.partyDamageMitigationPct * 3 + talents.healingPowerPct)
-    );
 
-    const dmgBig = BigInt(combatDamage);
-    const supBig = BigInt(supportScore);
-    const totalScoreDelta = dmgBig + supBig;
-    const nextHp = raid.currentHp > dmgBig ? raid.currentHp - dmgBig : 0n;
+    if (!txResult.ok) {
+      return reply.status(txResult.statusCode).send({ error: txResult.error });
+    }
 
-    const updatedRaid = await db.raidBossInstance.update({
-      where: { id: raid.id },
-      data: {
-        currentHp: nextHp,
-        totalRaidDamage: { increment: dmgBig },
-        isDefeated: nextHp === 0n,
-        status: nextHp === 0n ? 'DEFEATED' : raid.status,
-      },
-    });
-
-    const contribution = await db.raidParticipantContribution.upsert({
-      where: { raidInstanceId_characterId: { raidInstanceId: raid.id, characterId } },
-      update: {
-        combatDamageDealt: { increment: dmgBig },
-        supportScore: { increment: supBig },
-        totalContributionScore: { increment: totalScoreDelta },
-        dailyAttacksUsed: { increment: 1 },
-        lastAttackAt: new Date(),
-      },
-      create: {
-        raidInstanceId: raid.id,
-        characterId,
-        combatDamageDealt: dmgBig,
-        supportScore: supBig,
-        totalContributionScore: totalScoreDelta,
-        dailyAttacksUsed: 1,
-        lastAttackAt: new Date(),
-      },
-    });
+    const { raid, character, combatDamage, supportScore, nextHp, updatedRaid, contribution } =
+      txResult;
 
     // Real-Time WebSocket Multicast to all athletes viewing this raid encounter
+    const safeBigIntValue = (val: bigint): number | string => {
+      const num = Number(val);
+      return Number.isSafeInteger(num) ? num : val.toString();
+    };
     const raidHpEvent = {
       type: 'RAID_HP_UPDATE' as const,
       raidId: raid.id,
-      currentHp: Number(nextHp),
-      maxHp: Number(raid.maxHp),
+      currentHp: safeBigIntValue(nextHp),
+      maxHp: safeBigIntValue(raid.maxHp),
       isDefeated: nextHp === 0n,
       attacker: {
         characterId: character.id,
@@ -340,8 +573,20 @@ export function registerGuildAndRaidRoutes(
   });
 
   // Resolve 7-Day Raid Boss Rollover & Distribute Tiered Rewards
-  app.post('/api/raids/:raidId/resolve', async (request, reply) => {
+  app.post('/api/raids/:raidId/resolve', { preHandler: [requireAuth] }, async (request, reply) => {
     const { raidId } = z.object({ raidId: z.string() }).parse(request.params);
+    const isProd = (process.env.NODE_ENV || env.NODE_ENV) === 'production';
+    if (isProd) {
+      const raid = await db.raidBossInstance.findUnique({ where: { id: raidId } });
+      if (!raid) {
+        return reply.status(404).send({ error: 'Raid Boss instance not found.' });
+      }
+      if (raid.endsAt && raid.endsAt.getTime() > Date.now() && !raid.isDefeated) {
+        return reply.status(403).send({
+          error: 'Forbidden: Raid rollover cannot be forced before expiry in production.',
+        });
+      }
+    }
     const resolution = await resolveRaidBossRolloverOperation(db, raidId);
     return reply.send({ resolution });
   });

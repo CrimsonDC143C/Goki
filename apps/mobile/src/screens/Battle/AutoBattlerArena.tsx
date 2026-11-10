@@ -207,6 +207,8 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
   const [isPlaying, setIsPlaying] = useState(true);
   const [speedMultiplier, setSpeedMultiplier] = useState<1 | 2 | 4>(1);
   const [resolvedImpactCursor, setResolvedImpactCursor] = useState<number>(-1);
+  const resolvedImpactCursorRef = useRef<number>(-1);
+  resolvedImpactCursorRef.current = resolvedImpactCursor;
 
   // Combat animation states (per-unit dictionaries & target tracking)
   const [heroAnimStates, setHeroAnimStates] = useState<Record<string, AnimationState>>({});
@@ -232,21 +234,25 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
   // Fanfare modal & spoils reveal state
   const [fanfareModalVisible, setFanfareModalVisible] = useState(false);
   const [revealedIndices, setRevealedIndices] = useState<number[]>([]);
-  const hasTriggeredFanfareRef = useRef(false);
+  const hasPlayedOutcomeCueRef = useRef(false);
 
   useEffect(() => {
-    hasTriggeredFanfareRef.current = false;
+    hasPlayedOutcomeCueRef.current = false;
     setRevealedIndices([]);
     setFanfareModalVisible(false);
   }, [replay?.seed]);
 
   useEffect(() => {
     if (!replay || replay.events.length === 0) return;
-    if (cursorIndex >= replay.events.length - 1 && !hasTriggeredFanfareRef.current) {
-      hasTriggeredFanfareRef.current = true;
+    if (cursorIndex >= replay.events.length - 1 && !hasPlayedOutcomeCueRef.current) {
+      hasPlayedOutcomeCueRef.current = true;
       setFanfareModalVisible(true);
-      triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
-      void audioManager.playSound('level-up');
+      if (replay.outcome === 'VICTORY') {
+        triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
+        void audioManager.playSound('level-up');
+      } else {
+        void audioManager.playSound('enemy-damage');
+      }
     }
   }, [cursorIndex, replay]);
 
@@ -300,6 +306,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
   }, []);
 
   // Dual-driver arena motion adapter (Reanimated UI-thread when available, 60fps NativeDriver fallback)
+  const motionDriver = useArenaMotionDriver();
   const {
     heroTransformStyle,
     enemyLungeStyle,
@@ -312,7 +319,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
     triggerEnemyApproach,
     triggerHeroFloat,
     triggerEnemyFloat,
-  } = useArenaMotionDriver();
+  } = motionDriver;
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const width = Math.round(e.nativeEvent.layout.width);
@@ -616,7 +623,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
 
   // React to combat events for lunge, hit-flash, floating text, and audio SFX
   useEffect(() => {
-    if (!currentEvent || !replay) return;
+    if (!isPlaying || !currentEvent || !replay) return;
 
     const eventKey = `${replay.seed}:${cursorIndex}`;
     if (lastProcessedEventKeyRef.current === eventKey) return;
@@ -625,8 +632,10 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
     const currentSpeed = speedMultiplierRef.current;
     const leadHeroId = stageStateRef.current.heroes[0]?.id ?? null;
 
-    let impactTimer: ReturnType<typeof setTimeout> | null = null;
-    let hitFlashTimeout: ReturnType<typeof setTimeout> | null = null;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const cleanup = () => {
+      timers.forEach(clearTimeout);
+    };
 
     if (isTwoPhaseStrikeEvent(currentEvent, replay)) {
       setHeroFloatingText(null);
@@ -637,7 +646,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
     setActiveTargetId(currentEvent.targetId ?? null);
 
     if (currentEvent.type === 'EXPEDITION_START') {
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'WORKOUT_BUFF_ACTIVE') {
@@ -646,12 +655,12 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       setHeroFloatingColor(COLORS.gold);
       triggerHeroFloat(-34, Math.max(160, Math.round(400 / currentSpeed)));
       void audioManager.playSound('level-up');
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'ROOM_ENTER') {
       triggerWaveTransition();
-      return;
+      return cleanup;
     }
 
     if (isSupportSkillCast(currentEvent, replay)) {
@@ -666,7 +675,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
         triggerHeroFloat(-34, Math.max(160, Math.round(400 / currentSpeed)));
         void audioManager.playSound('level-up');
       }
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'ROOM_CLEARED') {
@@ -676,7 +685,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
         setHeroFloatingColor(COLORS.gold);
         triggerHeroFloat(-34, Math.max(160, Math.round(400 / currentSpeed)));
       }
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'LOOT_DROP') {
@@ -688,7 +697,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       setHeroFloatingColor(COLORS.gold);
       triggerHeroFloat(-34, Math.max(180, Math.round(450 / currentSpeed)));
       void audioManager.playSound('level-up');
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'SHIELD_APPLIED' && currentEvent.targetId && currentEvent.amount) {
@@ -696,7 +705,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       setHeroFloatingText(`+${currentEvent.amount} SHIELD`);
       setHeroFloatingColor(COLORS.shieldCyan);
       triggerHeroFloat(-34, 320);
-      return;
+      return cleanup;
     }
 
     if (
@@ -708,7 +717,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       setHeroFloatingText(`+${currentEvent.amount} HP`);
       setHeroFloatingColor(COLORS.success);
       triggerHeroFloat(-34, 320);
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'BOSS_PHASE_SHIFT') {
@@ -719,7 +728,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       setEnemyFloatingColor(COLORS.strength);
       triggerEnemyFloat(-34, 380);
       void audioManager.playSound('critical-hit');
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'HAZARD_RESOLVED') {
@@ -736,11 +745,11 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
           triggerHeroFloat(-34, Math.max(140, Math.round(340 / currentSpeed)));
 
           triggerHeroUnitAnim(currentEvent.targetId, isDeadlyBlow ? 'death' : 'hurt');
-          hitFlashTimeout = setTimeout(() => setHeroHitFlash(false), 90);
+          timers.push(setTimeout(() => setHeroHitFlash(false), 90));
         }
       }
       void audioManager.playSound('enemy-damage');
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'BLEED_TICK') {
@@ -755,7 +764,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
         setHeroFloatingColor(COLORS.danger);
         triggerHeroFloat(-34, Math.max(140, Math.round(340 / currentSpeed)));
         triggerHeroUnitAnim(currentEvent.targetId, isDeadlyBlow ? 'death' : 'hurt');
-        hitFlashTimeout = setTimeout(() => setHeroHitFlash(false), 90);
+        timers.push(setTimeout(() => setHeroHitFlash(false), 90));
       } else if (currentEvent.targetId) {
         setEnemyFloatingTargetId(currentEvent.targetId);
         setEnemyHitFlash(true);
@@ -763,10 +772,10 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
         setEnemyFloatingColor(COLORS.danger);
         triggerEnemyFloat(-34, Math.max(140, Math.round(340 / currentSpeed)));
         triggerEnemyUnitAnim(currentEvent.targetId, isDeadlyBlow ? 'death' : 'hurt');
-        hitFlashTimeout = setTimeout(() => setEnemyHitFlash(false), 90);
+        timers.push(setTimeout(() => setEnemyHitFlash(false), 90));
       }
       void audioManager.playSound('enemy-damage');
-      return;
+      return cleanup;
     }
 
     // Two-phase strike events (BASIC_ATTACK, offensive SKILL_CAST, DODGE)
@@ -795,7 +804,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       }
 
       // Phase 2 — Scheduled at t = impactDelayMs (Weapon Impact Moment!)
-      impactTimer = setTimeout(() => {
+      const impactTimer = setTimeout(() => {
         setResolvedImpactCursor(cursorIndex);
 
         if (currentEvent.type === 'DODGE') {
@@ -831,7 +840,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
             setHeroFloatingColor(COLORS.danger);
             triggerHeroFloat(-34, Math.max(160, Math.round(420 / currentSpeed)));
             triggerHeroUnitAnim(currentEvent.targetId, isDeadlyBlow ? 'death' : 'hurt');
-            hitFlashTimeout = setTimeout(() => setHeroHitFlash(false), 90);
+            timers.push(setTimeout(() => setHeroHitFlash(false), 90));
           } else {
             setEnemyFloatingTargetId(currentEvent.targetId);
             setEnemyHitFlash(true);
@@ -849,7 +858,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
             setEnemyFloatingColor(color);
             triggerEnemyFloat(-34, Math.max(160, Math.round(420 / currentSpeed)));
             triggerEnemyUnitAnim(currentEvent.targetId, isDeadlyBlow ? 'death' : 'hurt');
-            hitFlashTimeout = setTimeout(() => setEnemyHitFlash(false), 90);
+            timers.push(setTimeout(() => setEnemyHitFlash(false), 90));
           }
         }
 
@@ -861,7 +870,13 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
           void audioManager.playSound('enemy-damage');
         }
       }, impactDelayMs);
-      return;
+      timers.push(impactTimer);
+      return () => {
+        if (resolvedImpactCursorRef.current < cursorIndex) {
+          lastProcessedEventKeyRef.current = '';
+        }
+        cleanup();
+      };
     }
 
     if (currentEvent.type === 'UNIT_DEFEATED' && currentEvent.targetId) {
@@ -876,7 +891,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
           triggerEnemyUnitAnim(currentEvent.targetId, 'death');
         }
       }
-      return;
+      return cleanup;
     }
 
     if (currentEvent.type === 'EXPEDITION_END') {
@@ -893,15 +908,9 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       }
     }
 
-    return () => {
-      if (impactTimer) {
-        clearTimeout(impactTimer);
-      }
-      if (hitFlashTimeout) {
-        clearTimeout(hitFlashTimeout);
-      }
-    };
+    return cleanup;
   }, [
+    isPlaying,
     currentEvent,
     cursorIndex,
     replay,
@@ -1406,7 +1415,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                   setHeroActionKeys({});
                   setEnemyAnimStates({});
                   setEnemyActionKeys({});
-                  hasTriggeredFanfareRef.current = false;
+                  hasPlayedOutcomeCueRef.current = false;
                   setRevealedIndices([]);
                   setFanfareModalVisible(false);
                 } else {
@@ -1426,6 +1435,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
             <Pressable
               style={styles.controlBtnSecondary}
               onPress={() => {
+                motionDriver.cancelAll();
                 setIsPlaying(false);
                 setIsWaveTransition(false);
                 setResolvedImpactCursor(replay.events.length - 1);
@@ -1435,8 +1445,6 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                 setEnemyFloatingText(null);
                 setCursorIndex(replay.events.length - 1);
                 setFanfareModalVisible(true);
-                triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
-                void audioManager.playSound('level-up');
               }}
             >
               <Text style={styles.controlBtnSecondaryText}>⏭ Skip to End</Text>

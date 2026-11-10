@@ -38,13 +38,17 @@ export async function initializeRestNotifications(): Promise<void> {
 
   if (!handlerInitialized) {
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-        priority: Notifications.AndroidNotificationPriority.MAX,
-      }),
+      handleNotification: async () => {
+        const isForeground = AppState.currentState === 'active';
+        return {
+          shouldShowAlert: !isForeground,
+          shouldShowBanner: !isForeground,
+          shouldShowList: !isForeground,
+          shouldPlaySound: !isForeground,
+          shouldSetBadge: false,
+          priority: Notifications.AndroidNotificationPriority.MAX,
+        };
+      },
     });
     handlerInitialized = true;
   }

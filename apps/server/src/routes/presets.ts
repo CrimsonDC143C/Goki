@@ -1,6 +1,7 @@
 import { PrismaClient } from '@goki/database';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { optionalAuth, requireAuth } from '../middleware/auth';
 
 const workoutCategoryEnum = z.enum(['GYM', 'CARDIO', 'SPORT', 'RECOVERY']);
 const setTypeEnum = z.enum(['NORMAL', 'WARMUP', 'DROP_SET', 'FAILURE', 'AMRAP']);
@@ -55,26 +56,32 @@ const upsertPresetSchema = z.object({
  * these routes let the server mirror and sync them when connectivity is available.
  */
 export function registerPresetRoutes(app: FastifyInstance, db: PrismaClient): void {
-  app.get('/api/workout-presets', async (request, reply) => {
+  app.get('/api/workout-presets', { preHandler: [optionalAuth] }, async (request, reply) => {
     const query = z
       .object({ userId: z.string().optional(), category: workoutCategoryEnum.optional() })
       .parse(request.query);
 
+    const authUserId = request.user?.userId;
+
     const presets = await db.workoutPreset.findMany({
       where: {
         ...(query.category ? { category: query.category } : {}),
-        OR: [{ isSystemSeed: true }, ...(query.userId ? [{ userId: query.userId }] : [])],
+        OR: [
+          { isSystemSeed: true },
+          { userId: null },
+          ...(authUserId ? [{ userId: authUserId }] : []),
+        ],
       },
       orderBy: [{ isSystemSeed: 'desc' }, { updatedAt: 'desc' }],
     });
     return reply.send({ presets });
   });
 
-  app.post('/api/workout-presets', async (request, reply) => {
+  app.post('/api/workout-presets', { preHandler: [requireAuth] }, async (request, reply) => {
     const body = upsertPresetSchema.parse(request.body);
     const preset = await db.workoutPreset.create({
       data: {
-        userId: body.userId ?? null,
+        userId: request.user.userId,
         name: body.name,
         category: body.category,
         notes: body.notes ?? null,
@@ -85,7 +92,7 @@ export function registerPresetRoutes(app: FastifyInstance, db: PrismaClient): vo
     return reply.status(201).send({ preset });
   });
 
-  app.put('/api/workout-presets/:presetId', async (request, reply) => {
+  app.put('/api/workout-presets/:presetId', { preHandler: [requireAuth] }, async (request, reply) => {
     const { presetId } = z.object({ presetId: z.string() }).parse(request.params);
     const body = upsertPresetSchema.parse(request.body);
 
@@ -93,10 +100,10 @@ export function registerPresetRoutes(app: FastifyInstance, db: PrismaClient): vo
     if (!existing) {
       return reply.status(404).send({ error: 'Preset not found.' });
     }
-    if (existing.isSystemSeed) {
+    if (existing.isSystemSeed || existing.userId !== request.user.userId) {
       return reply
         .status(403)
-        .send({ error: 'System starter presets are read-only. Save a copy instead.' });
+        .send({ error: 'Forbidden: You do not own this workout preset.' });
     }
 
     const preset = await db.workoutPreset.update({
@@ -111,14 +118,14 @@ export function registerPresetRoutes(app: FastifyInstance, db: PrismaClient): vo
     return reply.send({ preset });
   });
 
-  app.delete('/api/workout-presets/:presetId', async (request, reply) => {
+  app.delete('/api/workout-presets/:presetId', { preHandler: [requireAuth] }, async (request, reply) => {
     const { presetId } = z.object({ presetId: z.string() }).parse(request.params);
     const existing = await db.workoutPreset.findUnique({ where: { id: presetId } });
     if (!existing) {
       return reply.status(404).send({ error: 'Preset not found.' });
     }
-    if (existing.isSystemSeed) {
-      return reply.status(403).send({ error: 'System starter presets cannot be deleted.' });
+    if (existing.isSystemSeed || existing.userId !== request.user.userId) {
+      return reply.status(403).send({ error: 'Forbidden: You do not own this workout preset.' });
     }
     await db.workoutPreset.delete({ where: { id: presetId } });
     return reply.status(204).send();

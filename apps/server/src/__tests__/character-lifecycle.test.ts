@@ -54,7 +54,13 @@ describe('Character Lifecycle & Restoration API', () => {
         findFirst: async ({ where }: any) => {
           return (
             memoryCharacters.find((c) => {
-              if (where?.name && c.name.toLowerCase() !== where.name.toLowerCase()) return false;
+              const targetName =
+                typeof where?.name === 'string'
+                  ? where.name
+                  : typeof where?.name?.equals === 'string'
+                    ? where.name.equals
+                    : null;
+              if (targetName && c.name.toLowerCase() !== targetName.toLowerCase()) return false;
               if (where?.deletedAt === null && c.deletedAt !== null && c.deletedAt !== undefined) return false;
               if (where?.NOT?.deletedAt === null && (c.deletedAt === null || c.deletedAt === undefined)) return false;
               if (where?.id?.not && c.id === where.id.not) return false;
@@ -413,7 +419,7 @@ describe('Character Lifecycle & Restoration API', () => {
     const app = await buildServerApp({ db: mockDb });
     const token = app.jwt.sign({ userId: testUser.id, email: testUser.email, username: testUser.username });
 
-    // Create a hero with dexLevel: 2 (giving 2 talent points for DEXTERITY)
+    // Create a hero with dexLevel: 3 (giving 3 - 1 = 2 talent points for DEXTERITY; Level 1 stats have 0 unearned points)
     const char = {
       id: 'char_dex_rogue',
       userId: testUser.id,
@@ -421,7 +427,7 @@ describe('Character Lifecycle & Restoration API', () => {
       gameMode: 'STANDARD',
       appearanceId: 'shadow_dancer',
       deletedAt: null,
-      dexLevel: 2,
+      dexLevel: 3,
       conLevel: 1,
       wisLevel: 1,
       sprLevel: 1,
@@ -437,6 +443,16 @@ describe('Character Lifecycle & Restoration API', () => {
       equipmentLoadout: {},
     };
     memoryCharacters.push(char);
+
+    // Verify Level-1 CON/WIS/SPR have 0 available talent points (rejected with 400)
+    const conRes = await app.inject({
+      method: 'POST',
+      url: `/api/characters/${char.id}/talents/unlock`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { nodeSlug: 'grd_iron_fortitude' },
+    });
+    expect(conRes.statusCode).toBe(400);
+    expect(conRes.json().error).toMatch(/points/i);
 
     // 1st unlock: Acrobat Tier 1 node 'acro_feather_step' (costs 1 point) -> Should succeed (newRank: 1)
     const res1 = await app.inject({
@@ -464,7 +480,7 @@ describe('Character Lifecycle & Restoration API', () => {
     expect(memoryTalentUnlocks[0].currentRank).toBe(2);
     expect(memoryTalentUnlocks[0].pointsSpent).toBe(2);
 
-    // 3rd unlock: Total spent is now 2, dexLevel is 2, so available DEXTERITY points is 0 -> Should fail with 400!
+    // 3rd unlock: Total spent is now 2, dexLevel is 3 (2 points earned above Lv.1), so available DEXTERITY points is 0 -> Should fail with 400!
     const res3 = await app.inject({
       method: 'POST',
       url: `/api/characters/${char.id}/talents/unlock`,

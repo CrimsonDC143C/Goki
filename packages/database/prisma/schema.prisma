@@ -41,32 +41,6 @@ enum StatType {
   SPIRIT
 }
 
-enum ActivityType {
-  CALISTHENICS
-  ROCK_CLIMBING
-  SLEEP
-  STEPS
-  YOGA
-  PILATES
-  MEDITATION
-  BREATHWORK
-  SAUNA
-  COLD_PLUNGE
-}
-
-enum WorkoutModality {
-  CALISTHENICS
-  ROCK_CLIMBING
-  SLEEP
-  STEPS
-  YOGA
-  PILATES
-  MEDITATION
-  BREATHWORK
-  SAUNA
-  COLD_PLUNGE
-}
-
 enum AdventurerRank {
   COPPER
   IRON
@@ -315,6 +289,8 @@ model Character {
   bountyCompletions     CharacterBountyCompletion[]
   raidContributions     RaidParticipantContribution[]
 
+  // Partial Unique Index enforced via SQL migration (20261110_active_character_mode_unique):
+  // CREATE UNIQUE INDEX IF NOT EXISTS "Character_userId_gameMode_active_key" ON "Character"("userId", "gameMode") WHERE "deletedAt" IS NULL;
   @@index([userId, gameMode, deletedAt])
   @@index([adventurerRank])
 }

@@ -16,6 +16,7 @@ import {
   countWorkoutsForCharacter,
   pruneTrainingHistory,
   rebuildHistoricalPRsFromWorkouts,
+  createDefaultSampleWorkoutHistory,
   DEFAULT_SAMPLE_WORKOUT_HISTORY,
   CompletedWorkoutRecord,
   CompletedSetEntry,
@@ -649,6 +650,85 @@ describe('Training History Tracker', () => {
       // Falls back to 80kg x 8 -> 101.33
       expect(prsAfter.bench_press?.bestE1RM).toBeCloseTo(101.33, 1);
       expect(prsAfter.cable_face_pulls).toBeUndefined();
+    });
+
+    it('normalizes gym aliases, preserves hybrid workouts with cardioEntries when stripping resistance exercises, and retains LBS weight brackets + cardio PRs on rebuild', () => {
+      // 135 lbs in kg via lbsToKg(135) is 61.235 kg -> formatWeightBracketKey(61.235) === '61.0'
+      const hybridWorkout: CompletedWorkoutRecord = {
+        id: 'wk_hybrid_sanctum',
+        characterId: 'char_hybrid',
+        gymId: 'gym_iron_sanctum', // Geofence alias for 'iron-sanctum'
+        gymName: 'Iron Sanctum Barbell Club',
+        source: 'ONLINE',
+        performedAtIso: new Date(fixedNowMs - 1 * DAY_MS).toISOString(),
+        durationSeconds: 3600,
+        workoutCategory: 'SPORT',
+        exercises: [
+          {
+            exerciseId: 'bench_press',
+            exerciseName: 'Bench Press',
+            sets: [
+              { weightKg: 61.235, reps: 10, setType: 'NORMAL' },
+              { weightKg: 100, reps: 1, setType: 'NORMAL' },
+            ],
+          },
+        ],
+        cardioEntries: [
+          {
+            exerciseId: 'boxing_session',
+            exerciseName: 'Boxing Session',
+            activityType: 'boxing',
+            durationSeconds: 1800,
+            averageHrZone: 4,
+          },
+        ],
+      };
+
+      // 1. Gym alias matching: filtering by 'iron-sanctum' matches 'gym_iron_sanctum'
+      const gymPrunePreview = pruneTrainingHistory(
+        [hybridWorkout],
+        { gymId: 'iron-sanctum' },
+        fixedNowMs
+      );
+      expect(gymPrunePreview.removedSessionsCount).toBe(1);
+
+      // 2. STRIP_EXERCISE on 'bench_press' keeps the hybrid workout alive because cardioEntries is non-empty!
+      const strippedResistance = pruneTrainingHistory(
+        [hybridWorkout],
+        { exerciseId: 'bench_press', exercisePruneMode: 'STRIP_EXERCISE' },
+        fixedNowMs
+      );
+      expect(strippedResistance.removedSessionsCount).toBe(0);
+      expect(strippedResistance.modifiedSessionsCount).toBe(1);
+      expect(strippedResistance.remainingWorkouts).toHaveLength(1);
+      expect(strippedResistance.remainingWorkouts[0]?.exercises).toHaveLength(0);
+      expect(strippedResistance.remainingWorkouts[0]?.cardioEntries).toHaveLength(1);
+
+      // 3. Stripping the remaining cardio activity removes the workout when both become empty
+      const strippedCardio = pruneTrainingHistory(
+        strippedResistance.remainingWorkouts,
+        { exerciseId: 'boxing_session', exercisePruneMode: 'STRIP_EXERCISE' },
+        fixedNowMs
+      );
+      expect(strippedCardio.removedSessionsCount).toBe(1);
+      expect(strippedCardio.remainingWorkouts).toHaveLength(0);
+
+      // 4. rebuildHistoricalPRsFromWorkouts uses formatWeightBracketKey ('61.0' not '61.2'), calculateE1RM (103.33 for 100x1), and populates bestCardioDurationSecByZone
+      const rebuilt = rebuildHistoricalPRsFromWorkouts([hybridWorkout]);
+      expect(rebuilt.bench_press?.maxRepsByWeight['61.0']).toBe(10);
+      expect(rebuilt.bench_press?.maxRepsByWeight['61.2']).toBeUndefined();
+      expect(rebuilt.bench_press?.bestE1RM).toBe(103.33);
+      expect(rebuilt.boxing_session?.bestCardioDurationSecByZone[4]).toBe(1800);
+    });
+
+    it('creates deterministic sample workout histories anchored to anchorNowMs via createDefaultSampleWorkoutHistory', () => {
+      const anchor = Date.UTC(2026, 0, 15, 12, 0, 0);
+      const h1 = createDefaultSampleWorkoutHistory(anchor);
+      const h2 = createDefaultSampleWorkoutHistory(anchor);
+      expect(h1).toEqual(h2);
+      expect(h1).toEqual(DEFAULT_SAMPLE_WORKOUT_HISTORY);
+      expect(h1[0]?.performedAtIso).toBe('2026-01-14T12:00:00.000Z');
+      expect(h1[5]?.performedAtIso).toBe('2026-01-01T12:00:00.000Z');
     });
   });
 });

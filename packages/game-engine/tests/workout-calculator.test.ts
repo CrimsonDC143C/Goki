@@ -415,5 +415,82 @@ describe('workout-calculator', () => {
         ).toBe(7);
       });
     });
+
+    describe('P2-5: Non-Finite NaN/Infinity Guards & HR Zone Clamping', () => {
+      it('guards calculateE1RM, calculateStrengthSetXp, and evaluateWorkoutSession against NaN and Infinity', () => {
+        expect(calculateE1RM(NaN, 10)).toBe(0);
+        expect(calculateE1RM(100, Infinity)).toBe(0);
+        expect(calculateE1RM(Infinity, 5)).toBe(0);
+
+        const setXpNaN = calculateStrengthSetXp({
+          weightKg: NaN,
+          reps: 8,
+          referenceE1RM: 100,
+        });
+        expect(setXpNaN).toEqual({ rawXp: 0, relativeIntensity: 0, setVolume: 0 });
+
+        const setXpInf = calculateStrengthSetXp({
+          weightKg: Infinity,
+          reps: 8,
+          referenceE1RM: 100,
+        });
+        expect(setXpInf).toEqual({ rawXp: 0, relativeIntensity: 0, setVolume: 0 });
+
+        const sessionEval = evaluateWorkoutSession({
+          workoutType: 'HYBRID',
+          resistanceSets: [
+            { exerciseId: 'bench_press', weightKg: NaN, reps: 10 },
+            { exerciseId: 'bench_press', weightKg: Infinity, reps: 5 },
+            { exerciseId: 'bench_press', weightKg: 80, reps: NaN },
+            { exerciseId: 'bench_press', weightKg: 80, reps: 8 },
+          ],
+          cardioSegments: [
+            {
+              exerciseId: 'run',
+              activityType: 'running',
+              durationSeconds: NaN,
+              averageHrZone: 2,
+            },
+            {
+              exerciseId: 'run',
+              activityType: 'running',
+              durationSeconds: Infinity,
+              averageHrZone: 4,
+            },
+            {
+              exerciseId: 'run',
+              activityType: 'running',
+              durationSeconds: 1200,
+              averageHrZone: 99 as unknown as 1 | 2 | 3 | 4 | 5,
+            },
+            {
+              exerciseId: 'walk',
+              activityType: 'walking',
+              durationSeconds: 600,
+              averageHrZone: 0 as unknown as 1 | 2 | 3 | 4 | 5,
+            },
+            {
+              exerciseId: 'row',
+              activityType: 'rowing',
+              durationSeconds: 600,
+              averageHrZone: NaN as unknown as 1 | 2 | 3 | 4 | 5,
+            },
+          ],
+          xpMultiplier: NaN,
+        });
+
+        expect(Number.isFinite(sessionEval.finalXpAwarded.STRENGTH)).toBe(true);
+        expect(Number.isFinite(sessionEval.finalXpAwarded.ENDURANCE)).toBe(true);
+        expect(Number.isFinite(sessionEval.finalXpAwarded.AGILITY)).toBe(true);
+        expect(sessionEval.finalXpAwarded.STRENGTH).toBeGreaterThan(0);
+        // Zone 99 clamped to 5 -> Agility XP > 0
+        expect(sessionEval.finalXpAwarded.AGILITY).toBeGreaterThan(0);
+        // Zone 0 clamped to 1 and Zone NaN defaulted to 2 -> Endurance XP > 0
+        expect(sessionEval.finalXpAwarded.ENDURANCE).toBeGreaterThan(0);
+        expect(sessionEval.updatedPRs.run?.bestCardioDurationSecByZone[5]).toBe(1200);
+        expect(sessionEval.updatedPRs.walk?.bestCardioDurationSecByZone[1]).toBe(600);
+        expect(sessionEval.updatedPRs.row?.bestCardioDurationSecByZone[2]).toBe(600);
+      });
+    });
   });
 });

@@ -28,6 +28,7 @@ export interface CharacterManagerModalProps {
   initialCustomizeCharacterId?: string | null;
   initialView?: 'ROSTER' | 'CREATE';
   initialCreateMode?: 'STANDARD' | 'IRONMAN_VERIFIED';
+  onCharacterActivated?: () => void;
 }
 
 type ModalView = 'ROSTER' | 'CREATE' | 'CUSTOMIZE' | 'CONFIRM_DELETE';
@@ -38,6 +39,7 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
   initialCustomizeCharacterId,
   initialView,
   initialCreateMode,
+  onCharacterActivated,
 }) => {
   const {
     characters,
@@ -107,6 +109,7 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
       await switchCharacter(charId);
       triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
       setLoading(false);
+      onCharacterActivated?.();
       onClose();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to switch hero');
@@ -182,6 +185,7 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
       setLoading(false);
       setCreatingMode(null);
       setCurrentView('ROSTER');
+      onCharacterActivated?.();
     } catch (err: any) {
       setErrorMsg(err.message || 'Error creating hero.');
       setLoading(false);
@@ -236,6 +240,7 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
       }
       triggerSensoryCue('DUNGEON_CLEARED_FANFARE');
       setLoading(false);
+      onCharacterActivated?.();
     } catch (err: any) {
       setErrorMsg(err.message || 'Error restoring hero.');
       setLoading(false);
