@@ -5,7 +5,7 @@
   "description": "Goki: Fitness RPG — Expo React Native + Expo Web client & 2D Auto-Battler replay viewer",
   "main": "index.js",
   "scripts": {
-    "eas-build-pre-build": "cd ../../ && npm run build --workspace=@goki/game-engine",
+    "eas-build-pre-build": "cd ../../ && node scripts/patch-react-native-health.mjs && npm run build --workspace=@goki/game-engine",
     "start": "expo start --lan",
     "tunnel": "expo start --tunnel",
     "android": "expo start --android",
