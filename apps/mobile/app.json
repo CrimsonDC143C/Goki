@@ -6,7 +6,7 @@
     "version": "0.2.0",
     "runtimeVersion": "0.1.0",
     "updates": {
-      "url": "https://u.expo.dev/18696d92-3fb6-4aa5-b4c3-e89952db9031",
+      "url": "https://u.expo.dev/321a40ce-c8b4-48ee-b035-1a880144af51",
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
@@ -78,7 +78,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "18696d92-3fb6-4aa5-b4c3-e89952db9031"
+        "projectId": "321a40ce-c8b4-48ee-b035-1a880144af51"
       }
     }
   }
