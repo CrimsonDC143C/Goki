@@ -17,7 +17,7 @@ const envSchema = z.object({
   APP_MIN_REQUIRED_VERSION: z.string().default('0.1.0'),
   ANDROID_APK_DOWNLOAD_URL: z
     .string()
-    .default('https://expo.dev/artifacts/eas/cl7bfJE2S84ueb4LuUG0ygjs4jvN51jLO1SbKpsN9M0.apk'),
+    .default('https://expo.dev/artifacts/eas/QxLjKtE7zUYVKtoLCunnIG4CjXhlEDfYhPIr4dkAyks.apk'),
   APP_RELEASE_NOTES: z
     .string()
     .default('Performance improvements, bug fixes, and new RPG content.'),
