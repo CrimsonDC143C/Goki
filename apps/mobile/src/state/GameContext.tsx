@@ -945,7 +945,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const activeCharacterIdRef = useRef<string | null>(null);
   activeCharacterIdRef.current = activeCharacterId;
 
-  const [characterName, setCharacterName] = useState('Aric the Ironbound');
+  const [characterName, setCharacterName] = useState('Adventurer');
   const currentProfileRef = useRef<PersistedCharacterProfile | null>(null);
   const [gameMode, setGameMode] = useState<'STANDARD' | 'IRONMAN_VERIFIED'>('STANDARD');
   const [characterArtUri, setCharacterArtUri] = useState<string | null>(null);
@@ -955,30 +955,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   deletedCharactersRef.current = deletedCharacters;
   const locallyPermanentlyErasedIdsRef = useRef<Set<string>>(new Set<string>());
   const [adventurerRank, setAdventurerRank] = useState<AdventurerRank>('COPPER');
-  const [adventurerReputation, setAdventurerReputation] = useState(140);
+  const [adventurerReputation, setAdventurerReputation] = useState(0);
   const [guildName] = useState('Iron Vanguard [IRON]');
   const [guildReputation, setGuildReputation] = useState(1450);
-  const [gold, setGold] = useState(450);
+  const [gold, setGold] = useState(0);
   const [location, setLocation] = useState<GameLocation>('TAVERN');
   const [activityState, setActivityState] = useState<
     'IDLE' | 'RESTING_TAVERN' | 'GATHERING' | 'IN_DUNGEON'
   >('RESTING_TAVERN');
 
-  const [stats, setStats] = useState({
-    STRENGTH: { level: 5, xp: 80, pointsAvailable: 3 },
-    ENDURANCE: { level: 4, xp: 60, pointsAvailable: 2 },
-    AGILITY: { level: 4, xp: 45, pointsAvailable: 2 },
-    DEXTERITY: { level: 3, xp: 30, pointsAvailable: 1 },
-    CONSTITUTION: { level: 4, xp: 50, pointsAvailable: 2 },
-    WISDOM: { level: 2, xp: 20, pointsAvailable: 1 },
-    SPIRIT: { level: 2, xp: 15, pointsAvailable: 1 },
-  });
+  const [stats, setStats] = useState(() => createLevelOneStats());
 
-  const [unlockedTalentRanks, setUnlockedTalentRanks] = useState<Record<string, number>>({
-    jug_iron_skin: 2,
-    war_deep_lungs: 1,
-    ass_shadowstep_reflexes: 1,
-  });
+  const [unlockedTalentRanks, setUnlockedTalentRanks] = useState<Record<string, number>>({});
 
   const [fatigueState, setFatigueState] = useState<FatigueStateSnapshot>(() => ({
     isRestingInTavern: true,
@@ -988,32 +976,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     consecutiveHighIntensityDays: 0,
     lastHighIntensityDayKey: null,
     systemicFatigueStacks: 0,
-    fatigueScore: 5,
+    fatigueScore: 0,
     wellRestedMultiplier: 1.15,
     activeRecoveryBuffActive: false,
     activeRecoveryGrantedAt: null,
   }));
 
-  // Bench Press & Zone 2 Run have prior baselines (ready to demonstrate PR Crit!);
-  // Squat, Deadlift, OHP, Pull-Up have NO prior baseline (demonstrating First-Time PR Guard!)
-  const [historicalPRs, setHistoricalPRs] = useState<Record<string, HistoricalExercisePR>>({
-    bench_press: {
-      exerciseId: 'bench_press',
-      bestE1RM: 101.33, // 80kg x 8 prior baseline
-      bestSingleSetVolume: 640,
-      bestSessionVolume: 1920,
-      maxRepsByWeight: { '80.0': 8 },
-      bestCardioDurationSecByZone: {},
-    },
-    zone2_run: {
-      exerciseId: 'zone2_run',
-      bestE1RM: 0,
-      bestSingleSetVolume: 0,
-      bestSessionVolume: 0,
-      maxRepsByWeight: {},
-      bestCardioDurationSecByZone: { 2: 30 * 60 },
-    },
-  });
+  const [historicalPRs, setHistoricalPRs] = useState<Record<string, HistoricalExercisePR>>({});
 
   const [remoteCharacterWorkoutsCount, setRemoteCharacterWorkoutsCount] = useState(0);
   const [consistencyStreak, setConsistencyStreak] = useState(0);
@@ -1075,10 +1044,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         participants: [
           {
             characterId: 'player_hero',
-            name: 'Aric the Ironbound (You)',
-            combatDamageDealt: 110_000,
-            workoutEnergyDamage: 85_000,
-            supportScore: 15_000,
+            name: 'Adventurer (You)',
+            combatDamageDealt: 0,
+            workoutEnergyDamage: 0,
+            supportScore: 0,
           },
           {
             characterId: 'world_champ_1',
@@ -1109,10 +1078,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         participants: [
           {
             characterId: 'player_hero',
-            name: 'Aric the Ironbound (You)',
-            combatDamageDealt: 120_000,
-            workoutEnergyDamage: 95_000,
-            supportScore: 18_000,
+            name: 'Adventurer (You)',
+            combatDamageDealt: 0,
+            workoutEnergyDamage: 0,
+            supportScore: 0,
           },
           {
             characterId: 'ally_torin',
@@ -2621,58 +2590,30 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setServerOnline(true);
 
-      // 1. Check if device has an existing stored JWT session
+      // Restore existing authenticated JWT session if present on device
       const storedToken = await getStoredAuthToken();
       if (storedToken) {
         const sessionRes = await fetchCurrentSession();
         if (sessionRes.ok && sessionRes.data) {
           setAuthTokenState(storedToken);
           setCurrentUser(sessionRes.data.user);
-          syncRemoteCharacters(sessionRes.data.character, sessionRes.data.characters, (sessionRes.data as any).deletedCharacters);
+          syncRemoteCharacters(
+            sessionRes.data.character,
+            sessionRes.data.characters,
+            (sessionRes.data as any).deletedCharacters
+          );
           return sessionRes.data.character?.id ?? null;
         }
       }
 
-      if (!storedToken && hasExplicitlyLoggedOutRef.current) {
-        return null;
-      }
-
-      // 2. If no valid stored session, log in with default hero credentials
-      const loginRes = await loginAccount({
-        email: 'hero@gokirpg.com',
-        password: 'password123',
-      });
-
-      if (loginRes.ok && loginRes.data) {
-        setAuthTokenState(loginRes.data.token);
-        setCurrentUser(loginRes.data.user);
-        syncRemoteCharacters(loginRes.data.character, loginRes.data.characters, (loginRes.data as any).deletedCharacters);
-        return loginRes.data.character?.id ?? null;
-      }
-
-      // 3. Fallback: If user not yet seeded/registered on backend, register new hero account
-      const regRes = await registerAccount({
-        email: 'hero@gokirpg.com',
-        username: 'iron_adventurer',
-        password: 'password123',
-        characterName: 'Aric the Ironbound',
-      });
-
-      if (regRes.ok && regRes.data) {
-        setAuthTokenState(regRes.data.token);
-        setCurrentUser(regRes.data.user);
-        syncRemoteCharacters(regRes.data.character, regRes.data.characters, (regRes.data as any).deletedCharacters);
-        return regRes.data.character?.id ?? null;
-      }
-
-      return null;
+      return remoteCharacterIdRef.current ?? null;
     } catch {
       setServerOnline(false);
       return null;
     }
   }, [syncRemoteCharacters]);
 
-  // Probe Backend Server Health & Bootstrap Demo Character on launch
+  // Probe Backend Server Health & Restore Stored Session on launch
   useEffect(() => {
     void ensureRemoteCharacterBootstrapped();
   }, [ensureRemoteCharacterBootstrapped]);

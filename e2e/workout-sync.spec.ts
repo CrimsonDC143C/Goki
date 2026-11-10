@@ -37,6 +37,14 @@ test.describe('Offline-to-Online Workout Loop & Background Sync Queue', () => {
 
     await page.goto('/');
 
+    // Ensure an active hero is forged if starting from a clean unbootstrapped state
+    const createHeroCta = page.getByTestId('landing-create-hero-cta-btn');
+    if (await createHeroCta.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await createHeroCta.click();
+      await page.getByTestId('create-char-name-input').fill('Kurogane');
+      await page.getByTestId('forge-hero-submit-btn').click();
+    }
+
     // 2. Start Quick Offline Workout
     const offlineBtn = page.getByTestId('action-offline-workout');
     await expect(offlineBtn).toBeVisible();

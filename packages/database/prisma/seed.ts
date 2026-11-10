@@ -452,111 +452,8 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
   }
 
   // --------------------------------------------------------------------------
-  // 7. Demo User, Character, Guild, & Active 7-Day Boss Raids
+  // 7. Active 7-Day Public World Boss Raid (No Demo User / Character Seeded)
   // --------------------------------------------------------------------------
-  const demoUser = await db.user.upsert({
-    where: { email: 'hero@gokirpg.com' },
-    update: {
-      passwordHash: '$2b$10$yhYXws24AU5CU0/LA2I5peE5cxniSnZvnOtHVL.9IROpu.j96M/oq',
-    },
-    create: {
-      email: 'hero@gokirpg.com',
-      username: 'iron_adventurer',
-      passwordHash: '$2b$10$yhYXws24AU5CU0/LA2I5peE5cxniSnZvnOtHVL.9IROpu.j96M/oq',
-      timezone: 'America/Los_Angeles',
-    },
-  });
-
-  const existingGymCount = await db.registeredGymGuild.count({
-    where: { userId: demoUser.id },
-  });
-  if (existingGymCount === 0) {
-    await db.registeredGymGuild.createMany({
-      data: [
-        {
-          userId: demoUser.id,
-          name: 'Iron Sanctum Barbell Club',
-          latitude: 37.7749,
-          longitude: -122.4194,
-          radiusMeters: 120,
-        },
-        {
-          userId: demoUser.id,
-          name: 'Titan Foundry Athletics',
-          latitude: 37.7815,
-          longitude: -122.4091,
-          radiusMeters: 120,
-        },
-      ],
-    });
-  }
-
-  const demoChar = await db.character.upsert({
-    where: { name: 'Aric the Ironbound' },
-    update: {},
-    create: {
-      userId: demoUser.id,
-      name: 'Aric the Ironbound',
-      gameMode: 'STANDARD',
-      adventurerRank: 'IRON',
-      adventurerReputation: 280,
-      gold: 650,
-      overallLevel: 6,
-      currentLocation: 'TAVERN',
-      activityState: 'RESTING_TAVERN',
-      stats: {
-        create: {
-          strengthLevel: 5,
-          strengthXp: 120,
-          strengthTalentPointsAvailable: 3,
-          strengthTalentPointsSpent: 2,
-          enduranceLevel: 4,
-          enduranceXp: 90,
-          enduranceTalentPointsAvailable: 2,
-          enduranceTalentPointsSpent: 1,
-          agilityLevel: 4,
-          agilityXp: 60,
-          agilityTalentPointsAvailable: 2,
-          agilityTalentPointsSpent: 1,
-        },
-      },
-      fatigueState: {
-        create: {
-          isRestingInTavern: true,
-          wellRestedMultiplier: 1.15,
-          activeRecoveryBuffActive: false,
-        },
-      },
-      equipmentLoadout: {
-        create: {},
-      },
-    },
-  });
-
-  const guild = await db.guild.upsert({
-    where: { tag: 'IRON' },
-    update: {},
-    create: {
-      name: 'Iron Vanguard',
-      tag: 'IRON',
-      description: 'Founding Adventurers Guild for strength & conditioning hybrids.',
-      leaderCharacterId: demoChar.id,
-      guildLevel: 3,
-      guildReputation: 1450,
-    },
-  });
-
-  await db.guildMember.upsert({
-    where: { characterId: demoChar.id },
-    update: { guildId: guild.id, role: 'LEADER' },
-    create: {
-      guildId: guild.id,
-      characterId: demoChar.id,
-      role: 'LEADER',
-      contributedReputation: 450,
-    },
-  });
-
   const now = new Date();
   const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
@@ -565,15 +462,15 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
   });
 
   if (!existingPublicRaid) {
-    const publicRaid = await db.raidBossInstance.create({
+    await db.raidBossInstance.create({
       data: {
         bossSlug: 'ignisrax_world_wyrm',
         bossName: 'Ignisrax, the World-Forge Wyrm',
         bossTier: 3,
         accessType: 'PUBLIC_WORLD',
         maxHp: 2_500_000n,
-        currentHp: 1_820_000n,
-        totalRaidDamage: 680_000n,
+        currentHp: 2_500_000n,
+        totalRaidDamage: 0n,
         startsAt: now,
         endsAt: sevenDaysLater,
         status: 'ACTIVE',
@@ -598,74 +495,11 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
         ],
       },
     });
-
-    await db.raidParticipantContribution.create({
-      data: {
-        raidInstanceId: publicRaid.id,
-        characterId: demoChar.id,
-        combatDamageDealt: 95_000n,
-        workoutEnergyDamage: 65_000n,
-        supportScore: 15_000n,
-        totalContributionScore: 175_000n,
-        dailyAttacksUsed: 2,
-        workoutsChanneled: 3,
-      },
-    });
   }
 
-  const existingGuildRaid = await db.raidBossInstance.findFirst({
-    where: { bossSlug: 'dread_colossus_guild', guildId: guild.id, status: 'ACTIVE' },
-  });
-
-  if (!existingGuildRaid) {
-    const guildRaid = await db.raidBossInstance.create({
-      data: {
-        bossSlug: 'dread_colossus_guild',
-        bossName: 'Vaelgor, Guild Dread-Colossus',
-        bossTier: 2,
-        accessType: 'GUILD_ONLY',
-        guildId: guild.id,
-        maxHp: 800_000n,
-        currentHp: 510_000n,
-        totalRaidDamage: 290_000n,
-        startsAt: now,
-        endsAt: sevenDaysLater,
-        status: 'ACTIVE',
-        bossMechanicsConfig: { element: 'SHADOW', baseGoldPool: 9000, baseGuildRepPool: 3000 },
-        lootPoolConfig: [
-          {
-            itemSlug: 'malakor_signet',
-            itemName: "Malakor's Signet Ring",
-            rarity: 'EPIC',
-            quantity: 1,
-            weight: 45,
-          },
-          {
-            itemSlug: 'windrunner_daggers',
-            itemName: 'Twin Windrunner Blades',
-            rarity: 'RARE',
-            quantity: 1,
-            weight: 55,
-          },
-        ],
-      },
-    });
-
-    await db.raidParticipantContribution.create({
-      data: {
-        raidInstanceId: guildRaid.id,
-        characterId: demoChar.id,
-        combatDamageDealt: 110_000n,
-        workoutEnergyDamage: 80_000n,
-        supportScore: 20_000n,
-        totalContributionScore: 210_000n,
-        dailyAttacksUsed: 2,
-        workoutsChanneled: 3,
-      },
-    });
-  }
-
-  console.log(`✅ Seed complete! Demo character '${demoChar.name}' (${demoChar.id}) ready.`);
+  console.log(
+    '✅ Seed complete! Starter exercises, presets, 10 talent trees, items, gathering nodes, dungeons, bounties, and world raid ready.'
+  );
 }
 
 if (require.main === module) {
