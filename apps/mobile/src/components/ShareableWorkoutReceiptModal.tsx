@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Image,
+  ImageSourcePropType,
   Modal,
   Platform,
   Pressable,
@@ -21,6 +23,8 @@ import {
   isWarmupSetType,
 } from '@goki/game-engine';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+
+const GOKI_EMBLEM_SOURCE: ImageSourcePropType = require('../../assets/favicon.png');
 
 export interface ShareableReceiptRpgContext {
   bossName?: string | null;
@@ -417,7 +421,14 @@ export const ShareableWorkoutReceiptModal: React.FC<ShareableWorkoutReceiptModal
             {/* 1. Crest & Sanctum Header */}
             <View style={styles.crestHeader}>
               <View style={styles.eyebrowRow}>
-                <Text style={styles.crestEyebrow}>⚔️ GOKI • RAID RECEIPT</Text>
+                <View style={styles.crestBrandCluster}>
+                  <Image
+                    source={GOKI_EMBLEM_SOURCE}
+                    style={styles.crestEmblem}
+                    resizeMode="contain"
+                  />
+                  <Text style={styles.crestEyebrow}>⚔️ GOKI • RAID RECEIPT</Text>
+                </View>
                 <Text style={styles.dateStamp}>{receiptData.dateLabel}</Text>
               </View>
 
@@ -748,6 +759,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 4,
+  },
+  crestBrandCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  crestEmblem: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
   },
   crestEyebrow: {
     color: '#C69A45',

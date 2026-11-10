@@ -12,6 +12,11 @@
     },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0E14"
+    },
     "userInterfaceStyle": "dark",
     "platforms": [
       "ios",
@@ -22,7 +27,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gokirpg.app",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "CFBundleDisplayName": "Goki",
         "ITSAppUsesNonExemptEncryption": false,
@@ -32,6 +37,11 @@
     },
     "android": {
       "package": "com.gokirpg.app",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FEF5D2"
+      },
       "permissions": [
         "android.permission.VIBRATE",
         "android.permission.POST_NOTIFICATIONS",
@@ -45,6 +55,7 @@
       "name": "Goki: Fitness RPG",
       "shortName": "Goki",
       "description": "Turn real-world workouts into holistic 7-stat character progression, boss raids, and hardware-verified Ironman rewards.",
+      "favicon": "./assets/favicon.png",
       "bundler": "metro",
       "output": "single",
       "backgroundColor": "#0B0E14",

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Image,
   ImageSourcePropType,
   Pressable,
   ScrollView,
@@ -14,6 +15,8 @@ import { CharacterManagerModal } from '../components/CharacterManagerModal';
 import { useGame } from '../state/GameContext';
 import { LOOT_CHEST_SVGS, RANK_CREST_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
+
+const GOKI_EMBLEM_SOURCE: ImageSourcePropType = require('../../assets/favicon.png');
 
 export interface LandingScreenProps {
   onSelectOfflineWorkout: () => void;
@@ -106,6 +109,12 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
       >
         {/* Top App Emblem Header */}
         <View style={styles.brandHeader}>
+          <Image
+            source={GOKI_EMBLEM_SOURCE}
+            style={styles.brandEmblem}
+            resizeMode="contain"
+            accessibilityLabel="Goki Emblem"
+          />
           <View style={styles.brandBadgeRow}>
             <View style={styles.brandAccentLine} />
             <Text style={styles.brandEyebrow}>GOKI</Text>
@@ -177,7 +186,11 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           ) : (
             <View style={styles.emptyHeroFrame} testID="landing-no-hero-box">
               <View style={styles.emptyHeroEmblemBadge}>
-                <Text style={styles.emptyHeroEmblemIcon}>⚔️</Text>
+                <Image
+                  source={GOKI_EMBLEM_SOURCE}
+                  style={styles.emptyHeroEmblemImage}
+                  resizeMode="contain"
+                />
               </View>
               <Text style={styles.emptyHeroEyebrow}>HALL OF HEROES</Text>
               <Text style={styles.emptyHeroTitle}>No Active Hero Selected</Text>
@@ -398,6 +411,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 14,
   },
+  brandEmblem: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    marginBottom: 8,
+  },
   brandBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -474,18 +493,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyHeroEmblemBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: 'rgba(139, 17, 36, 0.25)',
-    borderWidth: 1.5,
-    borderColor: CRIMSON_ONI.agedGold,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
   },
-  emptyHeroEmblemIcon: {
-    fontSize: 26,
+  emptyHeroEmblemImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
   },
   emptyHeroEyebrow: {
     color: CRIMSON_ONI.agedGold,

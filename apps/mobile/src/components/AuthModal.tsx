@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  Image,
+  ImageSourcePropType,
   Modal,
   Pressable,
   StyleSheet,
@@ -11,6 +13,8 @@ import {
 import { useGame } from '../state/GameContext';
 import { COLORS, CRIMSON_ONI } from '../theme';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+
+const GOKI_EMBLEM_SOURCE: ImageSourcePropType = require('../../assets/favicon.png');
 
 export interface AuthModalProps {
   visible: boolean;
@@ -95,9 +99,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <View style={styles.dialogCard}>
           {/* Header */}
           <View style={styles.headerRow}>
-            <Text style={styles.titleText}>
-              {mode === 'REGISTER' ? '⚔️ Register Adventurer' : '🔐 Sign In to Realm'}
-            </Text>
+            <View style={styles.headerBrandCluster}>
+              <Image
+                source={GOKI_EMBLEM_SOURCE}
+                style={styles.headerEmblem}
+                resizeMode="contain"
+              />
+              <Text style={styles.titleText}>
+                {mode === 'REGISTER' ? 'Register Adventurer' : 'Sign In to Realm'}
+              </Text>
+            </View>
             <Pressable
               style={styles.closeBtn}
               onPress={onClose}
@@ -321,6 +332,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  headerBrandCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  headerEmblem: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
   },
   titleText: {
     fontSize: 18,

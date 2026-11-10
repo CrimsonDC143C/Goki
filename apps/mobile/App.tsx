@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, ImageSourcePropType, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HolisticStatType, StatType, isIntraWorkoutFocusLocked } from '@goki/game-engine';
 import { BugReportModal } from './src/components/BugReportModal';
@@ -36,6 +36,8 @@ export type ActiveTab =
  * Designed as a clean constant so future updates can swap to a World Map screen effortlessly.
  */
 export const DEFAULT_WORLD_ENTRY_TAB: ActiveTab = 'PROFILE';
+
+const GOKI_EMBLEM_SOURCE: ImageSourcePropType = require('./assets/favicon.png');
 
 export interface LocationOption {
   key: GameLocation;
@@ -161,7 +163,12 @@ const MainShell: React.FC<MainShellProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel="Return to Landing Screen"
               >
-                <Text style={styles.landingHubBtnText}>⛩️ Hub</Text>
+                <Image
+                  source={GOKI_EMBLEM_SOURCE}
+                  style={styles.landingHubEmblem}
+                  resizeMode="contain"
+                />
+                <Text style={styles.landingHubBtnText}>Hub</Text>
               </Pressable>
 
               <Pressable
@@ -534,6 +541,31 @@ export default function App() {
         );
         upsertMeta('property', 'og:title', 'Goki: Fitness RPG');
         upsertMeta('property', 'og:site_name', 'Goki');
+
+        const resolvedIconUri =
+          typeof GOKI_EMBLEM_SOURCE === 'string'
+            ? GOKI_EMBLEM_SOURCE
+            : (GOKI_EMBLEM_SOURCE as { uri?: string })?.uri ??
+              Image.resolveAssetSource?.(GOKI_EMBLEM_SOURCE)?.uri;
+
+        if (resolvedIconUri) {
+          const upsertLink = (rel: string, type?: string) => {
+            const existing = doc.querySelector?.(`link[rel="${rel}"]`);
+            if (existing) {
+              existing.setAttribute('href', resolvedIconUri);
+              if (type) existing.setAttribute('type', type);
+            } else if (doc.createElement && doc.head) {
+              const link = doc.createElement('link');
+              link.setAttribute('rel', rel);
+              link.setAttribute('href', resolvedIconUri);
+              if (type) link.setAttribute('type', type);
+              doc.head.appendChild(link);
+            }
+          };
+          upsertLink('icon', 'image/png');
+          upsertLink('apple-touch-icon', 'image/png');
+          upsertMeta('property', 'og:image', resolvedIconUri);
+        }
       }
     }
   }, []);
@@ -593,12 +625,20 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   landingHubBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     backgroundColor: CRIMSON_ONI.crimsonDim,
     borderWidth: 1,
     borderColor: CRIMSON_ONI.agedGold,
     borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+  },
+  landingHubEmblem: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
   },
   landingHubBtnText: {
     color: CRIMSON_ONI.agedGoldBright,
