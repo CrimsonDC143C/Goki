@@ -375,6 +375,7 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
   * [`apps/mobile/src/api/tokenStorage.ts`](./apps/mobile/src/api/tokenStorage.ts) — Multi-platform secure token persistence.
   * [`apps/mobile/src/api/websocketClient.ts`](./apps/mobile/src/api/websocketClient.ts) — Cross-platform WebSocket client with dynamic URL resolution (`resolveWsBaseUrl`), auto-reconnect, and room subscriptions.
   * [`apps/mobile/src/hooks/useWebSocket.ts`](./apps/mobile/src/hooks/useWebSocket.ts) — Declarative React hook for room-based synchronization.
+  * [`apps/mobile/src/hooks/useIntraWorkoutBlocks.ts`](./apps/mobile/src/hooks/useIntraWorkoutBlocks.ts) — Shared controlled intra-workout exercise block, set-row, zero-drift `canonicalWeightKg` `KG ⇄ LBS` unit toggling, warm-up insertion, superset linking, history block conversion (`convertCompletedSessionToBlocks`), and press-and-hold `⠿` drag-to-reorder `PanResponder` hook consumed by both `WorkoutLoggerScreen` and `OfflineWorkoutScreen`.
   * [`apps/mobile/src/services/wearableTelemetry.ts`](./apps/mobile/src/services/wearableTelemetry.ts) — Unified wearable telemetry abstraction for Apple HealthKit and Google Health Connect.
   * [`apps/mobile/src/services/AudioManager.ts`](./apps/mobile/src/services/AudioManager.ts) — Cross-platform audio manager with `expo-audio`, sound presets, procedural synthesis fallback, and gym silence mute persistence.
   * [`apps/mobile/assets/sprites/index.ts`](./apps/mobile/assets/sprites/index.ts) — 2D sprite asset registry supporting drop-in PNG/WebP files and vector data URIs for heroes, enemies, and loot chests.
@@ -677,8 +678,9 @@ Following live mobile walkthrough audits of `v0.2.0`, core workout ergonomics, R
   * `assertCharacterActiveAndOwned` enforces `404` missing, `400` archived (`deletedAt !== null`), and `403` ownership across all character-scoped gameplay routes, paired with the PostgreSQL partial unique index migration (`Character_userId_gameMode_active_key` `WHERE "deletedAt" IS NULL`).
   * `withDbTransaction` and atomic `updateMany` status claims (`gracefulMissing` BullMQ worker resilience) prevent double-claim race conditions across workouts, gathering, dungeons, fatigue, and raids.
   * `websocketManager` runs a `30s` `ping()`/`pong` liveness sweep (`sweepLiveness`, `shutdown`) and serializes payloads via `BigInt`-safe `safeSerializeWsPayload`.
-* **Mobile Context Race Guards & Synchronous Persistence (`GameContext.tsx`):**
+* **Mobile Context Race Guards, Synchronous Persistence, & Shared Intra-Workout Hook (`GameContext.tsx`, `useIntraWorkoutBlocks.ts`):**
   * `characterSwitchSeqRef` guards against out-of-order async character hydration races, while `unlogHybridSet`, `updateHybridSet`, and `consumeInventoryItem` synchronize refs and persist offline state bundles synchronously.
+  * `useIntraWorkoutBlocks` consolidates ~1,750 lines of duplicated exercise block, set-row, zero-drift `canonicalWeightKg` `KG ⇄ LBS` unit conversion, warm-up insertion, superset linking, and press-and-hold `PanResponder` drag-to-reorder logic across `WorkoutLoggerScreen` and `OfflineWorkoutScreen` with lifecycle callbacks (`onSetLogged`, `onSetUnlogged`, `onSetUpdated`).
 
 
 
