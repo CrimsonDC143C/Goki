@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import type { CompletedWorkoutRecord } from '@goki/game-engine';
+import type {
+  CompletedWorkoutRecord,
+  WorkoutPresetDefinition,
+} from '@goki/game-engine';
 import { RpgIcon } from '../components/icons/RpgIcon';
-import { NpcDialogueOverlay } from '../components/npc';
+import { TrainerCoachingModal } from '../components/npc';
 import { SegmentedControl, SegmentedOption } from '../components/ui';
 import { useGame } from '../state/GameContext';
 import { COLORS, RADII, SPACING, SURFACES } from '../theme';
@@ -39,10 +42,13 @@ export const TrainHubScreen: React.FC<TrainHubScreenProps> = ({
   onNavigateToTalents,
   onNavigateToPaperdoll,
 }) => {
-  const { workoutsLoggedCount, consistencyStreak } = useGame();
+  const { loadPresetIntoDraft } = useGame();
   const [subView, setSubView] = useState<TrainSubView>('WORKOUT');
   const [trainerOpen, setTrainerOpen] = useState(false);
   const [pendingSession, setPendingSession] = useState<CompletedWorkoutRecord | null>(
+    null
+  );
+  const [pendingPreset, setPendingPreset] = useState<WorkoutPresetDefinition | null>(
     null
   );
 
@@ -83,6 +89,8 @@ export const TrainHubScreen: React.FC<TrainHubScreenProps> = ({
           onOpenHistory={() => setSubView('HISTORY')}
           externalLoadedSession={pendingSession}
           onConsumeExternalSession={() => setPendingSession(null)}
+          externalLoadedPreset={pendingPreset}
+          onConsumeExternalPreset={() => setPendingPreset(null)}
         />
       </View>
 
@@ -100,40 +108,16 @@ export const TrainHubScreen: React.FC<TrainHubScreenProps> = ({
         </View>
       )}
 
-      <NpcDialogueOverlay
+      <TrainerCoachingModal
         visible={trainerOpen}
         onClose={() => setTrainerOpen(false)}
-        npcId="TRAINER"
-        dialoguePages={[
-          `You have ${workoutsLoggedCount} logged workout${
-            workoutsLoggedCount === 1 ? '' : 's'
-          } and a ${consistencyStreak}-day streak. Pick a discipline to start a live session or review your Progression Matrix in History.`,
-          'In Milestone 4, I will read your 7-day MEV/MAV/MRV muscle volume landmarks and fatigue state to suggest overload targets and deload timing.',
-        ]}
-        actionChips={[
-          {
-            id: 'coach-history',
-            label: 'View History',
-            icon: 'history',
-            onPress: () => {
-              setTrainerOpen(false);
-              setSubView('HISTORY');
-            },
-          },
-          ...(onOpenOfflineLogger
-            ? [
-                {
-                  id: 'coach-offline',
-                  label: 'Quick Offline Logger',
-                  icon: 'train' as const,
-                  onPress: () => {
-                    setTrainerOpen(false);
-                    onOpenOfflineLogger();
-                  },
-                },
-              ]
-            : []),
-        ]}
+        initialTab="COACHING"
+        onSelectPresetToLog={(preset) => {
+          setPendingPreset(preset);
+          loadPresetIntoDraft(preset, 'OFFLINE');
+          setTrainerOpen(false);
+          setSubView('WORKOUT');
+        }}
       />
     </View>
   );

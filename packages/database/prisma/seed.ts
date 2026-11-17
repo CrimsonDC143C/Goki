@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import {
   BASE_EQUIPPABLE_ITEMS,
   COMBAT_CONSUMABLE_CATALOG,
+  CRAFTING_MATERIAL_CATALOG,
   DEFAULT_DUNGEON_CATALOG,
   DEFAULT_EXERCISE_CATALOG,
   DEFAULT_GUILD_QUEST_CATALOG,
@@ -144,52 +145,23 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
   // --------------------------------------------------------------------------
   // 3. Starter Items (Materials, Consumables, & 32 Base Equippable Items)
   // --------------------------------------------------------------------------
-  const consumableAndMaterialItems = [
-    {
-      slug: 'iron_ore_cluster',
-      name: 'Rich Iron Ore Cluster',
-      description: 'Raw iron ore mined from mountain veins.',
-      itemType: 'CRAFTING_MATERIAL' as const,
-      weaponHandedness: null,
-      rarity: 'COMMON' as const,
-      requiredStrength: 0,
-      requiredEndurance: 0,
-      requiredAgility: 0,
-      stackable: true,
-      maxStack: 999,
-      goldValue: 12,
-      statBonuses: {},
-    },
-    {
-      slug: 'sunleaf_herb_bundle',
-      name: 'Sunleaf Herb Bundle',
-      description: 'Restorative wild herbs used in stamina elixirs.',
-      itemType: 'CRAFTING_MATERIAL' as const,
-      weaponHandedness: null,
-      rarity: 'COMMON' as const,
-      requiredStrength: 0,
-      requiredEndurance: 0,
-      requiredAgility: 0,
-      stackable: true,
-      maxStack: 999,
-      goldValue: 12,
-      statBonuses: {},
-    },
-    {
-      slug: 'obsidian_ingot',
-      name: 'Obsidian Steel Ingot',
-      description: 'Smelted alloy prized by guild blacksmiths.',
-      itemType: 'CRAFTING_MATERIAL' as const,
-      weaponHandedness: null,
-      rarity: 'UNCOMMON' as const,
-      requiredStrength: 0,
-      requiredEndurance: 0,
-      requiredAgility: 0,
-      stackable: true,
-      maxStack: 999,
-      goldValue: 45,
-      statBonuses: {},
-    },
+  const craftingMaterialItems = CRAFTING_MATERIAL_CATALOG.map((mat) => ({
+    slug: mat.slug,
+    name: mat.name,
+    description: mat.description,
+    itemType: 'CRAFTING_MATERIAL' as const,
+    weaponHandedness: null,
+    rarity: mat.rarity as any,
+    requiredStrength: 0,
+    requiredEndurance: 0,
+    requiredAgility: 0,
+    stackable: true,
+    maxStack: 999,
+    goldValue: mat.goldValue,
+    statBonuses: {},
+  }));
+
+  const starterConsumableItems = [
     {
       slug: 'vitality_elixir',
       name: 'Elixir of Peak Output',
@@ -204,21 +176,6 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
       maxStack: 99,
       goldValue: 85,
       statBonuses: { maxStamina: 25 },
-    },
-    {
-      slug: 'raid_essence_crystal',
-      name: 'Raid Boss Essence Crystal',
-      description: 'Crystallized power harvested from weekly Raid Bosses.',
-      itemType: 'CRAFTING_MATERIAL' as const,
-      weaponHandedness: null,
-      rarity: 'RARE' as const,
-      requiredStrength: 0,
-      requiredEndurance: 0,
-      requiredAgility: 0,
-      stackable: true,
-      maxStack: 999,
-      goldValue: 120,
-      statBonuses: {},
     },
   ];
 
@@ -276,7 +233,12 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
     },
   }));
 
-  const allItems = [...consumableAndMaterialItems, ...combatConsumableItems, ...equippableItems];
+  const allItems = [
+    ...craftingMaterialItems,
+    ...starterConsumableItems,
+    ...combatConsumableItems,
+    ...equippableItems,
+  ];
 
   for (const item of allItems) {
     await db.item.upsert({
@@ -286,7 +248,7 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
     });
   }
   console.log(
-    `✅ Seeded ${allItems.length} items (${equippableItems.length} equippable weapons/armor/accessories + ${consumableAndMaterialItems.length + combatConsumableItems.length} materials/consumables).`
+    `✅ Seeded ${allItems.length} items (${equippableItems.length} equippable weapons/armor/accessories + ${craftingMaterialItems.length + starterConsumableItems.length + combatConsumableItems.length} materials/consumables).`
   );
 
   // --------------------------------------------------------------------------
@@ -380,6 +342,58 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
           rarity: 'RARE',
           quantity: 2,
           weight: 100,
+        },
+      ],
+    },
+    {
+      slug: 'astral_glade_foraging',
+      name: 'Forage Astral Glade',
+      professionType: 'FORAGING' as const,
+      description: '2-hour botanical expedition harvesting Astral Dew Vials and Sunleaf Herbs.',
+      durationSeconds: 7200,
+      requiredStatType: 'ENDURANCE' as const,
+      requiredStatLevel: 2,
+      inputMaterials: [],
+      lootTable: [
+        {
+          itemSlug: 'astral_dew_vial',
+          itemName: 'Astral Dew Vial',
+          rarity: 'UNCOMMON',
+          quantity: 2,
+          weight: 65,
+        },
+        {
+          itemSlug: 'sunleaf_herb_bundle',
+          itemName: 'Sunleaf Herb Bundle',
+          rarity: 'COMMON',
+          quantity: 3,
+          weight: 35,
+        },
+      ],
+    },
+    {
+      slug: 'titanite_deep_mining',
+      name: 'Mine Titanite Deep Vein',
+      professionType: 'MINING' as const,
+      description: '2-hour deep excavation extracting Titanite Forge Embers and Rich Iron Ore.',
+      durationSeconds: 7200,
+      requiredStatType: 'STRENGTH' as const,
+      requiredStatLevel: 2,
+      inputMaterials: [],
+      lootTable: [
+        {
+          itemSlug: 'titanite_ember',
+          itemName: 'Titanite Forge Ember',
+          rarity: 'RARE',
+          quantity: 1,
+          weight: 50,
+        },
+        {
+          itemSlug: 'iron_ore_cluster',
+          itemName: 'Rich Iron Ore Cluster',
+          rarity: 'COMMON',
+          quantity: 4,
+          weight: 50,
         },
       ],
     },

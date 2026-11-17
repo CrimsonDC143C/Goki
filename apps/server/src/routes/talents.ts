@@ -153,6 +153,18 @@ export function registerTalentRoutes(app: FastifyInstance, db: PrismaClient): vo
         } else if (spendRes.governingStat === 'AGILITY') {
           statUpdateData.agilityTalentPointsAvailable = { decrement: spendRes.pointsSpent };
           statUpdateData.agilityTalentPointsSpent = { increment: spendRes.pointsSpent };
+        } else if (spendRes.governingStat === 'DEXTERITY') {
+          statUpdateData.dexterityTalentPointsAvailable = { decrement: spendRes.pointsSpent };
+          statUpdateData.dexterityTalentPointsSpent = { increment: spendRes.pointsSpent };
+        } else if (spendRes.governingStat === 'CONSTITUTION') {
+          statUpdateData.constitutionTalentPointsAvailable = { decrement: spendRes.pointsSpent };
+          statUpdateData.constitutionTalentPointsSpent = { increment: spendRes.pointsSpent };
+        } else if (spendRes.governingStat === 'WISDOM') {
+          statUpdateData.wisdomTalentPointsAvailable = { decrement: spendRes.pointsSpent };
+          statUpdateData.wisdomTalentPointsSpent = { increment: spendRes.pointsSpent };
+        } else if (spendRes.governingStat === 'SPIRIT') {
+          statUpdateData.spiritTalentPointsAvailable = { decrement: spendRes.pointsSpent };
+          statUpdateData.spiritTalentPointsSpent = { increment: spendRes.pointsSpent };
         }
 
         if (Object.keys(statUpdateData).length > 0) {

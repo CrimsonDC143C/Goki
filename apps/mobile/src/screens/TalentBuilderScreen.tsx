@@ -24,6 +24,7 @@ import {
   STAT_GLYPH_SVGS,
 } from '../assets/v0Vault';
 import { RpgIcon } from '../components/icons/RpgIcon';
+import { TrainerCoachingModal } from '../components/npc';
 import { CombatLoadoutSelector } from '../components/character';
 import { COLORS, CRIMSON_ONI, SURFACES } from '../theme';
 
@@ -136,6 +137,7 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [showCombatSummary, setShowCombatSummary] = useState<boolean>(false);
+  const [trainerRespecOpen, setTrainerRespecOpen] = useState<boolean>(false);
 
   // Sync initialStat changes
   useEffect(() => {
@@ -308,15 +310,14 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
           <Pressable
             style={styles.resetTalentsBtn}
             onPress={() => {
-              setErrorBanner(
-                'Talent Respec: Visit the Trainer in a major settlement to respec talent points.'
-              );
+              setErrorBanner(null);
+              setTrainerRespecOpen(true);
             }}
             testID="talent-reset-btn"
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <RpgIcon name="refresh" size={12} color="#D1D5DB" />
-              <Text style={styles.resetTalentsBtnText}>Reset</Text>
+              <Text style={styles.resetTalentsBtnText}>Trainer Respec</Text>
             </View>
           </Pressable>
         </View>
@@ -774,6 +775,12 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
           })()}
         </View>
       )}
+
+      <TrainerCoachingModal
+        visible={trainerRespecOpen}
+        onClose={() => setTrainerRespecOpen(false)}
+        initialTab="RESPEC"
+      />
     </ScrollView>
   );
 };

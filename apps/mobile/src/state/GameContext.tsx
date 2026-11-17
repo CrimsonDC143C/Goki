@@ -135,6 +135,17 @@ import {
   sanitizeActiveSkillLoadout,
   sanitizeBeltLoadout,
   validateCombatLoadout,
+  AffixReforgeMode,
+  CRAFTING_MATERIAL_BY_SLUG,
+  TalentGoverningStat,
+  calculateTraderSellValue,
+  evaluateCraftRecipe,
+  evaluateTraderPurchase,
+  reforgeProceduralItemAffixes,
+  resolveProgramSessionPreset,
+  respecCharacterTalents,
+  toUtcDayKey,
+  upgradeProceduralItemTier,
 } from '@goki/game-engine';
 import {
   OfflineDraftCardioItem,
@@ -183,11 +194,18 @@ import {
   gokiWebSocket,
 } from '../api';
 import {
+  buyTraderOfferApi,
   completeGuildQuestRunApi,
+  completeOnboardingApi,
+  craftRecipeApi,
   fetchAdventurersGuildQuestsApi,
+  reforgeGearApi,
+  respecTalentsApi,
   saveCharacterCombatLoadoutApi,
+  sellInventoryItemApi,
   startGuildQuestRunApi,
   syncOfflineGuildQuestRunsApi,
+  upgradeGearApi,
 } from '../api/apiClient';
 import { WearableTelemetrySource } from '../services/wearableTelemetry';
 
@@ -223,6 +241,8 @@ export interface ExerciseCatalogItem {
 }
 
 export interface InventoryEntry {
+  inventoryItemId?: string;
+  isLocked?: boolean;
   slug: string;
   name: string;
   description?: string;
@@ -627,6 +647,47 @@ interface GameContextValue {
     error?: string;
   }>;
   syncOfflineGuildRuns: () => Promise<void>;
+
+  // Milestone 4: Crafting, Reforging, Trader, Trainer, Programs & Guide FTUE
+  activeProgramEnrollment: {
+    programId: string;
+    currentWeek: number;
+    currentDayIndex: number;
+  } | null;
+  enrollInWorkoutProgram: (
+    programId: string,
+    weekNumber?: number,
+    dayIndex?: number
+  ) => void;
+  guideOnboardingCompleted: boolean;
+  completeGuideOnboarding: () => Promise<{ ok: boolean; welcomeGiftGranted?: boolean }>;
+  dismissGuideOnboarding: () => void;
+  craftItemRecipe: (
+    recipeSlug: string,
+    quantity?: number
+  ) => Promise<{ ok: boolean; message?: string; error?: string }>;
+  upgradeInventoryGear: (
+    itemSlugOrId: string
+  ) => Promise<{ ok: boolean; newTier?: number; message?: string; error?: string }>;
+  reforgeInventoryGear: (
+    itemSlugOrId: string,
+    mode?: AffixReforgeMode
+  ) => Promise<{ ok: boolean; message?: string; error?: string }>;
+  buyTraderOffer: (
+    offerId: string,
+    quantity?: number,
+    rotationDateKey?: string
+  ) => Promise<{ ok: boolean; message?: string; error?: string }>;
+  sellInventoryItemToTrader: (
+    itemSlugOrId: string,
+    quantity?: number
+  ) => Promise<{ ok: boolean; goldEarned?: number; message?: string; error?: string }>;
+  respecCharacterTalentTrees: () => Promise<{
+    ok: boolean;
+    goldCost?: number;
+    totalPointsRefunded?: number;
+    error?: string;
+  }>;
 }
 
 const STARTER_EXERCISES: ExerciseCatalogItem[] = [
@@ -713,6 +774,18 @@ const KNOWN_ITEM_METADATA: Record<
   obsidian_ingot: {
     itemType: 'MATERIAL',
     description: 'Refined dark-steel alloy prized by guild blacksmiths.',
+  },
+  astral_dew_vial: {
+    itemType: 'MATERIAL',
+    description:
+      CRAFTING_MATERIAL_BY_SLUG.astral_dew_vial?.description ??
+      'Moonlit botanical essence harvested from Whisperwood blooms.',
+  },
+  arcane_reforge_dust: {
+    itemType: 'MATERIAL',
+    description:
+      CRAFTING_MATERIAL_BY_SLUG.arcane_reforge_dust?.description ??
+      'Alchemical reagent that unbinds and rerolls gear affixes.',
   },
   titanite_ember: {
     itemType: 'MATERIAL',
@@ -849,6 +922,34 @@ const GATHERING_NODES: GatheringNodeItem[] = [
     inputMaterials: [{ slug: 'sunleaf_herb_bundle', name: 'Sunleaf Herb Bundle', quantity: 2 }],
     lootTable: [
       { itemSlug: 'vitality_elixir', itemName: 'Elixir of Peak Output', rarity: 'RARE', quantity: 2, weight: 100 },
+    ],
+  },
+  {
+    slug: 'astral_glade_foraging',
+    name: 'Forage Astral Glade',
+    professionType: 'FORAGING',
+    description: '2-hour botanical expedition harvesting Astral Dew Vials and Sunleaf Herbs.',
+    durationSeconds: 7200,
+    requiredStatType: 'ENDURANCE',
+    requiredStatLevel: 2,
+    inputMaterials: [],
+    lootTable: [
+      { itemSlug: 'astral_dew_vial', itemName: 'Astral Dew Vial', rarity: 'UNCOMMON', quantity: 2, weight: 65 },
+      { itemSlug: 'sunleaf_herb_bundle', itemName: 'Sunleaf Herb Bundle', rarity: 'COMMON', quantity: 3, weight: 35 },
+    ],
+  },
+  {
+    slug: 'titanite_deep_mining',
+    name: 'Mine Titanite Deep Vein',
+    professionType: 'MINING',
+    description: '2-hour deep excavation extracting Titanite Forge Embers and Rich Iron Ore.',
+    durationSeconds: 7200,
+    requiredStatType: 'STRENGTH',
+    requiredStatLevel: 2,
+    inputMaterials: [],
+    lootTable: [
+      { itemSlug: 'titanite_ember', itemName: 'Titanite Forge Ember', rarity: 'RARE', quantity: 1, weight: 50 },
+      { itemSlug: 'iron_ore_cluster', itemName: 'Rich Iron Ore Cluster', rarity: 'COMMON', quantity: 4, weight: 50 },
     ],
   },
 ];
@@ -1081,6 +1182,8 @@ function mapServerInventoryItems(serverItems: unknown): InventoryEntry[] | null 
     const meta = (raw.itemMetadata && typeof raw.itemMetadata === 'object' ? raw.itemMetadata : {}) as Record<string, any>;
     const knownMeta = KNOWN_ITEM_METADATA[slug];
     entries.push({
+      inventoryItemId: typeof raw.id === 'string' ? raw.id : undefined,
+      isLocked: Boolean(raw.isLocked),
       slug: meta.slug ?? slug,
       baseSlug: meta.baseSlug ?? slug,
       name: meta.name ?? itemObj?.name ?? knownMeta?.description ?? slug,
@@ -1386,6 +1489,22 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   queuedOfflineGuildRunsRef.current = queuedOfflineGuildRuns;
   const isSyncingGuildRunsRef = useRef(false);
   const pendingServerRunIdsRef = useRef<Record<string, string>>({});
+
+  const [activeProgramEnrollment, setActiveProgramEnrollment] = useState<{
+    programId: string;
+    currentWeek: number;
+    currentDayIndex: number;
+  } | null>(null);
+  const activeProgramEnrollmentRef = useRef<{
+    programId: string;
+    currentWeek: number;
+    currentDayIndex: number;
+  } | null>(activeProgramEnrollment);
+  activeProgramEnrollmentRef.current = activeProgramEnrollment;
+
+  const [guideOnboardingCompleted, setGuideOnboardingCompleted] = useState<boolean>(false);
+  const guideOnboardingCompletedRef = useRef<boolean>(guideOnboardingCompleted);
+  guideOnboardingCompletedRef.current = guideOnboardingCompleted;
 
   const hasExplicitlyLoggedOutRef = useRef(false);
 
@@ -1765,6 +1884,15 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           historicalPRsRef.current = cp.historicalPRs;
           setHistoricalPRs(cp.historicalPRs);
         }
+        const hydratedOnboarding = Boolean(cp.guideOnboardingCompleted);
+        guideOnboardingCompletedRef.current = hydratedOnboarding;
+        setGuideOnboardingCompleted(hydratedOnboarding);
+        const hydratedEnrollment =
+          cp.activeProgramEnrollment && typeof cp.activeProgramEnrollment === 'object'
+            ? cp.activeProgramEnrollment
+            : null;
+        activeProgramEnrollmentRef.current = hydratedEnrollment;
+        setActiveProgramEnrollment(hydratedEnrollment);
       }
       setOfflineHydrated(true);
     })();
@@ -2319,6 +2447,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       customizationConfigRef.current = resolvedCustom.customizationConfig;
       setCustomizationConfig(resolvedCustom.customizationConfig);
 
+      const resolvedOnboarding = Boolean(
+        fullSheet?.character?.guideOnboardingCompleted ??
+          char.guideOnboardingCompleted ??
+          existingLocal?.guideOnboardingCompleted
+      );
+      guideOnboardingCompletedRef.current = resolvedOnboarding;
+      setGuideOnboardingCompleted(resolvedOnboarding);
+
+      const resolvedProgramEnrollment =
+        char.activeProgramEnrollment ??
+        existingLocal?.activeProgramEnrollment ??
+        null;
+      activeProgramEnrollmentRef.current = resolvedProgramEnrollment;
+      setActiveProgramEnrollment(resolvedProgramEnrollment);
+
       const charProfile: PersistedCharacterProfile = {
         id: char.id,
         name: char.name,
@@ -2342,6 +2485,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         completedBountySlugs: resolvedCompletedBounties,
         consistencyStreak: resolvedStreak,
         historicalPRs: resolvedPRs,
+        guideOnboardingCompleted: resolvedOnboarding,
+        activeProgramEnrollment: resolvedProgramEnrollment,
         lastSyncedAtMs: Date.now(),
       };
       currentProfileRef.current = charProfile;
@@ -2423,6 +2568,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const resetCustom = createDefaultCustomizationConfig('HUMAN');
     customizationConfigRef.current = resetCustom;
     setCustomizationConfig(resetCustom);
+    guideOnboardingCompletedRef.current = false;
+    setGuideOnboardingCompleted(false);
+    activeProgramEnrollmentRef.current = null;
+    setActiveProgramEnrollment(null);
   }, []);
 
   const syncRemoteCharacters = useCallback(
@@ -2763,6 +2912,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
               activeSkillLoadout: [],
               beltLoadout: [null, null, null, null],
               completedGuildQuestSlugs: [],
+              guideOnboardingCompleted: Boolean(res.data.character.guideOnboardingCompleted),
+              activeProgramEnrollment: null,
             };
             activeCharacterIdRef.current = newChar.id;
             const nextList = [...availableCharactersRef.current, newChar];
@@ -2805,6 +2956,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         completedBountySlugs: [],
         consistencyStreak: 0,
         historicalPRs: {},
+        guideOnboardingCompleted: false,
+        activeProgramEnrollment: null,
       };
       activeCharacterIdRef.current = localChar.id;
       const nextList = [...availableCharactersRef.current, localChar];
@@ -5509,6 +5662,843 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [persistBundleSnapshot]
   );
 
+  const persistCurrentProfileUpdates = useCallback(
+    (partialProfile: Partial<PersistedCharacterProfile>) => {
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          ...partialProfile,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+        persistBundleSnapshot({
+          characterProfile: updatedProfile,
+          availableCharacters: nextAvail,
+        });
+      } else {
+        persistBundleSnapshot({});
+      }
+    },
+    [persistBundleSnapshot]
+  );
+
+  const lootDropToInventoryEntry = useCallback((d: LootDrop): InventoryEntry => {
+    const consumableMeta = COMBAT_CONSUMABLE_BY_SLUG[d.itemSlug];
+    const baseLookup = d.baseSlug ?? d.itemSlug;
+    const meta =
+      KNOWN_ITEM_METADATA[baseLookup] ??
+      KNOWN_ITEM_METADATA[d.itemSlug] ??
+      (consumableMeta
+        ? {
+            itemType: 'CONSUMABLE' as const,
+            description: consumableMeta.description,
+          }
+        : undefined);
+    const isEquip =
+      BASE_EQUIPPABLE_ITEM_BY_SLUG[baseLookup] !== undefined ||
+      (meta?.itemType !== undefined && isEquippableItemType(meta.itemType));
+    return {
+      inventoryItemId: isEquip
+        ? `local_item_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+        : undefined,
+      isLocked: false,
+      slug: d.itemSlug,
+      baseSlug: d.baseSlug ?? d.itemSlug,
+      name: d.itemName,
+      description: meta?.description,
+      rarity: d.rarity,
+      quantity: d.quantity,
+      itemType: meta?.itemType ?? 'MATERIAL',
+      weaponHandedness: meta?.weaponHandedness,
+      requiredStrength: meta?.requiredStrength,
+      requiredEndurance: meta?.requiredEndurance,
+      requiredAgility: meta?.requiredAgility,
+      statBonuses: d.statBonuses ?? meta?.statBonuses,
+      tier: d.tier,
+      prefixId: d.prefixId ?? null,
+      prefixLabel: d.prefixLabel ?? null,
+      prefixSummary: d.prefixSummary,
+      suffixId: d.suffixId ?? null,
+      suffixLabel: d.suffixLabel ?? null,
+      suffixSummary: d.suffixSummary,
+      baseStatsSummary: d.baseStatsSummary,
+      primaryStatBonuses: d.primaryStatBonuses,
+      uniquePassive: d.uniquePassive,
+    };
+  }, []);
+
+  const applyServerEconomySnapshot = useCallback(
+    (data: any) => {
+      const mapped = mapServerInventoryItems(data?.inventoryItems);
+      let nextInv = rawInventoryRef.current;
+      if (mapped) {
+        nextInv = mapped;
+        rawInventoryRef.current = mapped;
+        setRawInventory(mapped);
+      }
+      let nextGold = goldRef.current;
+      if (typeof data?.remainingGold === 'number') {
+        nextGold = data.remainingGold;
+        goldRef.current = nextGold;
+        setGold(nextGold);
+      } else if (typeof data?.gold === 'number') {
+        nextGold = data.gold;
+        goldRef.current = nextGold;
+        setGold(nextGold);
+      }
+      persistCurrentProfileUpdates({
+        inventory: nextInv,
+        gold: nextGold,
+      });
+    },
+    [persistCurrentProfileUpdates]
+  );
+
+  const enrollInWorkoutProgram = useCallback(
+    (programId: string, weekNumber = 1, dayIndex = 0) => {
+      const resolved = resolveProgramSessionPreset(programId, weekNumber, dayIndex);
+      if (!resolved) return;
+      const enrollment = {
+        programId,
+        currentWeek: weekNumber,
+        currentDayIndex: dayIndex,
+      };
+      activeProgramEnrollmentRef.current = enrollment;
+      setActiveProgramEnrollment(enrollment);
+      persistCurrentProfileUpdates({ activeProgramEnrollment: enrollment });
+    },
+    [persistCurrentProfileUpdates]
+  );
+
+  const completeGuideOnboarding = useCallback(async (): Promise<{
+    ok: boolean;
+    welcomeGiftGranted?: boolean;
+  }> => {
+    const alreadyCompleted = guideOnboardingCompletedRef.current;
+    guideOnboardingCompletedRef.current = true;
+    setGuideOnboardingCompleted(true);
+
+    const remoteCharId = remoteCharacterIdRef.current;
+    if (
+      serverOnline &&
+      isAuthenticated &&
+      remoteCharId &&
+      !remoteCharId.startsWith('local_')
+    ) {
+      const res = await completeOnboardingApi(remoteCharId);
+      if (res.ok && res.data) {
+        applyServerEconomySnapshot(res.data);
+        persistCurrentProfileUpdates({ guideOnboardingCompleted: true });
+        return {
+          ok: true,
+          welcomeGiftGranted: Boolean(res.data.welcomeGiftGranted ?? !alreadyCompleted),
+        };
+      }
+    }
+
+    let welcomeGiftGranted = false;
+    if (!alreadyCompleted) {
+      addDropsToInventory([
+        {
+          itemSlug: 'sunleaf_healing_draught',
+          itemName: 'Sunleaf Healing Draught',
+          rarity: 'COMMON',
+          quantity: 1,
+        },
+      ]);
+      welcomeGiftGranted = true;
+    }
+    persistCurrentProfileUpdates({ guideOnboardingCompleted: true });
+    return { ok: true, welcomeGiftGranted };
+  }, [
+    addDropsToInventory,
+    applyServerEconomySnapshot,
+    isAuthenticated,
+    persistCurrentProfileUpdates,
+    serverOnline,
+  ]);
+
+  const dismissGuideOnboarding = useCallback(() => {
+    guideOnboardingCompletedRef.current = true;
+    setGuideOnboardingCompleted(true);
+    persistCurrentProfileUpdates({ guideOnboardingCompleted: true });
+  }, [persistCurrentProfileUpdates]);
+
+  const craftItemRecipe = useCallback(
+    async (
+      recipeSlug: string,
+      quantity = 1
+    ): Promise<{ ok: boolean; message?: string; error?: string }> => {
+      const remoteCharId = remoteCharacterIdRef.current;
+      const clientSeed = `craft_${Date.now()}`;
+      if (
+        serverOnline &&
+        isAuthenticated &&
+        remoteCharId &&
+        !remoteCharId.startsWith('local_')
+      ) {
+        const res = await craftRecipeApi({
+          characterId: remoteCharId,
+          recipeSlug,
+          quantity,
+          clientSeed,
+        });
+        if (res.ok && res.data) {
+          applyServerEconomySnapshot(res.data);
+          return {
+            ok: true,
+            message: res.data.message || `Crafted ${quantity}x item!`,
+          };
+        }
+        if (res.statusCode && res.statusCode < 500) {
+          return { ok: false, error: res.error || 'Failed to craft recipe.' };
+        }
+      }
+
+      const materialCounts: Record<string, number> = {};
+      for (const entry of rawInventoryRef.current) {
+        materialCounts[entry.slug] = (materialCounts[entry.slug] ?? 0) + entry.quantity;
+      }
+
+      const evalRes = evaluateCraftRecipe({
+        recipeSlug,
+        quantity,
+        currentGold: goldRef.current,
+        materialCounts,
+        characterStats: toCoreStatBlock(statsRef.current),
+        seed: clientSeed,
+      });
+
+      if (!evalRes.ok) {
+        return { ok: false, error: evalRes.error };
+      }
+
+      const remainingDeductions = { ...evalRes.deductedMaterials };
+      const nextInventory: InventoryEntry[] = [];
+      for (const entry of rawInventoryRef.current) {
+        const deduct = remainingDeductions[entry.slug] ?? 0;
+        if (deduct > 0) {
+          const used = Math.min(entry.quantity, deduct);
+          remainingDeductions[entry.slug] = deduct - used;
+          const left = entry.quantity - used;
+          if (left > 0) {
+            nextInventory.push({ ...entry, quantity: left });
+          }
+        } else {
+          nextInventory.push(entry);
+        }
+      }
+
+      for (const drop of evalRes.craftedDrops) {
+        const newEntry = lootDropToInventoryEntry(drop);
+        const isEquip = isEquippableInventoryEntry(newEntry);
+        const existingIdx = !isEquip
+          ? nextInventory.findIndex((i) => i.slug === newEntry.slug)
+          : -1;
+        if (existingIdx >= 0) {
+          nextInventory[existingIdx] = {
+            ...nextInventory[existingIdx]!,
+            quantity: nextInventory[existingIdx]!.quantity + newEntry.quantity,
+          };
+        } else {
+          nextInventory.push(newEntry);
+        }
+      }
+
+      rawInventoryRef.current = nextInventory;
+      setRawInventory(nextInventory);
+      goldRef.current = evalRes.remainingGold;
+      setGold(evalRes.remainingGold);
+      persistCurrentProfileUpdates({
+        inventory: nextInventory,
+        gold: evalRes.remainingGold,
+      });
+
+      return {
+        ok: true,
+        message: `Crafted ${quantity}x ${evalRes.recipe.outputItemName}!`,
+      };
+    },
+    [
+      applyServerEconomySnapshot,
+      isAuthenticated,
+      lootDropToInventoryEntry,
+      persistCurrentProfileUpdates,
+      serverOnline,
+    ]
+  );
+
+  const upgradeInventoryGear = useCallback(
+    async (
+      itemSlugOrId: string
+    ): Promise<{ ok: boolean; newTier?: number; message?: string; error?: string }> => {
+      const targetIdx = rawInventoryRef.current.findIndex(
+        (i) => i.inventoryItemId === itemSlugOrId || i.slug === itemSlugOrId
+      );
+      if (targetIdx < 0) {
+        return { ok: false, error: 'Gear item not found in inventory.' };
+      }
+      const target = rawInventoryRef.current[targetIdx]!;
+      const oldSlug = target.slug;
+      const clientSeed = `upg_${Date.now()}`;
+
+      const remoteCharId = remoteCharacterIdRef.current;
+      if (
+        serverOnline &&
+        isAuthenticated &&
+        remoteCharId &&
+        !remoteCharId.startsWith('local_') &&
+        target.inventoryItemId
+      ) {
+        const res = await upgradeGearApi({
+          characterId: remoteCharId,
+          inventoryItemId: target.inventoryItemId,
+          clientSeed,
+        });
+        if (res.ok && res.data) {
+          applyServerEconomySnapshot(res.data);
+          return {
+            ok: true,
+            newTier: res.data.newTier,
+            message: res.data.message || `Upgraded ${target.name} to Tier ${res.data.newTier ?? ''}!`,
+          };
+        }
+        if (res.statusCode && res.statusCode < 500) {
+          return { ok: false, error: res.error || 'Failed to upgrade gear.' };
+        }
+      }
+
+      const materialCounts: Record<string, number> = {};
+      for (const entry of rawInventoryRef.current) {
+        materialCounts[entry.slug] = (materialCounts[entry.slug] ?? 0) + entry.quantity;
+      }
+
+      const baseSlug = target.baseSlug ?? target.slug;
+      const currentTier = (target.tier ?? 1) as ItemTier;
+
+      const upgRes = upgradeProceduralItemTier({
+        baseSlug,
+        currentTier,
+        currentPrefixId: target.prefixId,
+        currentSuffixId: target.suffixId,
+        currentGold: goldRef.current,
+        materialCounts,
+        seed: clientSeed,
+      });
+
+      if (!upgRes.ok) {
+        return { ok: false, error: upgRes.error };
+      }
+
+      const remainingDeductions = { ...upgRes.deductedMaterials };
+      const nextInventory: InventoryEntry[] = [];
+      for (let idx = 0; idx < rawInventoryRef.current.length; idx++) {
+        const entry = rawInventoryRef.current[idx]!;
+        if (idx === targetIdx) {
+          const d = upgRes.lootDrop;
+          nextInventory.push({
+            ...entry,
+            slug: d.itemSlug,
+            baseSlug: d.baseSlug ?? baseSlug,
+            name: d.itemName,
+            rarity: d.rarity,
+            tier: upgRes.newTier,
+            prefixId: d.prefixId ?? entry.prefixId ?? null,
+            prefixLabel: d.prefixLabel ?? entry.prefixLabel ?? null,
+            prefixSummary: d.prefixSummary ?? entry.prefixSummary,
+            suffixId: d.suffixId ?? entry.suffixId ?? null,
+            suffixLabel: d.suffixLabel ?? entry.suffixLabel ?? null,
+            suffixSummary: d.suffixSummary ?? entry.suffixSummary,
+            baseStatsSummary: d.baseStatsSummary ?? entry.baseStatsSummary,
+            primaryStatBonuses: d.primaryStatBonuses ?? entry.primaryStatBonuses,
+            statBonuses: d.statBonuses ?? entry.statBonuses,
+            uniquePassive: d.uniquePassive ?? entry.uniquePassive,
+          });
+          continue;
+        }
+        const deduct = remainingDeductions[entry.slug] ?? 0;
+        if (deduct > 0) {
+          const used = Math.min(entry.quantity, deduct);
+          remainingDeductions[entry.slug] = deduct - used;
+          const left = entry.quantity - used;
+          if (left > 0) {
+            nextInventory.push({ ...entry, quantity: left });
+          }
+        } else {
+          nextInventory.push(entry);
+        }
+      }
+
+      const nextLoadout: EquipmentLoadoutMap = { ...(equipmentLoadoutRef.current || equipmentLoadout) };
+      let loadoutChanged = false;
+      for (const slot of EQUIPMENT_SLOT_KEYS) {
+        if (nextLoadout[slot] === oldSlug && upgRes.lootDrop.itemSlug !== oldSlug) {
+          nextLoadout[slot] = upgRes.lootDrop.itemSlug;
+          loadoutChanged = true;
+        }
+      }
+      if (loadoutChanged) {
+        equipmentLoadoutRef.current = nextLoadout;
+        setEquipmentLoadout(nextLoadout);
+      }
+
+      rawInventoryRef.current = nextInventory;
+      setRawInventory(nextInventory);
+      goldRef.current = upgRes.remainingGold;
+      setGold(upgRes.remainingGold);
+      persistCurrentProfileUpdates({
+        inventory: nextInventory,
+        gold: upgRes.remainingGold,
+        ...(loadoutChanged ? { equipmentLoadout: nextLoadout } : {}),
+      });
+
+      return {
+        ok: true,
+        newTier: upgRes.newTier,
+        message: `Upgraded to Tier ${upgRes.newTier}: ${upgRes.lootDrop.itemName}!`,
+      };
+    },
+    [
+      applyServerEconomySnapshot,
+      equipmentLoadout,
+      isAuthenticated,
+      persistCurrentProfileUpdates,
+      serverOnline,
+    ]
+  );
+
+  const reforgeInventoryGear = useCallback(
+    async (
+      itemSlugOrId: string,
+      mode: AffixReforgeMode = 'BOTH'
+    ): Promise<{ ok: boolean; message?: string; error?: string }> => {
+      const targetIdx = rawInventoryRef.current.findIndex(
+        (i) => i.inventoryItemId === itemSlugOrId || i.slug === itemSlugOrId
+      );
+      if (targetIdx < 0) {
+        return { ok: false, error: 'Gear item not found in inventory.' };
+      }
+      const target = rawInventoryRef.current[targetIdx]!;
+      const oldSlug = target.slug;
+      const clientSeed = `reforge_${Date.now()}`;
+
+      const remoteCharId = remoteCharacterIdRef.current;
+      if (
+        serverOnline &&
+        isAuthenticated &&
+        remoteCharId &&
+        !remoteCharId.startsWith('local_') &&
+        target.inventoryItemId
+      ) {
+        const res = await reforgeGearApi({
+          characterId: remoteCharId,
+          inventoryItemId: target.inventoryItemId,
+          mode,
+          clientSeed,
+        });
+        if (res.ok && res.data) {
+          applyServerEconomySnapshot(res.data);
+          return {
+            ok: true,
+            message: res.data.message || `Reforged ${target.name} affixes!`,
+          };
+        }
+        if (res.statusCode && res.statusCode < 500) {
+          return { ok: false, error: res.error || 'Failed to reforge gear.' };
+        }
+      }
+
+      const materialCounts: Record<string, number> = {};
+      for (const entry of rawInventoryRef.current) {
+        materialCounts[entry.slug] = (materialCounts[entry.slug] ?? 0) + entry.quantity;
+      }
+
+      const baseSlug = target.baseSlug ?? target.slug;
+      const currentTier = (target.tier ?? 1) as ItemTier;
+
+      const refRes = reforgeProceduralItemAffixes({
+        baseSlug,
+        tier: currentTier,
+        mode,
+        currentPrefixId: target.prefixId,
+        currentSuffixId: target.suffixId,
+        currentGold: goldRef.current,
+        materialCounts,
+        seed: clientSeed,
+      });
+
+      if (!refRes.ok) {
+        return { ok: false, error: refRes.error };
+      }
+
+      const remainingDeductions = { ...refRes.deductedMaterials };
+      const nextInventory: InventoryEntry[] = [];
+      for (let idx = 0; idx < rawInventoryRef.current.length; idx++) {
+        const entry = rawInventoryRef.current[idx]!;
+        if (idx === targetIdx) {
+          const d = refRes.lootDrop;
+          nextInventory.push({
+            ...entry,
+            slug: d.itemSlug,
+            baseSlug: d.baseSlug ?? baseSlug,
+            name: d.itemName,
+            rarity: d.rarity,
+            tier: currentTier,
+            prefixId: d.prefixId ?? null,
+            prefixLabel: d.prefixLabel ?? null,
+            prefixSummary: d.prefixSummary,
+            suffixId: d.suffixId ?? null,
+            suffixLabel: d.suffixLabel ?? null,
+            suffixSummary: d.suffixSummary,
+            baseStatsSummary: d.baseStatsSummary ?? entry.baseStatsSummary,
+            primaryStatBonuses: d.primaryStatBonuses ?? entry.primaryStatBonuses,
+            statBonuses: d.statBonuses ?? entry.statBonuses,
+            uniquePassive: d.uniquePassive ?? entry.uniquePassive,
+          });
+          continue;
+        }
+        const deduct = remainingDeductions[entry.slug] ?? 0;
+        if (deduct > 0) {
+          const used = Math.min(entry.quantity, deduct);
+          remainingDeductions[entry.slug] = deduct - used;
+          const left = entry.quantity - used;
+          if (left > 0) {
+            nextInventory.push({ ...entry, quantity: left });
+          }
+        } else {
+          nextInventory.push(entry);
+        }
+      }
+
+      const nextLoadout: EquipmentLoadoutMap = { ...(equipmentLoadoutRef.current || equipmentLoadout) };
+      let loadoutChanged = false;
+      for (const slot of EQUIPMENT_SLOT_KEYS) {
+        if (nextLoadout[slot] === oldSlug && refRes.lootDrop.itemSlug !== oldSlug) {
+          nextLoadout[slot] = refRes.lootDrop.itemSlug;
+          loadoutChanged = true;
+        }
+      }
+      if (loadoutChanged) {
+        equipmentLoadoutRef.current = nextLoadout;
+        setEquipmentLoadout(nextLoadout);
+      }
+
+      rawInventoryRef.current = nextInventory;
+      setRawInventory(nextInventory);
+      goldRef.current = refRes.remainingGold;
+      setGold(refRes.remainingGold);
+      persistCurrentProfileUpdates({
+        inventory: nextInventory,
+        gold: refRes.remainingGold,
+        ...(loadoutChanged ? { equipmentLoadout: nextLoadout } : {}),
+      });
+
+      return {
+        ok: true,
+        message: `Reforged: ${refRes.lootDrop.itemName}!`,
+      };
+    },
+    [
+      applyServerEconomySnapshot,
+      equipmentLoadout,
+      isAuthenticated,
+      persistCurrentProfileUpdates,
+      serverOnline,
+    ]
+  );
+
+  const buyTraderOffer = useCallback(
+    async (
+      offerId: string,
+      quantity = 1,
+      rotationDateKey?: string
+    ): Promise<{ ok: boolean; message?: string; error?: string }> => {
+      const dateKey = rotationDateKey ?? toUtcDayKey(new Date());
+      const remoteCharId = remoteCharacterIdRef.current;
+      if (
+        serverOnline &&
+        isAuthenticated &&
+        remoteCharId &&
+        !remoteCharId.startsWith('local_')
+      ) {
+        const res = await buyTraderOfferApi({
+          characterId: remoteCharId,
+          offerId,
+          quantity,
+          rotationDateKey: dateKey,
+        });
+        if (res.ok && res.data) {
+          applyServerEconomySnapshot(res.data);
+          return {
+            ok: true,
+            message: res.data.message || 'Purchase complete!',
+          };
+        }
+        if (res.statusCode && res.statusCode < 500) {
+          return { ok: false, error: res.error || 'Failed to purchase offer.' };
+        }
+      }
+
+      const buyRes = evaluateTraderPurchase({
+        offerId,
+        quantity,
+        currentGold: goldRef.current,
+        rotationDateKey: dateKey,
+      });
+      if (!buyRes.ok) {
+        return { ok: false, error: buyRes.error };
+      }
+
+      const nextInventory = [...rawInventoryRef.current];
+      for (const drop of buyRes.purchasedDrops) {
+        const newEntry = lootDropToInventoryEntry(drop);
+        const isEquip = isEquippableInventoryEntry(newEntry);
+        const existingIdx = !isEquip
+          ? nextInventory.findIndex((i) => i.slug === newEntry.slug)
+          : -1;
+        if (existingIdx >= 0) {
+          nextInventory[existingIdx] = {
+            ...nextInventory[existingIdx]!,
+            quantity: nextInventory[existingIdx]!.quantity + newEntry.quantity,
+          };
+        } else {
+          nextInventory.push(newEntry);
+        }
+      }
+
+      rawInventoryRef.current = nextInventory;
+      setRawInventory(nextInventory);
+      goldRef.current = buyRes.remainingGold;
+      setGold(buyRes.remainingGold);
+      persistCurrentProfileUpdates({
+        inventory: nextInventory,
+        gold: buyRes.remainingGold,
+      });
+
+      return {
+        ok: true,
+        message: `Bought ${quantity}x ${buyRes.offer.itemName} for ${buyRes.totalGoldCost}g!`,
+      };
+    },
+    [
+      applyServerEconomySnapshot,
+      isAuthenticated,
+      lootDropToInventoryEntry,
+      persistCurrentProfileUpdates,
+      serverOnline,
+    ]
+  );
+
+  const sellInventoryItemToTrader = useCallback(
+    async (
+      itemSlugOrId: string,
+      quantity = 1
+    ): Promise<{ ok: boolean; goldEarned?: number; message?: string; error?: string }> => {
+      const targetIdx = rawInventoryRef.current.findIndex(
+        (i) => i.inventoryItemId === itemSlugOrId || i.slug === itemSlugOrId
+      );
+      if (targetIdx < 0) {
+        return { ok: false, error: 'Item not found in inventory.' };
+      }
+      const target = rawInventoryRef.current[targetIdx]!;
+      if (target.isLocked) {
+        return { ok: false, error: `${target.name} is locked and cannot be sold.` };
+      }
+      const currentLoadout = equipmentLoadoutRef.current || equipmentLoadout;
+      const isEquipped = Object.values(currentLoadout).some((s) => s === target.slug);
+      if (isEquipped) {
+        return { ok: false, error: `Unequip ${target.name} before selling.` };
+      }
+
+      const sellQty = Math.min(Math.max(1, Math.floor(quantity)), target.quantity);
+      const remoteCharId = remoteCharacterIdRef.current;
+      if (
+        serverOnline &&
+        isAuthenticated &&
+        remoteCharId &&
+        !remoteCharId.startsWith('local_') &&
+        target.inventoryItemId
+      ) {
+        const res = await sellInventoryItemApi({
+          characterId: remoteCharId,
+          inventoryItemId: target.inventoryItemId,
+          quantity: sellQty,
+        });
+        if (res.ok && res.data) {
+          applyServerEconomySnapshot(res.data);
+          const earned = typeof res.data.goldEarned === 'number' ? res.data.goldEarned : undefined;
+          return {
+            ok: true,
+            goldEarned: earned,
+            message:
+              res.data.message ||
+              `Sold ${sellQty}x ${target.name}${earned !== undefined ? ` for ${earned}g` : ''}!`,
+          };
+        }
+        if (res.statusCode && res.statusCode < 500) {
+          return { ok: false, error: res.error || 'Failed to sell item.' };
+        }
+      }
+
+      const sellVal = calculateTraderSellValue({
+        itemSlug: target.baseSlug ?? target.slug,
+        tier: target.tier,
+        rarity: target.rarity,
+        quantity: sellQty,
+      });
+
+      const nextInventory = rawInventoryRef.current
+        .map((entry, idx) =>
+          idx === targetIdx ? { ...entry, quantity: entry.quantity - sellQty } : entry
+        )
+        .filter((entry) => entry.quantity > 0);
+
+      const nextGold = goldRef.current + sellVal.totalSellGold;
+      rawInventoryRef.current = nextInventory;
+      setRawInventory(nextInventory);
+      goldRef.current = nextGold;
+      setGold(nextGold);
+      persistCurrentProfileUpdates({
+        inventory: nextInventory,
+        gold: nextGold,
+      });
+
+      return {
+        ok: true,
+        goldEarned: sellVal.totalSellGold,
+        message: `Sold ${sellQty}x ${target.name} for ${sellVal.totalSellGold}g!`,
+      };
+    },
+    [
+      applyServerEconomySnapshot,
+      equipmentLoadout,
+      isAuthenticated,
+      persistCurrentProfileUpdates,
+      serverOnline,
+    ]
+  );
+
+  const respecCharacterTalentTrees = useCallback(async (): Promise<{
+    ok: boolean;
+    goldCost?: number;
+    totalPointsRefunded?: number;
+    error?: string;
+  }> => {
+    const remoteCharId = remoteCharacterIdRef.current;
+    if (
+      serverOnline &&
+      isAuthenticated &&
+      remoteCharId &&
+      !remoteCharId.startsWith('local_')
+    ) {
+      const res = await respecTalentsApi(remoteCharId);
+      if (res.ok && res.data) {
+        const nextRanks: Record<string, number> = res.data.unlockedTalentRanks ?? {};
+        const nextSkills = sanitizeActiveSkillLoadout(
+          res.data.activeSkillLoadout ?? activeSkillLoadoutRef.current,
+          nextRanks
+        );
+        unlockedTalentRanksRef.current = nextRanks;
+        setUnlockedTalentRanks(nextRanks);
+        activeSkillLoadoutRef.current = nextSkills;
+        setActiveSkillLoadout(nextSkills);
+
+        const nextGold =
+          typeof res.data.remainingGold === 'number'
+            ? res.data.remainingGold
+            : goldRef.current;
+        goldRef.current = nextGold;
+        setGold(nextGold);
+
+        const nextStats = { ...statsRef.current };
+        if (res.data.nextAvailablePoints && typeof res.data.nextAvailablePoints === 'object') {
+          for (const statKey of Object.keys(nextStats) as Array<keyof typeof nextStats>) {
+            const pts = res.data.nextAvailablePoints[statKey];
+            if (typeof pts === 'number') {
+              nextStats[statKey] = { ...nextStats[statKey], pointsAvailable: pts };
+            }
+          }
+        }
+        statsRef.current = nextStats;
+        setStats(nextStats);
+
+        persistCurrentProfileUpdates({
+          gold: nextGold,
+          stats: nextStats,
+          unlockedTalentRanks: nextRanks,
+          activeSkillLoadout: nextSkills,
+        });
+
+        return {
+          ok: true,
+          goldCost: res.data.goldCost,
+          totalPointsRefunded: res.data.totalPointsRefunded,
+        };
+      }
+      if (res.statusCode && res.statusCode < 500) {
+        return { ok: false, error: res.error || 'Failed to respec talents.' };
+      }
+    }
+
+    const availablePoints: Partial<Record<TalentGoverningStat, number>> = {
+      STRENGTH: statsRef.current.STRENGTH?.pointsAvailable ?? 0,
+      ENDURANCE: statsRef.current.ENDURANCE?.pointsAvailable ?? 0,
+      AGILITY: statsRef.current.AGILITY?.pointsAvailable ?? 0,
+      DEXTERITY: statsRef.current.DEXTERITY?.pointsAvailable ?? 0,
+      CONSTITUTION: statsRef.current.CONSTITUTION?.pointsAvailable ?? 0,
+      WISDOM: statsRef.current.WISDOM?.pointsAvailable ?? 0,
+      SPIRIT: statsRef.current.SPIRIT?.pointsAvailable ?? 0,
+    };
+
+    const respecRes = respecCharacterTalents({
+      currentGold: goldRef.current,
+      availablePoints,
+      unlockedNodeRanks: unlockedTalentRanksRef.current,
+      activeSkillLoadout: activeSkillLoadoutRef.current,
+    });
+
+    if (!respecRes.ok) {
+      return { ok: false, error: respecRes.error };
+    }
+
+    const nextStats = { ...statsRef.current };
+    for (const statKey of Object.keys(respecRes.nextAvailablePoints) as TalentGoverningStat[]) {
+      if (nextStats[statKey]) {
+        nextStats[statKey] = {
+          ...nextStats[statKey],
+          pointsAvailable: respecRes.nextAvailablePoints[statKey],
+        };
+      }
+    }
+
+    goldRef.current = respecRes.remainingGold;
+    setGold(respecRes.remainingGold);
+    statsRef.current = nextStats;
+    setStats(nextStats);
+    unlockedTalentRanksRef.current = respecRes.nextUnlockedNodeRanks;
+    setUnlockedTalentRanks(respecRes.nextUnlockedNodeRanks);
+    activeSkillLoadoutRef.current = respecRes.nextActiveSkillLoadout;
+    setActiveSkillLoadout(respecRes.nextActiveSkillLoadout);
+
+    persistCurrentProfileUpdates({
+      gold: respecRes.remainingGold,
+      stats: nextStats,
+      unlockedTalentRanks: respecRes.nextUnlockedNodeRanks,
+      activeSkillLoadout: respecRes.nextActiveSkillLoadout,
+    });
+
+    return {
+      ok: true,
+      goldCost: respecRes.goldCost,
+      totalPointsRefunded: respecRes.totalPointsRefunded,
+    };
+  }, [isAuthenticated, persistCurrentProfileUpdates, serverOnline]);
+
   const startGatheringTask = useCallback(
     (
       nodeSlug: string,
@@ -7338,6 +8328,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     startGuildQuestEncounter,
     completeGuildQuestEncounter,
     syncOfflineGuildRuns,
+    activeProgramEnrollment,
+    enrollInWorkoutProgram,
+    guideOnboardingCompleted,
+    completeGuideOnboarding,
+    dismissGuideOnboarding,
+    craftItemRecipe,
+    upgradeInventoryGear,
+    reforgeInventoryGear,
+    buyTraderOffer,
+    sellInventoryItemToTrader,
+    respecCharacterTalentTrees,
     historicalPRs,
     workoutsLoggedCount,
     consistencyStreak,

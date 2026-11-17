@@ -1,6 +1,10 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import type { CharacterCustomizationConfig, CharacterRace } from '@goki/game-engine';
+import type {
+  AffixReforgeMode,
+  CharacterCustomizationConfig,
+  CharacterRace,
+} from '@goki/game-engine';
 import {
   getStoredAuthToken,
   removeStoredAuthToken,
@@ -508,6 +512,278 @@ export async function syncOfflineGuildQuestRunsApi(payload: {
     return { ok: true, statusCode: res.status, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network error syncing offline guild runs';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Fetches crafting recipes (`GET /api/crafting/recipes`).
+ */
+export async function fetchCraftingRecipesApi(): Promise<{
+  ok: boolean;
+  statusCode?: number;
+  data?: any;
+  error?: string;
+}> {
+  try {
+    const res = await apiFetch('/api/crafting/recipes', { method: 'GET' }, 5000);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to fetch crafting recipes' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error fetching crafting recipes';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Crafts a recipe (`POST /api/crafting/craft`).
+ */
+export async function craftRecipeApi(payload: {
+  characterId: string;
+  recipeSlug: string;
+  quantity?: number;
+  clientSeed?: string;
+}): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      '/api/crafting/craft',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to craft recipe' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error crafting recipe';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Upgrades gear tier (`POST /api/crafting/upgrade`).
+ */
+export async function upgradeGearApi(payload: {
+  characterId: string;
+  inventoryItemId: string;
+  clientSeed?: string;
+}): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      '/api/crafting/upgrade',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to upgrade gear' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error upgrading gear';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Reforges gear affixes (`POST /api/crafting/reforge`).
+ */
+export async function reforgeGearApi(payload: {
+  characterId: string;
+  inventoryItemId: string;
+  mode?: AffixReforgeMode;
+  clientSeed?: string;
+}): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      '/api/crafting/reforge',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to reforge gear' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error reforging gear';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Fetches Bramwell's rotating trader stock (`GET /api/npc/trader/stock`).
+ */
+export async function fetchTraderStockApi(date?: string): Promise<{
+  ok: boolean;
+  statusCode?: number;
+  data?: any;
+  error?: string;
+}> {
+  try {
+    const query = date ? `?date=${encodeURIComponent(date)}` : '';
+    const res = await apiFetch(`/api/npc/trader/stock${query}`, { method: 'GET' }, 5000);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to fetch trader stock' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error fetching trader stock';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Purchases an offer from Bramwell (`POST /api/npc/trader/buy`).
+ */
+export async function buyTraderOfferApi(payload: {
+  characterId: string;
+  offerId: string;
+  quantity?: number;
+  rotationDateKey?: string;
+}): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      '/api/npc/trader/buy',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to purchase trader offer' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error purchasing trader offer';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Sells an inventory item to Bramwell (`POST /api/npc/trader/sell`).
+ */
+export async function sellInventoryItemApi(payload: {
+  characterId: string;
+  inventoryItemId: string;
+  quantity?: number;
+}): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      '/api/npc/trader/sell',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to sell item' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error selling item';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Respecs all character talent points (`POST /api/npc/trainer/respec`).
+ */
+export async function respecTalentsApi(characterId: string): Promise<{
+  ok: boolean;
+  statusCode?: number;
+  data?: any;
+  error?: string;
+}> {
+  try {
+    const res = await apiFetch(
+      '/api/npc/trainer/respec',
+      {
+        method: 'POST',
+        body: JSON.stringify({ characterId }),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to respec talents' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error respecing talents';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Fetches Master Kaelen's coaching report (`POST /api/npc/trainer/coaching`).
+ */
+export async function fetchTrainerCoachingApi(payload: {
+  characterId: string;
+  workoutHistory?: unknown[];
+}): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      '/api/npc/trainer/coaching',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to fetch trainer coaching' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error fetching trainer coaching';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Completes Auren's Level-1 Guide FTUE onboarding (`POST /api/characters/:id/onboarding/complete`).
+ */
+export async function completeOnboardingApi(characterId: string): Promise<{
+  ok: boolean;
+  statusCode?: number;
+  data?: any;
+  error?: string;
+}> {
+  try {
+    const res = await apiFetch(
+      `/api/characters/${characterId}/onboarding/complete`,
+      {
+        method: 'POST',
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to complete onboarding' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error completing onboarding';
     return { ok: false, error: message };
   }
 }

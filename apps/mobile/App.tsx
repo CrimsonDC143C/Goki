@@ -286,6 +286,9 @@ const MainShell: React.FC<MainShellProps> = ({
               onChangeSubView={setHeroSubView}
               initialTalentStat={talentFocusStat}
               onNavigateToTrain={() => handleTabPress('TRAIN')}
+              onNavigateToAdventure={() => handleTabPress('ADVENTURE')}
+              onNavigateToArtisan={() => handleTabPress('ARTISAN')}
+              onNavigateToSocial={() => handleTabPress('SOCIAL')}
             />
           )}
           {tab === 'ADVENTURE' && <AdventureHubScreen />}

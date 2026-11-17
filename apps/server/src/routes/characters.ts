@@ -886,6 +886,8 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
         'titanite_ember',
         'champion_sigil_shard',
         'raid_essence_crystal',
+        'astral_dew_vial',
+        'arcane_reforge_dust',
       ]);
 
       if (

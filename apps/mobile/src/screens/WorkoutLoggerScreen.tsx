@@ -231,6 +231,8 @@ export interface WorkoutLoggerScreenProps {
   onOpenHistory?: () => void;
   externalLoadedSession?: CompletedWorkoutRecord | null;
   onConsumeExternalSession?: () => void;
+  externalLoadedPreset?: WorkoutPresetDefinition | null;
+  onConsumeExternalPreset?: () => void;
 }
 
 // ============================================================================
@@ -246,6 +248,8 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   onOpenHistory,
   externalLoadedSession,
   onConsumeExternalSession,
+  externalLoadedPreset,
+  onConsumeExternalPreset,
 }) => {
   const {
     activeCharacterId,
@@ -930,6 +934,14 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       onConsumeExternalSession?.();
     }
   }, [externalLoadedSession, handleLoadSessionIntoWorkout, onConsumeExternalSession]);
+
+  useEffect(() => {
+    if (externalLoadedPreset) {
+      handleLoadPreset(externalLoadedPreset);
+      onConsumeExternalPreset?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalLoadedPreset]);
 
   const phaseRef = useRef(phase);
   phaseRef.current = phase;

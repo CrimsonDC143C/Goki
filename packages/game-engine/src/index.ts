@@ -19,3 +19,5 @@ export * from './strengthlog-exercise-catalog';
 export * from './item-affix-engine';
 export * from './character-customization';
 export * from './turn-based-combat';
+export * from './crafting-economy';
+export * from './fitness-coaching';

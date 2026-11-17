@@ -10,10 +10,12 @@ import { GameTimerScheduler, createNoopTimerScheduler } from './queues/bullmq-wo
 import { registerAuthRoutes } from './routes/auth';
 import { registerAdventurersGuildRoutes } from './routes/adventurers-guild';
 import { registerCharacterRoutes } from './routes/characters';
+import { registerCraftingRoutes } from './routes/crafting';
 import { registerDiagnosticsRoutes, forwardWebhookAlert } from './routes/diagnostics';
 import { registerDungeonRoutes } from './routes/dungeons';
 import { registerGatheringRoutes } from './routes/gathering';
 import { registerGuildAndRaidRoutes } from './routes/guilds-raids';
+import { registerNpcHubRoutes } from './routes/npc-hub';
 import { registerPresetRoutes } from './routes/presets';
 import { registerTalentRoutes } from './routes/talents';
 import { registerVersionRoutes } from './routes/version';
@@ -125,6 +127,8 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
   registerGatheringRoutes(app, options.db, timers);
   registerDungeonRoutes(app, options.db, timers, wsManager);
   registerAdventurersGuildRoutes(app, options.db);
+  registerCraftingRoutes(app, options.db);
+  registerNpcHubRoutes(app, options.db);
   registerGuildAndRaidRoutes(app, options.db, timers, wsManager);
 
   return app;

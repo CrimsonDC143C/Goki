@@ -42,7 +42,11 @@ import { CHARACTER_APPEARANCES } from '../assets/characterArtRegistry';
 import { CharacterManagerModal } from '../components/CharacterManagerModal';
 import { CharacterRigRenderer, type RigAnimationState } from '../components/character';
 import { RpgIcon } from '../components/icons/RpgIcon';
-import { NpcDialogueOverlay } from '../components/npc';
+import {
+  GuideOnboardingModal,
+  NpcDialogueOverlay,
+  NpcPortraitSvg,
+} from '../components/npc';
 import {
   HairlineDivider,
   SegmentedControl,
@@ -61,6 +65,9 @@ export interface HeroHubScreenProps {
   onChangeSubView?: (view: HeroSubView) => void;
   initialTalentStat?: HolisticStatType | StatType;
   onNavigateToTrain?: () => void;
+  onNavigateToAdventure?: () => void;
+  onNavigateToArtisan?: () => void;
+  onNavigateToSocial?: () => void;
 }
 
 const PREVIEW_ANIMS: ReadonlyArray<{ id: RigAnimationState; label: string }> = [
@@ -175,6 +182,9 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
   onChangeSubView,
   initialTalentStat,
   onNavigateToTrain,
+  onNavigateToAdventure,
+  onNavigateToArtisan,
+  onNavigateToSocial,
 }) => {
   const {
     race,
@@ -185,6 +195,8 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
     overallLevel,
     stats,
     activeCharacterId,
+    guideOnboardingCompleted,
+    dismissGuideOnboarding,
     updateCharacterCustomization,
     updateCharacterAppearance,
   } = useGame();
@@ -201,6 +213,7 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
     HolisticStatType | StatType | undefined
   >(initialTalentStat);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [ftueOpen, setFtueOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [savingAppearanceId, setSavingAppearanceId] = useState<string | null>(null);
   const [savingCustomization, setSavingCustomization] = useState(false);
@@ -374,13 +387,47 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
       {/* Active Sub-View */}
       <View style={styles.body}>
         {subView === 'OVERVIEW' && (
-          <CharacterProfileScreen
-            onJumpToTalents={(stat) => {
-              if (stat) setTalentFocusStat(stat);
-              setSubView('TALENTS');
-            }}
-            onOpenAppearance={() => setSubView('APPEARANCE')}
-          />
+          <View style={styles.overviewWrap}>
+            {overallLevel <= 1 && !guideOnboardingCompleted && (
+              <View style={styles.ftueBanner} testID="hero-ftue-banner">
+                <NpcPortraitSvg npcId="GUIDE" size={44} expression="happy" />
+                <View style={styles.ftueTextCol}>
+                  <Text style={styles.ftueEyebrow}>SANCTUM ORIENTATION</Text>
+                  <Text style={styles.ftueTitle}>
+                    Meet Auren to pick your lineage & claim a welcome potion.
+                  </Text>
+                  <View style={styles.ftueBtnRow}>
+                    <TouchableOpacity
+                      style={styles.ftueStartBtn}
+                      onPress={() => setFtueOpen(true)}
+                      activeOpacity={0.8}
+                      testID="hero-start-ftue-btn"
+                    >
+                      <RpgIcon name="sparkles" size={12} color={SURFACES.canvas} />
+                      <Text style={styles.ftueStartBtnText}>
+                        Begin Level-1 Walkthrough
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.ftueDismissBtn}
+                      onPress={dismissGuideOnboarding}
+                      activeOpacity={0.75}
+                      testID="hero-dismiss-ftue-btn"
+                    >
+                      <Text style={styles.ftueDismissBtnText}>Dismiss</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
+            <CharacterProfileScreen
+              onJumpToTalents={(stat) => {
+                if (stat) setTalentFocusStat(stat);
+                setSubView('TALENTS');
+              }}
+              onOpenAppearance={() => setSubView('APPEARANCE')}
+            />
+          </View>
         )}
 
         {subView === 'APPEARANCE' && (
@@ -1008,6 +1055,17 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
         ]}
         actionChips={[
           {
+            id: 'chip-ftue-walkthrough',
+            label: 'Level-1 Walkthrough',
+            icon: 'compass',
+            variant: 'primary',
+            testID: 'chip-ftue-walkthrough',
+            onPress: () => {
+              setGuideOpen(false);
+              setFtueOpen(true);
+            },
+          },
+          {
             id: 'chip-appearance',
             label: 'Appearance',
             icon: 'palette',
@@ -1031,7 +1089,6 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
                   id: 'chip-train',
                   label: 'Start Training',
                   icon: 'train' as const,
-                  variant: 'primary' as const,
                   onPress: () => {
                     setGuideOpen(false);
                     onNavigateToTrain();
@@ -1040,6 +1097,15 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
               ]
             : []),
         ]}
+      />
+
+      <GuideOnboardingModal
+        visible={ftueOpen}
+        onClose={() => setFtueOpen(false)}
+        onNavigateToTrain={onNavigateToTrain}
+        onNavigateToAdventure={onNavigateToAdventure}
+        onNavigateToArtisan={onNavigateToArtisan}
+        onNavigateToSocial={onNavigateToSocial}
       />
 
       <CharacterManagerModal
@@ -1391,5 +1457,66 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textSecondary,
     marginTop: 1,
+  },
+  overviewWrap: {
+    flex: 1,
+  },
+  ftueBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    backgroundColor: SURFACES.layer1,
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.sm,
+    padding: SPACING.md,
+    borderRadius: RADII.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.goldHairline,
+  },
+  ftueTextCol: {
+    flex: 1,
+    gap: 4,
+  },
+  ftueEyebrow: {
+    ...TYPOGRAPHY.eyebrow,
+    color: COLORS.gold,
+  },
+  ftueTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    lineHeight: 16,
+  },
+  ftueBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginTop: 2,
+  },
+  ftueStartBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: COLORS.gold,
+    borderRadius: RADII.md,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  ftueStartBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: SURFACES.canvas,
+  },
+  ftueDismissBtn: {
+    backgroundColor: SURFACES.layer2,
+    borderRadius: RADII.md,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  ftueDismissBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
   },
 });

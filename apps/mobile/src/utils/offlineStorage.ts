@@ -108,6 +108,12 @@ export interface PersistedCharacterProfile {
   completedGuildQuestSlugs?: string[];
   consistencyStreak?: number;
   historicalPRs?: Record<string, any>;
+  guideOnboardingCompleted?: boolean;
+  activeProgramEnrollment?: {
+    programId: string;
+    currentWeek: number;
+    currentDayIndex: number;
+  } | null;
   lastSyncedAtMs?: number;
 }
 

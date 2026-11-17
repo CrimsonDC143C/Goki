@@ -32,7 +32,7 @@ These core decisions guide every milestone below:
 | **M1** | Design System, 5-Tab Shell, & Workout Canvas Cleanup | `[x]` Complete |
 | **M2** | Modular 2D Bone-Rigged Character & Morphable Gear Engine | `[x]` Complete |
 | **M3** | Live Turn-Based Combat & Adventurer's Guild Hub | `[x]` Complete |
-| **M4** | Artisan Economy, NPC Cast, & Fitness Coaching | `[ ]` Planned |
+| **M4** | Artisan Economy, NPC Cast, & Fitness Coaching | `[x]` Complete |
 | **M5** | Social Hub, Real-World Gym Clans, & Adventurer Companies | `[ ]` Planned |
 | **M6** | Full RPG Illustration Polish & Real-Time Co-op Readiness | `[ ]` Planned |
 
@@ -101,23 +101,23 @@ These core decisions guide every milestone below:
 ---
 
 ## Milestone 4: Artisan Economy, NPC Cast, & Fitness Coaching
-**Status:** `[ ]` Planned  
+**Status:** `[x]` Complete  
 **Goal:** Close the gathering-to-combat economy loop, bring the RPG hub to life with functional NPCs, and connect real-world training landmarks to actionable coaching.
 
 ### Actionable Steps
-- [ ] **Crafting, Reforging & Potion Brewing (`@goki/game-engine`, `apps/server`):**
-  - [ ] Define crafting recipes turning gathered Mining, Foraging, Smelting, and Alchemy outputs into combat consumables, gear upgrades, and affix reforges.
-  - [ ] Add `/api/crafting` routes with transactional material deduction and item minting.
-  - [ ] Upgrade the `Artisan` tab into unified `Gather | Craft & Reforge` sub-views.
-- [ ] **NPC Trader & Trainer Systems (`apps/server`, `apps/mobile`):**
-  - [ ] Add **Trader NPC** rotating shop stock and Gold-sink purchases/selling.
-  - [ ] Add **Trainer NPC** talent tree respec functionality (Gold cost) and stat build guidance.
-- [ ] **Trainer NPC Smart Fitness Coaching (`@goki/game-engine`, `Train` / `Hero`):**
-  - [ ] Connect `calculateWeeklyMuscleVolumeLandmarks` (`MEV/MAV/MRV` in `intra-workout-ergonomics.ts`) and `fatigue-manager.ts` to generate deterministic split recommendations, deload prompts, and progressive overload cues delivered via Trainer NPC pop-ups.
-  - [ ] Add multi-week workout program templates built on `workout-presets-rest.ts`.
-- [ ] **Guide NPC Onboarding (FTUE):**
-  - [ ] Build a clean Level-1 walkthrough led by the **Guide NPC** introducing race selection, the first workout log, the Adventurer's Guild, and the default Home/Open-World Clan.
-- [ ] **Verification:** Unit tests for crafting/reforging & coaching rules, API transaction tests for shop/respec/crafting, and onboarding flow verification.
+- [x] **Crafting, Reforging & Potion Brewing (`@goki/game-engine`, `apps/server`):**
+  - [x] Define crafting recipes turning gathered Mining, Foraging, Smelting, and Alchemy outputs into combat consumables, gear upgrades, and affix reforges.
+  - [x] Add `/api/crafting` routes with transactional material deduction and item minting.
+  - [x] Upgrade the `Artisan` tab into unified `Gather | Craft & Reforge` sub-views.
+- [x] **NPC Trader & Trainer Systems (`apps/server`, `apps/mobile`):**
+  - [x] Add **Trader NPC** rotating shop stock and Gold-sink purchases/selling.
+  - [x] Add **Trainer NPC** talent tree respec functionality (Gold cost) and stat build guidance.
+- [x] **Trainer NPC Smart Fitness Coaching (`@goki/game-engine`, `Train` / `Hero`):**
+  - [x] Connect `calculateWeeklyMuscleVolumeLandmarks` (`MEV/MAV/MRV` in `intra-workout-ergonomics.ts`) and `fatigue-manager.ts` to generate deterministic split recommendations, deload prompts, and progressive overload cues delivered via Trainer NPC pop-ups.
+  - [x] Add multi-week workout program templates built on `workout-presets-rest.ts`.
+- [x] **Guide NPC Onboarding (FTUE):**
+  - [x] Build a clean Level-1 walkthrough led by the **Guide NPC** introducing race selection, the first workout log, the Adventurer's Guild, and the default Home/Open-World Clan.
+- [x] **Verification:** Unit tests for crafting/reforging & coaching rules, API transaction tests for shop/respec/crafting, and onboarding flow verification.
 
 ---
 
