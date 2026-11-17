@@ -24,6 +24,12 @@ enum GameMode {
   IRONMAN_VERIFIED  // Reserved for future biometric/wearable-verified realm
 }
 
+enum CharacterRace {
+  HUMAN
+  ONI
+  KITSUNE
+}
+
 enum VerificationSource {
   MANUAL_HONESTY        // MVP default
   APPLE_HEALTHKIT       // Reserved for future Ironman mode
@@ -249,6 +255,8 @@ model Character {
   name                 String                 @unique
   appearanceId         String                 @default("oni_warlord")
   avatarSpriteId       String                 @default("oni_warlord")
+  race                 CharacterRace          @default(HUMAN)
+  customizationConfig  Json?
   deletedAt            DateTime?
   gameMode             GameMode               @default(STANDARD)
   adventurerRank       AdventurerRank         @default(COPPER)

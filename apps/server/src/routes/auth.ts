@@ -4,7 +4,11 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
 import { isPrismaUniqueConstraintError, withDbTransaction } from '../services/game-operations';
-import { SOFT_DELETE_RETENTION_MS, computeDaysRemaining } from './characters';
+import {
+  SOFT_DELETE_RETENTION_MS,
+  computeDaysRemaining,
+  resolveStarterCustomization,
+} from './characters';
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -12,9 +16,11 @@ const registerSchema = z.object({
   password: z.string().min(6).max(128),
   characterName: z.string().min(2).max(32).optional(),
   gameMode: z.enum(['STANDARD', 'IRONMAN_VERIFIED']).default('STANDARD').optional(),
-  appearanceId: z.string().default('oni_warlord').optional(),
-  avatarSpriteId: z.string().default('oni_warlord').optional(),
+  appearanceId: z.string().optional(),
+  avatarSpriteId: z.string().optional(),
   timezone: z.string().default('UTC').optional(),
+  race: z.enum(['HUMAN', 'ONI', 'KITSUNE']).optional(),
+  customizationConfig: z.unknown().optional(),
 });
 
 const loginSchema = z.object({
@@ -49,6 +55,21 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
     const chosenCharacterName = body.characterName?.trim() || `${body.username}'s Hero`;
     const chosenGameMode = body.gameMode ?? 'STANDARD';
     const chosenAppearance = body.appearanceId || body.avatarSpriteId || 'oni_warlord';
+
+    const starterCustomization = resolveStarterCustomization({
+      race: body.race,
+      appearanceId: body.appearanceId,
+      avatarSpriteId: body.avatarSpriteId,
+      customizationConfig: body.customizationConfig,
+    });
+    if (!starterCustomization.ok) {
+      return reply.status(400).send({
+        error: starterCustomization.errors.join(' '),
+        errors: starterCustomization.errors,
+      });
+    }
+    const chosenRace = starterCustomization.race;
+    const resolvedConfig = starterCustomization.config;
 
     // Check case-insensitive character name uniqueness before creating user+character
     const existingCharWithName =
@@ -97,6 +118,8 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
               gameMode: chosenGameMode,
               appearanceId: chosenAppearance,
               avatarSpriteId: chosenAppearance,
+              race: chosenRace,
+              customizationConfig: resolvedConfig as any,
               stats: { create: {} },
               fatigueState: { create: {} },
               equipmentLoadout: { create: {} },

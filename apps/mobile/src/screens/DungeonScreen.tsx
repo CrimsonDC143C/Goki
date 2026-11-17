@@ -4,7 +4,8 @@ import { isAdventurerRankSufficient, type DungeonDefinition } from '@goki/game-e
 import { AutoBattlerArena } from './Battle/AutoBattlerArena';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useGame } from '../state/GameContext';
-import { COLORS } from '../theme';
+import { RpgIcon } from '../components/icons/RpgIcon';
+import { COLORS, SURFACES } from '../theme';
 
 export const DungeonScreen: React.FC = () => {
   const {
@@ -138,12 +139,18 @@ export const DungeonScreen: React.FC = () => {
 
               <View style={styles.tierMetaRow}>
                 <Text style={styles.tierRoomCount}>{d.rooms.length} Rooms</Text>
-                <Text style={styles.tierPowerText}>⚡ {d.recommendedPower ?? 100}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                  <RpgIcon name="bolt" size={11} color={COLORS.gold} />
+                  <Text style={styles.tierPowerText}>{d.recommendedPower ?? 100}</Text>
+                </View>
               </View>
 
               {!unlocked && (
                 <View style={styles.tierLockOverlay}>
-                  <Text style={styles.tierLockText}>🔒 Req. {d.requiredRank}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                    <RpgIcon name="lock" size={9} color="#FFFFFF" />
+                    <Text style={styles.tierLockText}>Req. {d.requiredRank}</Text>
+                  </View>
                 </View>
               )}
             </Pressable>
@@ -202,21 +209,38 @@ export const DungeonScreen: React.FC = () => {
           }}
           testID="dungeon-launch-expedition-btn"
         >
-          <Text
-            style={[
-              styles.launchBtnText,
-              (activeDungeonRun?.status === 'ACTIVE_WINDOW' || !isSelectedUnlocked) &&
-                styles.btnDisabledText,
-            ]}
-          >
-            {activeDungeonRun?.status === 'ACTIVE_WINDOW'
-              ? '⏳ 24-Hour Expedition Window Active'
-              : !isSelectedUnlocked
-                ? `🔒 Locked — Requires ${selectedDungeon.requiredRank} Adventurer Rank`
-                : `🏰 Lock In 24-Hour Run (${1 + selectedAllies.length} Player${
-                    selectedAllies.length > 0 ? 's' : ' Solo'
-                  })`}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <RpgIcon
+              name={
+                activeDungeonRun?.status === 'ACTIVE_WINDOW'
+                  ? 'watch'
+                  : !isSelectedUnlocked
+                  ? 'lock'
+                  : 'dungeon'
+              }
+              size={15}
+              color={
+                activeDungeonRun?.status === 'ACTIVE_WINDOW' || !isSelectedUnlocked
+                  ? COLORS.textMuted
+                  : '#0B0E14'
+              }
+            />
+            <Text
+              style={[
+                styles.launchBtnText,
+                (activeDungeonRun?.status === 'ACTIVE_WINDOW' || !isSelectedUnlocked) &&
+                  styles.btnDisabledText,
+              ]}
+            >
+              {activeDungeonRun?.status === 'ACTIVE_WINDOW'
+                ? '24-Hour Expedition Window Active'
+                : !isSelectedUnlocked
+                  ? `Locked — Requires ${selectedDungeon.requiredRank} Adventurer Rank`
+                  : `Lock In 24-Hour Run (${1 + selectedAllies.length} Player${
+                      selectedAllies.length > 0 ? 's' : ' Solo'
+                    })`}
+            </Text>
+          </View>
         </Pressable>
       </View>
 
@@ -233,9 +257,12 @@ export const DungeonScreen: React.FC = () => {
 
       {activeDungeonRun?.status === 'ACTIVE_WINDOW' && (
         <Pressable style={styles.resolveBtn} onPress={resolveActiveDungeonNow}>
-          <Text style={styles.resolveBtnText}>
-            ⚔️ Complete 24h Window &amp; Simulate Auto-Battler Replay
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <RpgIcon name="combat" size={15} color={COLORS.textPrimary} accentColor={COLORS.gold} />
+            <Text style={styles.resolveBtnText}>
+              Complete 24h Window &amp; Simulate Auto-Battler Replay
+            </Text>
+          </View>
         </Pressable>
       )}
     </ScrollView>
@@ -313,17 +340,18 @@ const styles = StyleSheet.create({
   },
   tierCard: {
     width: 154,
-    backgroundColor: COLORS.bgCard,
+    backgroundColor: SURFACES.layer1,
     borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairlineStrong,
     padding: 10,
     position: 'relative',
     overflow: 'hidden',
   },
   tierCardSelected: {
+    borderWidth: 1.5,
     borderColor: COLORS.gold,
-    backgroundColor: '#191E2C',
+    backgroundColor: SURFACES.layer2,
   },
   tierCardLocked: {
     opacity: 0.75,
@@ -410,10 +438,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   card: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: SURFACES.layer1,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     padding: 14,
   },
   cardHeaderRow: {

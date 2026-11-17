@@ -2,9 +2,15 @@ import React from 'react';
 import { ImageSourcePropType, StyleSheet, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Circle, Defs, Ellipse, LinearGradient, Path, Polygon, RadialGradient, Rect, Stop, SvgXml } from 'react-native-svg';
+import type {
+  CharacterCustomizationConfig,
+  CharacterRace,
+  EquipmentLoadoutMap,
+} from '@goki/game-engine';
 import { getCharacterBustSource, getCharacterStandingSource } from '../assets/characterArtRegistry';
 import { HUD_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
+import { CharacterRigRenderer, RigAnimationState } from './character';
 
 export const DEFAULT_HERO_PORTRAIT = require('../../assets/images/adventurer-portrait.png');
 
@@ -17,6 +23,10 @@ export interface CharacterPortraitFrameProps {
    * Preset appearance ID (e.g. 'oni_warlord', 'blade_dancer', etc.)
    */
   appearanceId?: string | null;
+  race?: CharacterRace;
+  customizationConfig?: CharacterCustomizationConfig | null;
+  equippedLoadout?: Partial<EquipmentLoadoutMap> | null;
+  animationState?: RigAnimationState;
   /**
    * Explicit pose override. Defaults to 'standing' for 'hero' variant and 'bust' for 'circle'/'avatar'.
    */
@@ -32,6 +42,10 @@ export interface CharacterPortraitFrameProps {
 export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
   imageSource,
   appearanceId,
+  race,
+  customizationConfig,
+  equippedLoadout,
+  animationState = 'idle',
   pose,
   variant = 'hero',
   height,
@@ -43,23 +57,30 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
   const effectivePose: 'bust' | 'standing' =
     pose ?? (variant === 'hero' ? 'standing' : 'bust');
 
+  const isSilhouette = imageSource === 'silhouette';
+  const isExternalUri =
+    typeof imageSource === 'string' &&
+    (imageSource.startsWith('http://') ||
+      imageSource.startsWith('https://') ||
+      imageSource.startsWith('file://'));
+  const isCustomImageProp = Boolean(imageSource && typeof imageSource !== 'string');
+  const useRigRenderer = !isSilhouette && !isExternalUri && !isCustomImageProp;
+  const rigAppearanceId =
+    appearanceId ?? (typeof imageSource === 'string' && imageSource.trim().length > 0 ? imageSource : undefined);
+
   let resolvedSource: ImageSourcePropType | null = null;
 
-  if (imageSource === 'silhouette') {
+  if (isSilhouette) {
     resolvedSource = null;
   } else if (appearanceId) {
     resolvedSource =
       effectivePose === 'bust'
         ? getCharacterBustSource(appearanceId)
         : getCharacterStandingSource(appearanceId);
-  } else if (imageSource && typeof imageSource !== 'string') {
-    resolvedSource = imageSource;
+  } else if (isCustomImageProp) {
+    resolvedSource = imageSource as ImageSourcePropType;
   } else if (typeof imageSource === 'string' && imageSource.trim().length > 0) {
-    const isUri =
-      imageSource.startsWith('http://') ||
-      imageSource.startsWith('https://') ||
-      imageSource.startsWith('file://');
-    if (isUri) {
+    if (isExternalUri) {
       resolvedSource = { uri: imageSource };
     } else {
       resolvedSource =
@@ -84,7 +105,18 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
           isActive && styles.circleOuterActive,
         ]}
       >
-        {resolvedSource ? (
+        {useRigRenderer ? (
+          <CharacterRigRenderer
+            mode={effectivePose === 'standing' ? 'full' : 'bust'}
+            race={race}
+            customizationConfig={customizationConfig}
+            appearanceId={rigAppearanceId}
+            equippedLoadout={equippedLoadout}
+            animationState={animationState}
+            width={size - 4}
+            height={size - 4}
+          />
+        ) : resolvedSource ? (
           <ExpoImage
             source={resolvedSource as any}
             style={styles.circleImage}
@@ -143,7 +175,18 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
     const size = height ?? 76;
     return (
       <View style={[styles.avatarOuter, { width: size, height: size }]}>
-        {resolvedSource ? (
+        {useRigRenderer ? (
+          <CharacterRigRenderer
+            mode={effectivePose === 'standing' ? 'full' : 'bust'}
+            race={race}
+            customizationConfig={customizationConfig}
+            appearanceId={rigAppearanceId}
+            equippedLoadout={equippedLoadout}
+            animationState={animationState}
+            width={size - 4}
+            height={size - 4}
+          />
+        ) : resolvedSource ? (
           <ExpoImage
             source={resolvedSource as any}
             style={styles.avatarImage}
@@ -198,6 +241,8 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
   }
 
   const frameHeight = height ?? 290;
+  const rigBoxWidth = Math.round(frameHeight * (2 / 3));
+  const rigBoxHeight = Math.max(120, frameHeight - (bottomClearance ?? 0));
 
   return (
     <View style={[styles.heroFrame, { height: frameHeight }]}>
@@ -215,7 +260,43 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
         <SvgXml xml={HUD_SVGS.cornerFiligreeLarge} width={32} height={32} />
       </View>
 
-      {resolvedSource ? (
+      {useRigRenderer ? (
+        <>
+          <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Defs>
+              <LinearGradient id="heroRigVignette" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor="#141824" stopOpacity="0.6" />
+                <Stop offset="0.55" stopColor="#0D0F14" stopOpacity="0.85" />
+                <Stop offset="1" stopColor="#090C12" stopOpacity="0.98" />
+              </LinearGradient>
+              <RadialGradient id="heroRigRadial" cx="50%" cy="42%" r="55%">
+                <Stop offset="0%" stopColor="#8B2637" stopOpacity="0.28" />
+                <Stop offset="65%" stopColor="#090C12" stopOpacity="0.55" />
+                <Stop offset="100%" stopColor="#090C12" stopOpacity="0.92" />
+              </RadialGradient>
+            </Defs>
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroRigVignette)" />
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#heroRigRadial)" />
+          </Svg>
+          <View
+            style={[
+              styles.heroRigWrap,
+              bottomClearance !== undefined ? { paddingBottom: bottomClearance } : null,
+            ]}
+          >
+            <CharacterRigRenderer
+              mode={effectivePose === 'bust' ? 'bust' : 'full'}
+              race={race}
+              customizationConfig={customizationConfig}
+              appearanceId={rigAppearanceId}
+              equippedLoadout={equippedLoadout}
+              animationState={animationState}
+              width={rigBoxWidth}
+              height={rigBoxHeight}
+            />
+          </View>
+        </>
+      ) : resolvedSource ? (
         <>
           {/* Layer 1: Atmospheric Blurred Backdrop (Fills Wide Frame, Soft Dark-Fantasy Lighting) */}
           <ExpoImage
@@ -318,6 +399,15 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  heroRigWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cornerFiligree: {
     position: 'absolute',

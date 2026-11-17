@@ -1,6 +1,8 @@
 import { File, Paths } from 'expo-file-system';
 import { Platform } from 'react-native';
 import {
+  CharacterCustomizationConfig,
+  CharacterRace,
   HeartRateZone,
   QueuedOfflineWorkoutPayload,
   WorkoutSpoilsReceipt,
@@ -67,6 +69,8 @@ export interface PersistedCharacterProfile {
   gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
   appearanceId?: string;
   avatarSpriteId?: string;
+  race?: CharacterRace;
+  customizationConfig?: CharacterCustomizationConfig;
   deletedAt?: string | null;
   daysRemaining?: number;
   overallLevel: number;

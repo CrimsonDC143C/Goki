@@ -11,7 +11,8 @@ import {
   normalizeGymId,
   resolveExerciseStickyNote,
 } from '@goki/game-engine';
-import { CRIMSON_ONI } from '../theme';
+import { RpgIcon } from './icons/RpgIcon';
+import { COLORS, CRIMSON_ONI, SURFACES } from '../theme';
 
 export interface ExerciseStickyNoteRowProps {
   exerciseId: string;
@@ -97,9 +98,12 @@ export const ExerciseStickyNoteRow: React.FC<ExerciseStickyNoteRowProps> = ({
                 onPress={() => setDraftNote(og.note)}
                 activeOpacity={0.75}
               >
-                <Text style={styles.otherGymChipText} numberOfLines={1}>
-                  📋 Copy from {og.gymName}: “{og.note}”
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <RpgIcon name="scroll" size={11} color={COLORS.textSecondary} />
+                  <Text style={styles.otherGymChipText} numberOfLines={1}>
+                    Copy from {og.gymName}: “{og.note}”
+                  </Text>
+                </View>
               </TouchableOpacity>
             ))}
           </View>
@@ -115,9 +119,12 @@ export const ExerciseStickyNoteRow: React.FC<ExerciseStickyNoteRowProps> = ({
         onPress={() => setEditing(true)}
         activeOpacity={0.7}
       >
-        <Text style={styles.emptyPinText} numberOfLines={1}>
-          📌 Gym-Specific Notes (seat height, pin placement, cues...)
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <RpgIcon name="pin" size={11} color="#64738F" />
+          <Text style={styles.emptyPinText} numberOfLines={1}>
+            Add gym setup note (seat height, pin placement, cues...)
+          </Text>
+        </View>
       </TouchableOpacity>
     );
   }
@@ -126,7 +133,7 @@ export const ExerciseStickyNoteRow: React.FC<ExerciseStickyNoteRowProps> = ({
     resolved.source === 'ACTIVE_GYM' && isSpecificGym
       ? `@ ${shortGymLabel}`
       : resolved.source === 'OTHER_GYM' && resolved.sourceGymName
-        ? `↪ ${resolved.sourceGymName}`
+        ? `from ${resolved.sourceGymName}`
         : null;
 
   return (
@@ -135,8 +142,9 @@ export const ExerciseStickyNoteRow: React.FC<ExerciseStickyNoteRowProps> = ({
       onPress={() => setEditing(true)}
       activeOpacity={0.75}
     >
+      <RpgIcon name="pin" size={12} color={COLORS.gold} />
       <Text style={styles.pinnedText} numberOfLines={1}>
-        📌 {resolved.note}
+        {resolved.note}
       </Text>
       {scopeBadge ? <Text style={styles.scopePill}>{scopeBadge}</Text> : null}
     </TouchableOpacity>
@@ -149,20 +157,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   emptyPinText: {
-    color: '#6B7280',
-    fontSize: 10,
+    color: '#64738F',
+    fontSize: 11,
     fontWeight: '600',
   },
   pinnedRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#231F18',
-    borderColor: 'rgba(198, 154, 69, 0.4)',
-    borderWidth: 1,
+    backgroundColor: SURFACES.layer1,
     borderRadius: 6,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
     marginBottom: 6,
     gap: 6,
   },

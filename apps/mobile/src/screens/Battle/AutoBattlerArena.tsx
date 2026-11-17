@@ -39,6 +39,13 @@ import {
   ArenaAnimatedView,
   useArenaMotionDriver,
 } from '../../components/battle/reanimatedRuntime';
+import {
+  CharacterRigRenderer,
+  RIG_STAGE_HEIGHT,
+  RIG_STAGE_WIDTH,
+  type RigAnimationState,
+} from '../../components/character';
+import { useGame } from '../../state/GameContext';
 
 export interface AutoBattlerArenaProps {
   dungeon: DungeonDefinition;
@@ -200,6 +207,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
   party,
   onDismiss,
 }) => {
+  const { race, customizationConfig, equipmentLoadout } = useGame();
   const [viewportWidth, setViewportWidth] = useState<number>(380);
 
   // Playback state
@@ -1084,6 +1092,25 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
           const leadAnim = heroAnimStates[leadHero.id] ?? 'idle';
           const effectiveHeroState: AnimationState =
             leadHero.hp <= 0 ? 'death' : isMarching ? 'walk' : leadAnim;
+          const isVictory = Boolean(
+            replay &&
+              replay.outcome === 'VICTORY' &&
+              cursorIndex >= replay.events.length - 1
+          );
+          const rigAnimState: RigAnimationState =
+            effectiveHeroState === 'death'
+              ? 'death'
+              : isVictory
+              ? 'victory'
+              : (effectiveHeroState as RigAnimationState);
+          const rigWidth = Math.round(100 * leadPos.scale);
+          const rigHeight = Math.round(125 * leadPos.scale);
+          const rigScale = Math.min(rigWidth / RIG_STAGE_WIDTH, rigHeight / RIG_STAGE_HEIGHT);
+          const rigBottomOffset = Math.round(
+            leadPos.baselineBottom -
+              ((RIG_STAGE_HEIGHT - 250) * rigScale +
+                (rigHeight - RIG_STAGE_HEIGHT * rigScale) / 2)
+          );
           const isLeadActiveActor = activeActorId === leadHero.id;
           const isLeadTarget = activeTargetId === leadHero.id;
 
@@ -1094,22 +1121,35 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                 styles.unitPositioner,
                 {
                   left: leadPos.leftPx,
-                  bottom: leadPos.bottomOffset,
+                  bottom: rigBottomOffset,
                   zIndex: leadPos.zIndex,
                 },
                 isLeadActiveActor ? heroTransformStyle : undefined,
               ]}
             >
-              <SpriteAnimator
-                config={heroSheet}
-                state={effectiveHeroState}
+              <CharacterRigRenderer
+                race={race}
+                customizationConfig={customizationConfig}
+                equippedLoadout={equipmentLoadout}
+                animationState={rigAnimState}
                 actionTriggerKey={heroActionKeys[leadHero.id] ?? 0}
-                scale={leadPos.scale}
+                width={rigWidth}
+                height={rigHeight}
                 flipHorizontal={false}
                 playbackRate={isLivePatrol ? 1 : speedMultiplier}
                 hitFlash={isLeadTarget && heroHitFlash}
                 paused={!isPlaying && !isLivePatrol}
-                onAnimationComplete={(s, k) => handleHeroUnitAnimComplete(leadHero.id, s, k)}
+                onAnimationComplete={(s, k) => {
+                  if (
+                    s === 'attack' ||
+                    s === 'hurt' ||
+                    s === 'death' ||
+                    s === 'idle' ||
+                    s === 'walk'
+                  ) {
+                    handleHeroUnitAnimComplete(leadHero.id, s, k);
+                  }
+                }}
               />
             </ArenaAnimatedView>
           );

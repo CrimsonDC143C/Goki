@@ -7,35 +7,34 @@ import { BugReportModal } from './src/components/BugReportModal';
 import { CharacterManagerModal } from './src/components/CharacterManagerModal';
 import { CharacterPortraitFrame } from './src/components/CharacterPortraitFrame';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { RpgIcon, RpgIconName } from './src/components/icons/RpgIcon';
 import { TopMenuBorderArt } from './src/components/TopMenuBorderArt';
 import { UpdateBanner } from './src/components/UpdateBanner';
 import { autoUpdateManager } from './src/services/AutoUpdateManager';
-import { CharacterProfileScreen } from './src/screens/CharacterProfileScreen';
-import { DungeonScreen } from './src/screens/DungeonScreen';
-import { GatheringScreen } from './src/screens/GatheringScreen';
-import { GuildHallScreen } from './src/screens/GuildHallScreen';
+import { AdventureHubScreen } from './src/screens/AdventureHubScreen';
+import { ArtisanHubScreen } from './src/screens/ArtisanHubScreen';
+import { HeroHubScreen, HeroSubView } from './src/screens/HeroHubScreen';
 import { LandingScreen } from './src/screens/LandingScreen';
 import { OfflineWorkoutScreen } from './src/screens/OfflineWorkoutScreen';
-import { TalentBuilderScreen } from './src/screens/TalentBuilderScreen';
-import { WorkoutLoggerScreen } from './src/screens/WorkoutLoggerScreen';
+import { SocialHubScreen } from './src/screens/SocialHubScreen';
+import { TrainHubScreen } from './src/screens/TrainHubScreen';
 import { GameLocation, GameProvider, useGame } from './src/state/GameContext';
-import { COLORS, CRIMSON_ONI } from './src/theme';
+import { COLORS, CRIMSON_ONI, SURFACES } from './src/theme';
 
 export type AppMode = 'LANDING' | 'OFFLINE_WORKOUT' | 'WORLD';
 
 export type ActiveTab =
-  | 'PROFILE'
-  | 'WORKOUT'
-  | 'TALENTS'
-  | 'GATHERING'
-  | 'DUNGEON'
-  | 'GUILD';
+  | 'HERO'
+  | 'ADVENTURE'
+  | 'ARTISAN'
+  | 'SOCIAL'
+  | 'TRAIN';
 
 /**
  * Default destination tab when clicking "Enter World" on LandingScreen.
- * Designed as a clean constant so future updates can swap to a World Map screen effortlessly.
+ * Designed as a clean constant so future updates can swap effortlessly.
  */
-export const DEFAULT_WORLD_ENTRY_TAB: ActiveTab = 'PROFILE';
+export const DEFAULT_WORLD_ENTRY_TAB: ActiveTab = 'HERO';
 
 const GOKI_EMBLEM_SOURCE: ImageSourcePropType = require('./assets/favicon.png');
 
@@ -43,24 +42,29 @@ export interface LocationOption {
   key: GameLocation;
   label: string;
   name: string;
-  icon: string;
+  iconName: RpgIconName;
   desc: string;
 }
 
 const LOCATIONS: Array<LocationOption> = [
-  { key: 'TAVERN', label: '🍺 Tavern', name: 'Tavern', icon: '🍺', desc: 'Rest & Recover' },
-  { key: 'GUILD_HALL', label: '🛡️ Guild Hall', name: 'Guild Hall', icon: '🛡️', desc: 'Bounties & Roster' },
-  { key: 'GATHERING_NODE', label: '⛏️ Nodes', name: 'Gathering Nodes', icon: '⛏️', desc: 'Resource Harvesting' },
-  { key: 'DUNGEON', label: '🏰 Dungeon', name: 'Dungeon', icon: '🏰', desc: 'Delves & Spoils' },
-  { key: 'RAID_SANCTUM', label: '🐉 Raid', name: 'Raid Sanctum', icon: '🐉', desc: 'Epic Boss Battles' },
+  { key: 'TAVERN', label: 'Tavern', name: 'Sanctum', iconName: 'tavern', desc: 'Hero & Talents' },
+  { key: 'GUILD_HALL', label: 'Social Hub', name: 'Clan Hall', iconName: 'social', desc: 'Clans & Raids' },
+  { key: 'GATHERING_NODE', label: 'Artisan', name: 'Forge & Nodes', iconName: 'artisan', desc: 'Gather & Craft' },
+  { key: 'DUNGEON', label: 'Adventure', name: 'Guild & Delve', iconName: 'adventure', desc: 'Quests & Expeditions' },
+  { key: 'RAID_SANCTUM', label: 'Train', name: 'Iron Sanctum', iconName: 'train', desc: 'Workouts & History' },
 ];
 
-const TAB_ITEMS: ReadonlyArray<{ key: ActiveTab; icon: string; label: string }> = [
-  { key: 'WORKOUT', icon: '🏋️', label: 'Workout' },
-  { key: 'TALENTS', icon: '🌳', label: 'Talents' },
-  { key: 'GATHERING', icon: '⛏️', label: 'Artisan' },
-  { key: 'DUNGEON', icon: '🏰', label: 'Expeditions' },
-  { key: 'GUILD', icon: '🐉', label: 'Guild' },
+const TAB_ITEMS: ReadonlyArray<{
+  key: ActiveTab;
+  iconName: RpgIconName;
+  label: string;
+  testID: string;
+}> = [
+  { key: 'HERO', iconName: 'hero', label: 'Hero', testID: 'world-tab-hero' },
+  { key: 'ADVENTURE', iconName: 'adventure', label: 'Adventure', testID: 'world-tab-adventure' },
+  { key: 'ARTISAN', iconName: 'artisan', label: 'Artisan', testID: 'world-tab-artisan' },
+  { key: 'SOCIAL', iconName: 'social', label: 'Social', testID: 'world-tab-social' },
+  { key: 'TRAIN', iconName: 'train', label: 'Train', testID: 'world-tab-train' },
 ];
 
 interface MainShellProps {
@@ -95,6 +99,7 @@ const MainShell: React.FC<MainShellProps> = ({
   } = useGame();
 
   const insets = useSafeAreaInsets();
+  const [heroSubView, setHeroSubView] = useState<HeroSubView>('OVERVIEW');
   const [talentFocusStat, setTalentFocusStat] = useState<HolisticStatType | StatType | undefined>(
     undefined
   );
@@ -107,13 +112,13 @@ const MainShell: React.FC<MainShellProps> = ({
     | undefined;
 
   const resolvedLocationKey: GameLocation =
-    tab === 'WORKOUT'
+    tab === 'TRAIN'
       ? 'RAID_SANCTUM'
-      : tab === 'GATHERING'
+      : tab === 'ARTISAN'
         ? 'GATHERING_NODE'
-        : tab === 'DUNGEON'
+        : tab === 'ADVENTURE'
           ? 'DUNGEON'
-          : tab === 'GUILD'
+          : tab === 'SOCIAL'
             ? 'GUILD_HALL'
             : location || 'TAVERN';
 
@@ -121,23 +126,23 @@ const MainShell: React.FC<MainShellProps> = ({
 
   const handleTabPress = (nextTab: ActiveTab) => {
     const nextLoc: GameLocation =
-      nextTab === 'WORKOUT'
+      nextTab === 'TRAIN'
         ? 'RAID_SANCTUM'
-        : nextTab === 'GATHERING'
+        : nextTab === 'ARTISAN'
           ? 'GATHERING_NODE'
-          : nextTab === 'DUNGEON'
+          : nextTab === 'ADVENTURE'
             ? 'DUNGEON'
-            : nextTab === 'GUILD'
+            : nextTab === 'SOCIAL'
               ? 'GUILD_HALL'
               : 'TAVERN';
 
-    if (nextTab === 'WORKOUT') {
+    if (nextTab === 'TRAIN') {
       travelTo(nextLoc);
-      onChangeTab('WORKOUT');
+      onChangeTab('TRAIN');
       return;
     }
     // Phase 2 Zero-Cognitive-Drag Gate: Require explicit cognitive-friction confirmation mid-workout
-    if (focusLocked && tab === 'WORKOUT') {
+    if (focusLocked && tab === 'TRAIN') {
       requestFocusOverride(nextTab);
       return;
     }
@@ -177,7 +182,7 @@ const MainShell: React.FC<MainShellProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel="Report Bug or Feature Suggestion"
               >
-                <Text style={styles.hudBugBtnText}>🐛</Text>
+                <RpgIcon name="bug" size={14} color={COLORS.textSecondary} accentColor={COLORS.gold} />
               </Pressable>
 
               <View
@@ -189,22 +194,25 @@ const MainShell: React.FC<MainShellProps> = ({
               />
             </View>
 
-            {/* Center: Character Portrait Circle (slightly larger than bar, tapping opens Profile) */}
+            {/* Center: Character Portrait Circle (slightly larger than bar, tapping opens Hero Overview) */}
             <View style={styles.hudCenterPortraitWrap}>
               <Pressable
                 style={[
                   styles.hudPortraitPressable,
-                  tab === 'PROFILE' && styles.hudPortraitPressableActive,
+                  tab === 'HERO' && styles.hudPortraitPressableActive,
                 ]}
-                onPress={() => handleTabPress('PROFILE')}
+                onPress={() => {
+                  setHeroSubView('OVERVIEW');
+                  handleTabPress('HERO');
+                }}
                 accessibilityRole="button"
-                accessibilityLabel={`Character ${characterName}, Level ${overallLevel}. Tap to view Character Profile.`}
+                accessibilityLabel={`Character ${characterName}, Level ${overallLevel}. Tap to view Hero Overview.`}
               >
                 <CharacterPortraitFrame
                   variant="circle"
                   height={56}
                   isCircle
-                  isActive={tab === 'PROFILE'}
+                  isActive={tab === 'HERO'}
                   appearanceId={appearanceId}
                   imageSource={characterArtUri}
                 />
@@ -224,15 +232,23 @@ const MainShell: React.FC<MainShellProps> = ({
             {/* Right Cluster: Gold + Cosmetic Location Identifier */}
             <View style={styles.hudRightCluster}>
               <View style={styles.hudGoldPill}>
-                <Text style={styles.goldText}>🪙 {gold}g</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <RpgIcon name="coin" size={13} color={COLORS.gold} />
+                  <Text style={styles.goldText}>{gold}g</Text>
+                </View>
               </View>
 
               <View
                 style={styles.hudLocationBtn}
                 accessibilityLabel={`Current location: ${currentLocation.name}`}
               >
+                <RpgIcon
+                  name={currentLocation.iconName}
+                  size={12}
+                  color={CRIMSON_ONI.agedGoldBright}
+                />
                 <Text style={styles.hudLocationBtnText} numberOfLines={1}>
-                  {currentLocation.icon} {currentLocation.name}
+                  {currentLocation.name}
                 </Text>
               </View>
             </View>
@@ -241,15 +257,21 @@ const MainShell: React.FC<MainShellProps> = ({
           {/* Phase 2 Focus Lock replaces Instant Travel Strip during DungeonActive / Resting */}
           {focusLocked && (
             <View style={styles.focusLockBanner}>
-              <Text style={styles.focusLockText}>
-                🔒 FOCUS LOCK ({workoutMachine.phase.toUpperCase()}) • 1.25x Arrival Boon Active
-              </Text>
-              {tab !== 'WORKOUT' && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                <RpgIcon name="lock" size={13} color={COLORS.gold} />
+                <Text style={styles.focusLockText} numberOfLines={1}>
+                  FOCUS LOCK ({workoutMachine.phase.toUpperCase()}) • 1.25x Arrival Boon Active
+                </Text>
+              </View>
+              {tab !== 'TRAIN' && (
                 <Pressable
                   style={styles.returnFocusBtn}
-                  onPress={() => onChangeTab('WORKOUT')}
+                  onPress={() => onChangeTab('TRAIN')}
                 >
-                  <Text style={styles.returnFocusBtnText}>↩ Return to Set</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <RpgIcon name="chevron-left" size={12} color={COLORS.bgDeep} />
+                    <Text style={styles.returnFocusBtnText}>Return to Set</Text>
+                  </View>
                 </Pressable>
               )}
             </View>
@@ -258,48 +280,68 @@ const MainShell: React.FC<MainShellProps> = ({
 
         {/* Active Screen Viewport */}
         <View style={styles.screenBody}>
-          {tab === 'PROFILE' && (
-            <CharacterProfileScreen
-              onJumpToTalents={(stat) => {
-                if (stat) setTalentFocusStat(stat);
-                handleTabPress('TALENTS');
+          {tab === 'HERO' && (
+            <HeroHubScreen
+              activeSubView={heroSubView}
+              onChangeSubView={setHeroSubView}
+              initialTalentStat={talentFocusStat}
+              onNavigateToTrain={() => handleTabPress('TRAIN')}
+            />
+          )}
+          {tab === 'ADVENTURE' && <AdventureHubScreen />}
+          {tab === 'ARTISAN' && <ArtisanHubScreen />}
+          {tab === 'SOCIAL' && <SocialHubScreen />}
+          {tab === 'TRAIN' && (
+            <TrainHubScreen
+              onOpenOfflineLogger={onOpenOfflineLogger}
+              onReturnToLanding={onReturnToLanding}
+              onNavigateToTalents={() => {
+                setHeroSubView('TALENTS');
+                handleTabPress('HERO');
+              }}
+              onNavigateToPaperdoll={() => {
+                setHeroSubView('OVERVIEW');
+                handleTabPress('HERO');
               }}
             />
           )}
-          {tab === 'WORKOUT' && (
-            <WorkoutLoggerScreen
-              onOpenOfflineLogger={onOpenOfflineLogger}
-              onNavigateToTalents={() => handleTabPress('TALENTS')}
-              onNavigateToPaperdoll={() => handleTabPress('PROFILE')}
-            />
-          )}
-          {tab === 'TALENTS' && (
-            <TalentBuilderScreen
-              initialStat={talentFocusStat}
-              onOpenProfileGear={() => handleTabPress('PROFILE')}
-            />
-          )}
-          {tab === 'GATHERING' && <GatheringScreen />}
-          {tab === 'DUNGEON' && <DungeonScreen />}
-          {tab === 'GUILD' && <GuildHallScreen />}
         </View>
 
         {/* Bottom RPG Navigation Bar with Intra-Workout Lock Indicators */}
         <View style={styles.tabBar}>
           {TAB_ITEMS.map((item) => {
             const active = tab === item.key;
-            const locked = focusLocked && item.key !== 'WORKOUT';
+            const locked = focusLocked && item.key !== 'TRAIN';
 
             return (
               <Pressable
                 key={item.key}
                 style={[styles.tabItem, active && styles.tabItemActive]}
                 onPress={() => handleTabPress(item.key)}
+                testID={item.testID}
               >
                 <View style={styles.tabIconWrap}>
-                  <Text style={styles.tabIcon}>
-                    {locked ? '🔒' : item.icon}
-                  </Text>
+                  <RpgIcon
+                    name={locked ? 'lock' : item.iconName}
+                    size={18}
+                    color={
+                      locked
+                        ? COLORS.textMuted
+                        : active
+                        ? COLORS.gold
+                        : COLORS.textSecondary
+                    }
+                    accentColor={
+                      locked
+                        ? COLORS.textMuted
+                        : active
+                        ? COLORS.gold
+                        : COLORS.textMuted
+                    }
+                  />
+                  {item.key === 'HERO' && unclaimedSpoilsCount > 0 ? (
+                    <View style={styles.spoilsDot} />
+                  ) : null}
                 </View>
                 <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
                   {item.label}
@@ -326,7 +368,12 @@ const MainShell: React.FC<MainShellProps> = ({
             ]}
           >
             <View style={styles.frictionDialog}>
-              <Text style={styles.frictionTitle}>🛡️ Break Dungeon Focus?</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <RpgIcon name="shield" size={20} color={COLORS.gold} />
+                <Text style={[styles.frictionTitle, { marginBottom: 0 }]}>
+                  Break Dungeon Focus?
+                </Text>
+              </View>
               <Text style={styles.frictionBody}>
                 Your Stamina &amp; neural drive peak when you stay locked into your sets. Stat
                 allocation, inventory sorting, and Guild menus unlock automatically at Finish
@@ -337,9 +384,12 @@ const MainShell: React.FC<MainShellProps> = ({
                 style={styles.stayFocusedBtn}
                 onPress={cancelFocusOverride}
               >
-                <Text style={styles.stayFocusedBtnText}>
-                  ⚔️ Stay Focused on Workout (Recommended)
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <RpgIcon name="combat" size={15} color={COLORS.bgDeep} />
+                  <Text style={styles.stayFocusedBtnText}>
+                    Stay Focused on Workout (Recommended)
+                  </Text>
+                </View>
               </Pressable>
 
               <Pressable
@@ -440,7 +490,7 @@ const AppRouter: React.FC = () => {
 
   useEffect(() => {
     if (notificationTapTick > 0 && hasActiveHero) {
-      setWorldTab('WORKOUT');
+      setWorldTab('TRAIN');
       setAppMode('WORLD');
     }
   }, [notificationTapTick, hasActiveHero]);
@@ -457,7 +507,7 @@ const AppRouter: React.FC = () => {
             onSelectOfflineWorkout={() => setAppMode('OFFLINE_WORKOUT')}
             onSelectOnlineWorkout={() => {
               if (!hasActiveHero) return;
-              setWorldTab('WORKOUT');
+              setWorldTab('TRAIN');
               setAppMode('WORLD');
             }}
             onEnterWorld={() => {
@@ -592,19 +642,19 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bgDeep,
+    backgroundColor: SURFACES.canvas,
   },
   appFrame: {
     flex: 1,
     width: '100%',
     maxWidth: 960,
     alignSelf: 'center',
-    backgroundColor: COLORS.bgDeep,
+    backgroundColor: SURFACES.canvas,
   },
   hudContainer: {
-    backgroundColor: COLORS.bgCard,
-    borderBottomWidth: 1.5,
-    borderBottomColor: CRIMSON_ONI.charcoalElevated,
+    backgroundColor: SURFACES.layer1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACES.hairline,
     paddingHorizontal: 12,
     paddingTop: 2,
     paddingBottom: 8,
@@ -883,20 +933,20 @@ const styles = StyleSheet.create({
   },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: COLORS.bgCard,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    backgroundColor: SURFACES.layer1,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: SURFACES.hairline,
     paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
   },
   tabItem: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 10,
   },
   tabItemActive: {
-    backgroundColor: COLORS.bgElevated,
+    backgroundColor: SURFACES.layer3,
   },
   tabIconWrap: {
     position: 'relative',

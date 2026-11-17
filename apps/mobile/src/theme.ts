@@ -57,3 +57,85 @@ export const RARITY_COLORS: Record<string, string> = {
   LEGENDARY: '#FFA726',
   MYTHIC: '#EF5350',
 };
+
+/**
+ * Layered Dark-Slate Surface System (Milestone 1)
+ * Replaces nested 4-sided borders with subtle luminance elevation and hairline dividers.
+ */
+export const SURFACES = {
+  canvas: '#0B0E14',
+  layer1: '#111620',
+  layer2: '#171E2B',
+  layer3: '#1F2838',
+  layerHover: '#263145',
+  scrim: 'rgba(6, 8, 13, 0.78)',
+  hairline: 'rgba(148, 163, 184, 0.12)',
+  hairlineStrong: 'rgba(148, 163, 184, 0.22)',
+  goldHairline: 'rgba(245, 184, 65, 0.28)',
+  emeraldTint: 'rgba(16, 185, 129, 0.11)',
+} as const;
+
+export const TYPOGRAPHY = {
+  display: {
+    fontSize: 22,
+    fontWeight: '800' as const,
+    letterSpacing: -0.2,
+    color: '#F3F6FC',
+  },
+  titleLg: {
+    fontSize: 17,
+    fontWeight: '800' as const,
+    letterSpacing: 0.1,
+    color: '#F3F6FC',
+  },
+  titleMd: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    letterSpacing: 0.1,
+    color: '#F3F6FC',
+  },
+  eyebrow: {
+    fontSize: 10,
+    fontWeight: '800' as const,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase' as const,
+    color: '#9BA8C2',
+  },
+  body: {
+    fontSize: 13,
+    fontWeight: '500' as const,
+    lineHeight: 19,
+    color: '#F3F6FC',
+  },
+  bodySm: {
+    fontSize: 12,
+    fontWeight: '500' as const,
+    lineHeight: 17,
+    color: '#9BA8C2',
+  },
+  caption: {
+    fontSize: 11,
+    fontWeight: '600' as const,
+    color: '#64738F',
+  },
+  tabular: {
+    fontVariant: ['tabular-nums'] as ['tabular-nums'],
+  },
+} as const;
+
+export const SPACING = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+} as const;
+
+export const RADII = {
+  sm: 6,
+  md: 10,
+  lg: 14,
+  xl: 20,
+  pill: 999,
+} as const;

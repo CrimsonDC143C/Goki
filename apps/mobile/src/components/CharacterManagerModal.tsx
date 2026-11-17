@@ -9,18 +9,37 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Image as ExpoImage } from 'expo-image';
+import {
+  BASE_SILHOUETTE_OPTIONS,
+  CHARACTER_RACES,
+  CharacterCustomizationConfig,
+  CharacterMorphConfig,
+  CharacterRace,
+  CoreStatBlock,
+  EYE_COLOR_OPTIONS,
+  EYE_STYLE_OPTIONS,
+  EquipmentLoadoutMap,
+  FACE_STYLE_OPTIONS,
+  HAIR_COLOR_OPTIONS,
+  HAIR_STYLE_OPTIONS,
+  RACE_DEFINITIONS,
+  SKIN_PALETTE_OPTIONS,
+  adaptCustomizationForRaceChange,
+  createDefaultCustomizationConfig,
+  deriveCustomizationFromLegacyAppearance,
+  getUnlockedCustomizationState,
+  normalizeCustomizationConfig,
+} from '@goki/game-engine';
 import {
   CHARACTER_APPEARANCES,
   CharacterAppearancePreset,
   getCharacterAppearance,
-  getCharacterBustSource,
-  getCharacterStandingSource,
 } from '../assets/characterArtRegistry';
 import { PersistedCharacterProfile } from '../utils/offlineStorage';
 import { useGame } from '../state/GameContext';
 import { COLORS, CRIMSON_ONI } from '../theme';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+import { CharacterRigRenderer, RigAnimationState } from './character';
 
 export interface CharacterManagerModalProps {
   visible: boolean;
@@ -32,6 +51,53 @@ export interface CharacterManagerModalProps {
 }
 
 type ModalView = 'ROSTER' | 'CREATE' | 'CUSTOMIZE' | 'CONFIRM_DELETE';
+
+function resolveCharRace(char: PersistedCharacterProfile): CharacterRace {
+  if (char.race === 'HUMAN' || char.race === 'ONI' || char.race === 'KITSUNE') {
+    return char.race;
+  }
+  return deriveCustomizationFromLegacyAppearance(char.appearanceId || char.avatarSpriteId).race;
+}
+
+function toCoreStats(stats: PersistedCharacterProfile['stats'] | undefined): CoreStatBlock {
+  return {
+    strengthLevel: stats?.STRENGTH?.level ?? 1,
+    enduranceLevel: stats?.ENDURANCE?.level ?? 1,
+    agilityLevel: stats?.AGILITY?.level ?? 1,
+    dexLevel: stats?.DEXTERITY?.level ?? 1,
+    conLevel: stats?.CONSTITUTION?.level ?? 1,
+    wisLevel: stats?.WISDOM?.level ?? 1,
+    sprLevel: stats?.SPIRIT?.level ?? 1,
+  };
+}
+
+function clampMorphsForRace(
+  race: CharacterRace,
+  morphs: CharacterMorphConfig,
+  stats?: PersistedCharacterProfile['stats']
+): CharacterMorphConfig {
+  const unlocked = getUnlockedCustomizationState(race, toCoreStats(stats));
+  return {
+    ...morphs,
+    muscleMassTier: Math.min(morphs.muscleMassTier, unlocked.maxMuscleMassTier) as CharacterMorphConfig['muscleMassTier'],
+    frameTier: Math.min(morphs.frameTier, unlocked.maxFrameTier) as CharacterMorphConfig['frameTier'],
+    leanDefinitionTier: Math.min(morphs.leanDefinitionTier, unlocked.maxLeanDefinitionTier) as CharacterMorphConfig['leanDefinitionTier'],
+    combatStance: unlocked.unlockedStances.includes(morphs.combatStance) ? morphs.combatStance : 'neutral',
+    scarsTier: Math.min(morphs.scarsTier, unlocked.maxScarsTier) as CharacterMorphConfig['scarsTier'],
+    vascularityTier: Math.min(morphs.vascularityTier, unlocked.maxVascularityTier) as CharacterMorphConfig['vascularityTier'],
+    oniHornTier: (race === 'ONI' ? Math.min(morphs.oniHornTier, unlocked.maxOniHornTier) : 0) as CharacterMorphConfig['oniHornTier'],
+    kitsuneTailCount: (race === 'KITSUNE' ? Math.max(1, Math.min(morphs.kitsuneTailCount || 1, unlocked.maxKitsuneTails)) : 0) as CharacterMorphConfig['kitsuneTailCount'],
+    auraTier: Math.min(morphs.auraTier, unlocked.maxAuraTier) as CharacterMorphConfig['auraTier'],
+  };
+}
+
+const PREVIEW_ANIMS: ReadonlyArray<{ id: RigAnimationState; label: string }> = [
+  { id: 'idle', label: 'Idle' },
+  { id: 'walk', label: 'Walk' },
+  { id: 'attack', label: 'Attack' },
+  { id: 'guard', label: 'Guard' },
+  { id: 'victory', label: 'Victory' },
+];
 
 export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
   visible,
@@ -47,7 +113,7 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
     activeCharacterId,
     switchCharacter,
     createCharacter,
-    updateCharacterAppearance,
+    updateCharacterCustomization,
     deleteCharacter,
     restoreCharacter,
   } = useGame();
@@ -59,7 +125,13 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
 
   const [newHeroName, setNewHeroName] = useState('');
   const [selectedAppearanceId, setSelectedAppearanceId] = useState<string>('oni_warlord');
+  const [draftRace, setDraftRace] = useState<CharacterRace>('HUMAN');
+  const [draftConfig, setDraftConfig] = useState<CharacterCustomizationConfig>(() =>
+    createDefaultCustomizationConfig('HUMAN')
+  );
   const [previewPose, setPreviewPose] = useState<'standing' | 'bust'>('standing');
+  const [previewAnim, setPreviewAnim] = useState<RigAnimationState>('idle');
+  const [previewActionKey, setPreviewActionKey] = useState(0);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [archiveExpanded, setArchiveExpanded] = useState(true);
 
@@ -71,11 +143,17 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
       setErrorMsg(null);
       setDeleteConfirmText('');
       setLoading(false);
+      setPreviewAnim('idle');
       if (initialCustomizeCharacterId) {
         const char = characters.find((c) => c.id === initialCustomizeCharacterId);
         if (char) {
+          const apper = char.appearanceId || char.avatarSpriteId || 'oni_warlord';
+          const charRace = resolveCharRace(char);
+          const charConfig = normalizeCustomizationConfig(char.customizationConfig, charRace, apper);
           setCustomizingCharacter(char);
-          setSelectedAppearanceId(char.appearanceId || char.avatarSpriteId || 'oni_warlord');
+          setSelectedAppearanceId(apper);
+          setDraftRace(charRace);
+          setDraftConfig(charConfig);
           setPreviewPose('standing');
           setCurrentView('CUSTOMIZE');
           return;
@@ -88,6 +166,8 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
         setCreatingMode(defaultMode);
         setNewHeroName('');
         setSelectedAppearanceId(defaultMode === 'IRONMAN_VERIFIED' ? 'oath_sentinel' : 'oni_warlord');
+        setDraftRace('HUMAN');
+        setDraftConfig(createDefaultCustomizationConfig('HUMAN'));
         setPreviewPose('standing');
         setCurrentView('CREATE');
         return;
@@ -121,16 +201,25 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
     setErrorMsg(null);
     setNewHeroName('');
     setSelectedAppearanceId(mode === 'IRONMAN_VERIFIED' ? 'oath_sentinel' : 'oni_warlord');
+    setDraftRace('HUMAN');
+    setDraftConfig(createDefaultCustomizationConfig('HUMAN'));
     setPreviewPose('standing');
+    setPreviewAnim('idle');
     setCreatingMode(mode);
     setCurrentView('CREATE');
   };
 
   const handleStartCustomize = (char: PersistedCharacterProfile) => {
+    const apper = char.appearanceId || char.avatarSpriteId || 'oni_warlord';
+    const charRace = resolveCharRace(char);
+    const charConfig = normalizeCustomizationConfig(char.customizationConfig, charRace, apper);
     setErrorMsg(null);
     setCustomizingCharacter(char);
-    setSelectedAppearanceId(char.appearanceId || char.avatarSpriteId || 'oni_warlord');
+    setSelectedAppearanceId(apper);
+    setDraftRace(charRace);
+    setDraftConfig(charConfig);
     setPreviewPose('standing');
+    setPreviewAnim('idle');
     setCurrentView('CUSTOMIZE');
   };
 
@@ -146,7 +235,14 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
     setErrorMsg(null);
     setLoading(true);
     try {
-      const res = await updateCharacterAppearance(selectedAppearanceId, customizingCharacter.id);
+      const res = await updateCharacterCustomization(
+        {
+          race: draftRace,
+          customizationConfig: draftConfig,
+          appearanceId: selectedAppearanceId,
+        },
+        customizingCharacter.id
+      );
       if (!res.ok) {
         setErrorMsg(res.error || 'Failed to update hero appearance.');
         setLoading(false);
@@ -174,7 +270,10 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await createCharacter(trimmed, creatingMode, selectedAppearanceId);
+      const res = await createCharacter(trimmed, creatingMode, selectedAppearanceId, {
+        race: draftRace,
+        customizationConfig: draftConfig,
+      });
       if (!res.ok) {
         setErrorMsg(res.error || 'Failed to forge hero.');
         setLoading(false);
@@ -217,7 +316,10 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
         setCreatingMode(charToDelete.gameMode);
         setNewHeroName('');
         setSelectedAppearanceId('oni_warlord');
+        setDraftRace('HUMAN');
+        setDraftConfig(createDefaultCustomizationConfig('HUMAN'));
         setPreviewPose('standing');
+        setPreviewAnim('idle');
         setCurrentView('CREATE');
       } else {
         setCurrentView('ROSTER');
@@ -265,117 +367,404 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
     }
   };
 
-  const renderAppearanceCustomizer = (isEditingExisting: boolean) => (
-    <View style={styles.customizerContainer}>
-      {/* Large Paired Art Preview Box */}
-      <View style={[styles.previewFrame, { borderColor: selectedPreset.accentColor }]}>
-        <View style={styles.previewImageWrap}>
-          {previewPose === 'standing' ? (
-            <ExpoImage
-              source={getCharacterStandingSource(selectedAppearanceId) as any}
-              style={styles.previewStandingImage}
-              contentFit="contain"
-            />
-          ) : (
-            <ExpoImage
-              source={getCharacterBustSource(selectedAppearanceId) as any}
-              style={[
-                styles.previewBustImage,
-                { borderColor: selectedPreset.accentColor },
-              ]}
-              contentFit="cover"
-              contentPosition="top center"
-            />
-          )}
-        </View>
+  const renderAppearanceCustomizer = (isEditingExisting: boolean) => {
+    const raceDef = RACE_DEFINITIONS[draftRace];
+    const allowedSkins = raceDef.allowedSkinPaletteIds
+      .map((id) => SKIN_PALETTE_OPTIONS.find((opt) => opt.id === id))
+      .filter((opt): opt is (typeof SKIN_PALETTE_OPTIONS)[number] => Boolean(opt));
 
-        {/* Pose Toggle Controls */}
-        <View style={styles.poseToggleRow}>
-          <Pressable
-            style={[styles.poseToggleBtn, previewPose === 'standing' && styles.poseToggleBtnActive]}
-            onPress={() => setPreviewPose('standing')}
-          >
-            <Text
-              style={[
-                styles.poseToggleText,
-                previewPose === 'standing' && styles.poseToggleTextActive,
-              ]}
-            >
-              🧍 Full Stance
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.poseToggleBtn, previewPose === 'bust' && styles.poseToggleBtnActive]}
-            onPress={() => setPreviewPose('bust')}
-          >
-            <Text
-              style={[
-                styles.poseToggleText,
-                previewPose === 'bust' && styles.poseToggleTextActive,
-              ]}
-            >
-              👤 Portrait Medallion
-            </Text>
-          </Pressable>
-        </View>
+    const handleSelectRace = (nextRace: CharacterRace) => {
+      setErrorMsg(null);
+      setDraftRace(nextRace);
+      setDraftConfig((prev) => {
+        const adapted = adaptCustomizationForRaceChange(prev, nextRace);
+        return isEditingExisting
+          ? {
+              ...adapted,
+              morphs: clampMorphsForRace(
+                nextRace,
+                adapted.morphs,
+                customizingCharacter?.stats
+              ),
+            }
+          : {
+              ...adapted,
+              morphs: createDefaultCustomizationConfig(nextRace).morphs,
+            };
+      });
+    };
 
-        {/* Preset Info Banner */}
-        <View style={styles.presetMetaBanner}>
-          <Text style={[styles.presetTitle, { color: selectedPreset.accentColor }]}>
-            {selectedPreset.title}
-          </Text>
-        </View>
-      </View>
+    const handleApplyQuickPreset = (presetId: string) => {
+      setErrorMsg(null);
+      setSelectedAppearanceId(presetId);
+      const derived = deriveCustomizationFromLegacyAppearance(presetId);
+      setDraftRace(derived.race);
+      if (isEditingExisting) {
+        const adapted = adaptCustomizationForRaceChange(
+          {
+            version: 1,
+            identity: derived.config.identity,
+            morphs: draftConfig.morphs,
+          },
+          derived.race
+        );
+        setDraftConfig({
+          ...adapted,
+          morphs: clampMorphsForRace(
+            derived.race,
+            adapted.morphs,
+            customizingCharacter?.stats
+          ),
+        });
+      } else {
+        setDraftConfig(derived.config);
+      }
+    };
 
-      {/* Preset Carousel / Grid */}
-      <Text style={styles.gridSectionHeader}>Choose Appearance (10 Looks)</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.presetScrollContent}
-      >
-        {CHARACTER_APPEARANCES.map((preset) => {
-          const isSelected = selectedAppearanceId === preset.id;
-          return (
-            <Pressable
-              key={preset.id}
-              style={[
-                styles.presetThumbnailCard,
-                isSelected && { borderColor: preset.accentColor, borderWidth: 2.5 },
-              ]}
-              onPress={() => {
-                setErrorMsg(null);
-                setSelectedAppearanceId(preset.id);
-              }}
-            >
-              <ExpoImage
-                source={preset.bustSource as any}
-                style={styles.presetThumbImage}
-                contentFit="cover"
-                contentPosition="top center"
+    return (
+      <View style={styles.customizerContainer}>
+        {/* Live Rig Preview Stage */}
+        <View style={[styles.previewFrame, { borderColor: selectedPreset.accentColor }]}>
+          <View style={styles.previewStageWrap}>
+            {previewPose === 'bust' ? (
+              <View style={[styles.previewBustRing, { borderColor: selectedPreset.accentColor }]}>
+                <CharacterRigRenderer
+                  race={draftRace}
+                  customizationConfig={draftConfig}
+                  equippedLoadout={
+                    isEditingExisting
+                      ? (customizingCharacter?.equipmentLoadout as Partial<EquipmentLoadoutMap> | undefined)
+                      : undefined
+                  }
+                  mode="bust"
+                  animationState={previewAnim}
+                  actionTriggerKey={previewActionKey}
+                  width={132}
+                  height={132}
+                />
+              </View>
+            ) : (
+              <CharacterRigRenderer
+                race={draftRace}
+                customizationConfig={draftConfig}
+                equippedLoadout={
+                  isEditingExisting
+                    ? (customizingCharacter?.equipmentLoadout as Partial<EquipmentLoadoutMap> | undefined)
+                    : undefined
+                }
+                mode="full"
+                animationState={previewAnim}
+                actionTriggerKey={previewActionKey}
+                width={168}
+                height={210}
               />
+            )}
+          </View>
+
+          {/* Pose Toggle Controls */}
+          <View style={styles.poseToggleRow}>
+            <Pressable
+              style={[styles.poseToggleBtn, previewPose === 'standing' && styles.poseToggleBtnActive]}
+              onPress={() => setPreviewPose('standing')}
+            >
               <Text
                 style={[
-                  styles.presetThumbLabel,
-                  isSelected && { color: preset.accentColor, fontWeight: '900' },
+                  styles.poseToggleText,
+                  previewPose === 'standing' && styles.poseToggleTextActive,
                 ]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
               >
-                {preset.shortTitle}
+                🧍 Full Stance
               </Text>
             </Pressable>
-          );
-        })}
-      </ScrollView>
+            <Pressable
+              style={[styles.poseToggleBtn, previewPose === 'bust' && styles.poseToggleBtnActive]}
+              onPress={() => setPreviewPose('bust')}
+            >
+              <Text
+                style={[
+                  styles.poseToggleText,
+                  previewPose === 'bust' && styles.poseToggleTextActive,
+                ]}
+              >
+                👤 Portrait Medallion
+              </Text>
+            </Pressable>
+          </View>
 
-      {/* Pure Cosmetic Decoupling Note */}
-      <View style={styles.cosmeticNoteBox}>
-        <Text style={styles.cosmeticNoteText}>
-          💡 <Text style={{ fontWeight: '800', color: COLORS.gold }}>Appearance is purely cosmetic.</Text>{' '}
-          Your combat archetypes and talent trees are shaped organically by your real-world training.
-        </Text>
-      </View>
+          {/* Animation Preview Pills */}
+          <View style={styles.animPillsRow}>
+            {PREVIEW_ANIMS.map((anim) => {
+              const active = previewAnim === anim.id;
+              return (
+                <Pressable
+                  key={anim.id}
+                  style={[styles.animPill, active && styles.animPillActive]}
+                  onPress={() => {
+                    setPreviewAnim(anim.id);
+                    setPreviewActionKey((k) => k + 1);
+                  }}
+                >
+                  <Text style={[styles.animPillText, active && styles.animPillTextActive]}>
+                    {anim.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.presetMetaBanner}>
+            <Text style={[styles.presetTitle, { color: selectedPreset.accentColor }]}>
+              {raceDef.name} • {raceDef.tagline}
+            </Text>
+          </View>
+        </View>
+
+        {/* Race Selector */}
+        <View style={styles.forgeSectionBlock}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.gridSectionHeader}>Origin Race</Text>
+            <View style={styles.cosmeticOnlyBadge}>
+              <Text style={styles.cosmeticOnlyBadgeText}>Cosmetic Only — Identical Stat Caps</Text>
+            </View>
+          </View>
+          <View style={styles.raceSelectorRow}>
+            {CHARACTER_RACES.map((r) => {
+              const def = RACE_DEFINITIONS[r];
+              const active = draftRace === r;
+              return (
+                <Pressable
+                  key={r}
+                  style={[styles.raceCardBtn, active && styles.raceCardBtnActive]}
+                  onPress={() => handleSelectRace(r)}
+                  testID={`forge-race-${r.toLowerCase()}`}
+                >
+                  <Text style={[styles.raceCardTitle, active && { color: COLORS.gold }]}>
+                    {def.name}
+                  </Text>
+                  <Text style={styles.raceCardSub} numberOfLines={1}>
+                    {def.tagline}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Level-1 Identity Pickers */}
+        <View style={styles.forgeSectionBlock}>
+          <Text style={styles.gridSectionHeader}>Skin / Fur Palette</Text>
+          <View style={styles.swatchRow}>
+            {allowedSkins.map((swatch) => {
+              const active = draftConfig.identity.skinPalette === swatch.id;
+              return (
+                <Pressable
+                  key={swatch.id}
+                  style={[styles.swatchChip, active && styles.swatchChipActive]}
+                  onPress={() =>
+                    setDraftConfig((prev) => ({
+                      ...prev,
+                      identity: { ...prev.identity, skinPalette: swatch.id },
+                    }))
+                  }
+                >
+                  <View style={[styles.swatchDot, { backgroundColor: swatch.baseHex }]} />
+                  <Text style={[styles.swatchLabel, active && { color: COLORS.gold }]}>
+                    {swatch.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.forgeSectionBlock}>
+          <Text style={styles.gridSectionHeader}>Hair Style & Color</Text>
+          <View style={styles.pillWrapRow}>
+            {HAIR_STYLE_OPTIONS.map((opt) => {
+              const active = draftConfig.identity.hairStyle === opt.id;
+              return (
+                <Pressable
+                  key={opt.id}
+                  style={[styles.optionPill, active && styles.optionPillActive]}
+                  onPress={() =>
+                    setDraftConfig((prev) => ({
+                      ...prev,
+                      identity: { ...prev.identity, hairStyle: opt.id },
+                    }))
+                  }
+                >
+                  <Text style={[styles.optionPillText, active && styles.optionPillTextActive]}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.swatchRow}>
+            {HAIR_COLOR_OPTIONS.map((swatch) => {
+              const active = draftConfig.identity.hairColor === swatch.id;
+              return (
+                <Pressable
+                  key={swatch.id}
+                  style={[styles.swatchChip, active && styles.swatchChipActive]}
+                  onPress={() =>
+                    setDraftConfig((prev) => ({
+                      ...prev,
+                      identity: { ...prev.identity, hairColor: swatch.id },
+                    }))
+                  }
+                >
+                  <View style={[styles.swatchDot, { backgroundColor: swatch.primaryHex }]} />
+                  <Text style={[styles.swatchLabel, active && { color: COLORS.gold }]}>
+                    {swatch.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.forgeSectionBlock}>
+          <Text style={styles.gridSectionHeader}>Face & Eyes</Text>
+          <View style={styles.pillWrapRow}>
+            {FACE_STYLE_OPTIONS.map((opt) => {
+              const active = draftConfig.identity.faceStyle === opt.id;
+              return (
+                <Pressable
+                  key={opt.id}
+                  style={[styles.optionPill, active && styles.optionPillActive]}
+                  onPress={() =>
+                    setDraftConfig((prev) => ({
+                      ...prev,
+                      identity: { ...prev.identity, faceStyle: opt.id },
+                    }))
+                  }
+                >
+                  <Text style={[styles.optionPillText, active && styles.optionPillTextActive]}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.pillWrapRow}>
+            {EYE_STYLE_OPTIONS.map((opt) => {
+              const active = draftConfig.identity.eyeStyle === opt.id;
+              return (
+                <Pressable
+                  key={opt.id}
+                  style={[styles.optionPill, active && styles.optionPillActive]}
+                  onPress={() =>
+                    setDraftConfig((prev) => ({
+                      ...prev,
+                      identity: { ...prev.identity, eyeStyle: opt.id },
+                    }))
+                  }
+                >
+                  <Text style={[styles.optionPillText, active && styles.optionPillTextActive]}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.swatchRow}>
+            {EYE_COLOR_OPTIONS.map((swatch) => {
+              const active = draftConfig.identity.eyeColor === swatch.id;
+              return (
+                <Pressable
+                  key={swatch.id}
+                  style={[styles.swatchChip, active && styles.swatchChipActive]}
+                  onPress={() =>
+                    setDraftConfig((prev) => ({
+                      ...prev,
+                      identity: { ...prev.identity, eyeColor: swatch.id },
+                    }))
+                  }
+                >
+                  <View style={[styles.swatchDot, { backgroundColor: swatch.hex }]} />
+                  <Text style={[styles.swatchLabel, active && { color: COLORS.gold }]}>
+                    {swatch.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.forgeSectionBlock}>
+          <Text style={styles.gridSectionHeader}>Starter Silhouette</Text>
+          <View style={styles.pillWrapRow}>
+            {BASE_SILHOUETTE_OPTIONS.map((opt) => {
+              const active = draftConfig.identity.baseSilhouette === opt.id;
+              return (
+                <Pressable
+                  key={opt.id}
+                  style={[styles.optionPill, active && styles.optionPillActive]}
+                  onPress={() =>
+                    setDraftConfig((prev) => ({
+                      ...prev,
+                      identity: { ...prev.identity, baseSilhouette: opt.id },
+                    }))
+                  }
+                >
+                  <Text style={[styles.optionPillText, active && styles.optionPillTextActive]}>
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Quick Identity Presets */}
+        <Text style={styles.gridSectionHeader}>Quick Identity Presets</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.presetScrollContent}
+        >
+          {CHARACTER_APPEARANCES.map((preset) => {
+            const isSelected = selectedAppearanceId === preset.id;
+            return (
+              <Pressable
+                key={preset.id}
+                style={[
+                  styles.presetThumbnailCard,
+                  isSelected && { borderColor: preset.accentColor, borderWidth: 2.5 },
+                ]}
+                onPress={() => handleApplyQuickPreset(preset.id)}
+              >
+                <View style={styles.presetThumbRigWrap}>
+                  <CharacterRigRenderer
+                    mode="bust"
+                    appearanceId={preset.id}
+                    width={48}
+                    height={48}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.presetThumbLabel,
+                    isSelected && { color: preset.accentColor, fontWeight: '900' },
+                  ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {preset.shortTitle}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {/* Unmuscled Level-1 & Pure Cosmetic Note */}
+        <View style={styles.cosmeticNoteBox}>
+          <Text style={styles.cosmeticNoteText}>
+            💡 <Text style={{ fontWeight: '800', color: COLORS.gold }}>All heroes begin unmuscled at Level 1.</Text>{' '}
+            Races and identity traits are purely cosmetic. Physique hypertrophy, Oni horns, Kitsune tails (1–9), and energy auras unlock organically as you train your 7 stats.
+          </Text>
+        </View>
 
       {/* If Creating: Game Mode Selector & Name Input */}
       {!isEditingExisting && (
@@ -499,7 +888,8 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
         )}
       </View>
     </View>
-  );
+    );
+  };
 
   const renderDeleteConfirmation = () => {
     if (!characterToDelete) return null;
@@ -593,19 +983,32 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
           )}
         </View>
 
-        {char ? (
+        {char ? (() => {
+          const charRace = resolveCharRace(char);
+          const raceName = RACE_DEFINITIONS[charRace].name;
+          return (
           <View>
             <View style={styles.charInfoRow}>
-              <ExpoImage
-                source={getCharacterBustSource(char.appearanceId || char.avatarSpriteId) as any}
-                style={styles.charSprite}
-                contentFit="cover"
-                contentPosition="top center"
-              />
+              <View style={styles.charSpriteWrap}>
+                <CharacterRigRenderer
+                  mode="bust"
+                  race={charRace}
+                  customizationConfig={char.customizationConfig}
+                  appearanceId={char.appearanceId || char.avatarSpriteId}
+                  equippedLoadout={char.equipmentLoadout as Partial<EquipmentLoadoutMap> | undefined}
+                  width={52}
+                  height={52}
+                />
+              </View>
               <View style={styles.charMetaCol}>
-                <Text style={[styles.charNameText, isIronman && { color: '#93C5FD' }]}>
-                  {char.name}
-                </Text>
+                <View style={styles.charNameRow}>
+                  <Text style={[styles.charNameText, isIronman && { color: '#93C5FD' }]}>
+                    {char.name}
+                  </Text>
+                  <View style={styles.racePillBadge}>
+                    <Text style={styles.racePillBadgeText}>{raceName}</Text>
+                  </View>
+                </View>
                 <Text style={styles.charStatsText}>
                   Lv. {char.overallLevel} • {char.adventurerRank} Rank • 🪙 {char.gold}g
                 </Text>
@@ -642,7 +1045,8 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
               </Pressable>
             </View>
           </View>
-        ) : (
+          );
+        })() : (
           <View style={styles.emptySlotContent}>
             <Text style={styles.emptySlotTitle}>
               {isIronman ? 'Empty Ironman Slot' : 'Empty Standard Slot'}
@@ -744,19 +1148,22 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
                           Fallen heroes remain in purgatory for 30 days before permanent erasure.
                           Restoring a hero requires a free slot in that game mode.
                         </Text>
-                        {deletedCharacters.map((char) => (
+                        {deletedCharacters.map((char) => {
+                          const fallenRace = resolveCharRace(char);
+                          return (
                           <View key={char.id} style={styles.archiveCard}>
                             <View style={styles.archiveCardTop}>
-                              <ExpoImage
-                                source={
-                                  getCharacterBustSource(
-                                    char.appearanceId || char.avatarSpriteId
-                                  ) as any
-                                }
-                                style={styles.archiveSprite}
-                                contentFit="cover"
-                                contentPosition="top center"
-                              />
+                              <View style={styles.archiveSpriteWrap}>
+                                <CharacterRigRenderer
+                                  mode="bust"
+                                  race={fallenRace}
+                                  customizationConfig={char.customizationConfig}
+                                  appearanceId={char.appearanceId || char.avatarSpriteId}
+                                  equippedLoadout={char.equipmentLoadout as Partial<EquipmentLoadoutMap> | undefined}
+                                  width={44}
+                                  height={44}
+                                />
+                              </View>
                               <View style={styles.archiveMetaCol}>
                                 <View style={styles.archiveNameRow}>
                                   <Text style={styles.archiveName}>{char.name}</Text>
@@ -767,7 +1174,7 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
                                   </View>
                                 </View>
                                 <Text style={styles.archiveDetails}>
-                                  Lv. {char.overallLevel} •{' '}
+                                  Lv. {char.overallLevel} • {RACE_DEFINITIONS[fallenRace].name} •{' '}
                                   {char.gameMode === 'STANDARD' ? '⚔️ Standard' : '🛡️ Ironman'} • 🪙{' '}
                                   {char.gold}g
                                 </Text>
@@ -794,7 +1201,8 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
                               </Pressable>
                             </View>
                           </View>
-                        ))}
+                          );
+                        })}
                       </View>
                     )}
                   </View>
@@ -953,16 +1361,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  charSprite: {
+  charSpriteWrap: {
     width: 52,
     height: 52,
     borderRadius: 26,
     borderWidth: 1.5,
     borderColor: COLORS.gold,
     backgroundColor: '#1E1E24',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   charMetaCol: {
     flex: 1,
+  },
+  charNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  racePillBadge: {
+    backgroundColor: 'rgba(217, 119, 6, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(217, 119, 6, 0.45)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  racePillBadgeText: {
+    color: COLORS.gold,
+    fontSize: 9.5,
+    fontWeight: '800',
   },
   charNameText: {
     fontSize: 15,
@@ -1077,23 +1507,169 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
   },
-  previewImageWrap: {
+  previewStageWrap: {
     width: '100%',
-    height: 180,
+    height: 214,
     marginVertical: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  previewStandingImage: {
-    width: '100%',
-    height: 176,
-  },
-  previewBustImage: {
-    width: 152,
-    height: 152,
-    borderRadius: 76,
+  previewBustRing: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     borderWidth: 2.5,
     borderColor: CRIMSON_ONI.agedGold,
+    backgroundColor: '#151923',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  animPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  animPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 14,
+    backgroundColor: '#181C26',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  animPillActive: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(217, 119, 6, 0.18)',
+  },
+  animPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  animPillTextActive: {
+    color: COLORS.gold,
+    fontWeight: '900',
+  },
+  forgeSectionBlock: {
+    gap: 6,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  cosmeticOnlyBadge: {
+    backgroundColor: 'rgba(217, 119, 6, 0.14)',
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(217, 119, 6, 0.4)',
+  },
+  cosmeticOnlyBadgeText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: COLORS.gold,
+  },
+  raceSelectorRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  raceCardBtn: {
+    flex: 1,
+    backgroundColor: '#181C26',
+    borderWidth: 1.5,
+    borderColor: '#374151',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  raceCardBtnActive: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(217, 119, 6, 0.14)',
+  },
+  raceCardTitle: {
+    fontSize: 12.5,
+    fontWeight: '900',
+    color: COLORS.textPrimary,
+  },
+  raceCardSub: {
+    fontSize: 9.5,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  swatchRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  swatchChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#181C26',
+    borderWidth: 1,
+    borderColor: '#374151',
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  swatchChipActive: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(217, 119, 6, 0.15)',
+  },
+  swatchDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  swatchLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  pillWrapRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  optionPill: {
+    backgroundColor: '#181C26',
+    borderWidth: 1,
+    borderColor: '#374151',
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  optionPillActive: {
+    borderColor: COLORS.gold,
+    backgroundColor: 'rgba(217, 119, 6, 0.16)',
+  },
+  optionPillText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  optionPillTextActive: {
+    color: COLORS.gold,
+    fontWeight: '900',
+  },
+  presetThumbRigWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    overflow: 'hidden',
+    backgroundColor: '#11151E',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   poseToggleRow: {
     flexDirection: 'row',
@@ -1397,13 +1973,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  archiveSprite: {
+  archiveSpriteWrap: {
     width: 44,
     height: 44,
     borderRadius: 22,
     borderWidth: 1,
     borderColor: '#9CA3AF',
     opacity: 0.8,
+    backgroundColor: '#1E1E24',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   archiveMetaCol: {
     flex: 1,

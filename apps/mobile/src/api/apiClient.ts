@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import type { CharacterCustomizationConfig, CharacterRace } from '@goki/game-engine';
 import {
   getStoredAuthToken,
   removeStoredAuthToken,
@@ -76,6 +77,8 @@ export interface RegisterPayload {
   characterName?: string;
   gameMode?: 'STANDARD' | 'IRONMAN_VERIFIED';
   avatarSpriteId?: string;
+  race?: CharacterRace;
+  customizationConfig?: CharacterCustomizationConfig;
   timezone?: string;
 }
 
@@ -240,8 +243,11 @@ export async function createCharacterAccount(payload: {
   gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
   appearanceId?: string;
   avatarSpriteId?: string;
+  race?: CharacterRace;
+  customizationConfig?: CharacterCustomizationConfig;
 }): Promise<{
   ok: boolean;
+  statusCode?: number;
   data?: { character: any };
   error?: string;
 }> {
@@ -254,11 +260,11 @@ export async function createCharacterAccount(payload: {
       },
       5000
     );
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      return { ok: false, error: data.error || 'Failed to create character' };
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to create character' };
     }
-    return { ok: true, data };
+    return { ok: true, statusCode: res.status, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network error creating character';
     return { ok: false, error: message };
@@ -270,7 +276,13 @@ export async function createCharacterAccount(payload: {
  */
 export async function updateCharacterAccount(
   characterId: string,
-  payload: { name?: string; appearanceId?: string }
+  payload: {
+    name?: string;
+    appearanceId?: string;
+    avatarSpriteId?: string;
+    race?: CharacterRace;
+    customizationConfig?: CharacterCustomizationConfig;
+  }
 ): Promise<{ ok: boolean; statusCode?: number; data?: { character: any }; error?: string }> {
   try {
     const res = await apiFetch(

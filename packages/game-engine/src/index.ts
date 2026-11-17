@@ -17,3 +17,4 @@ export * from './training-history-tracker';
 export * from './intra-workout-ergonomics';
 export * from './strengthlog-exercise-catalog';
 export * from './item-affix-engine';
+export * from './character-customization';

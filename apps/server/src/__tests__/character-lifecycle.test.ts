@@ -1,4 +1,5 @@
 import { PrismaClient } from '@goki/database';
+import { createDefaultCustomizationConfig } from '@goki/game-engine';
 import { describe, expect, it } from 'vitest';
 import { buildServerApp } from '../app';
 import { SOFT_DELETE_RETENTION_MS } from '../routes/characters';
@@ -77,6 +78,12 @@ describe('Character Lifecycle & Restoration API', () => {
             gameMode: data.gameMode,
             appearanceId: data.appearanceId ?? 'oni_warlord',
             avatarSpriteId: data.avatarSpriteId ?? 'oni_warlord',
+            race: data.race ?? 'HUMAN',
+            customizationConfig: data.customizationConfig ?? null,
+            dexLevel: data.dexLevel ?? 1,
+            conLevel: data.conLevel ?? 1,
+            wisLevel: data.wisLevel ?? 1,
+            sprLevel: data.sprLevel ?? 1,
             deletedAt: null,
             stats: { strengthLevel: 1, enduranceLevel: 1, agilityLevel: 1 },
             fatigueState: { isRestingInTavern: true },
@@ -489,5 +496,279 @@ describe('Character Lifecycle & Restoration API', () => {
     });
     expect(res3.statusCode).toBe(400);
     expect(res3.json().error).toMatch(/points/i);
+  });
+
+  it('POST /api/characters initializes unmuscled Level-1 HUMAN, ONI, and KITSUNE heroes and rejects locked morph tiers at Lv 1', async () => {
+    const { mockDb, testUser, memoryCharacters } = createTestDb();
+    const app = await buildServerApp({ db: mockDb });
+    const token = app.jwt.sign({ userId: testUser.id, email: testUser.email, username: testUser.username });
+
+    // 1. Default HUMAN hero (no race / no appearanceId) -> unmuscled Lv 1 config
+    const humanRes = await app.inject({
+      method: 'POST',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: 'Starter Human', gameMode: 'STANDARD' },
+    });
+    expect(humanRes.statusCode).toBe(201);
+    const humanChar = humanRes.json().character;
+    expect(humanChar.race).toBe('HUMAN');
+    expect(humanChar.customizationConfig.morphs.muscleMassTier).toBe(0);
+    expect(humanChar.customizationConfig.morphs.oniHornTier).toBe(0);
+    expect(humanChar.customizationConfig.morphs.kitsuneTailCount).toBe(0);
+
+    // 2. ONI hero -> unmuscled Lv 1 config with oniHornTier: 0
+    const oniRes = await app.inject({
+      method: 'POST',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: 'Starter Oni', gameMode: 'IRONMAN_VERIFIED', race: 'ONI' },
+    });
+    expect(oniRes.statusCode).toBe(201);
+    const oniChar = oniRes.json().character;
+    expect(oniChar.race).toBe('ONI');
+    expect(oniChar.customizationConfig.morphs.muscleMassTier).toBe(0);
+    expect(oniChar.customizationConfig.morphs.oniHornTier).toBe(0);
+    expect(oniChar.customizationConfig.morphs.kitsuneTailCount).toBe(0);
+
+    // Clear active characters to test KITSUNE and invalid Lv 1 morph rejection
+    memoryCharacters.length = 0;
+
+    // 3. KITSUNE hero -> unmuscled Lv 1 config with kitsuneTailCount: 1
+    const kitsuneRes = await app.inject({
+      method: 'POST',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: 'Starter Kitsune', gameMode: 'STANDARD', race: 'KITSUNE' },
+    });
+    expect(kitsuneRes.statusCode).toBe(201);
+    const kitsuneChar = kitsuneRes.json().character;
+    expect(kitsuneChar.race).toBe('KITSUNE');
+    expect(kitsuneChar.customizationConfig.morphs.muscleMassTier).toBe(0);
+    expect(kitsuneChar.customizationConfig.morphs.kitsuneTailCount).toBe(1);
+    expect(kitsuneChar.customizationConfig.morphs.oniHornTier).toBe(0);
+
+    // 4. Reject locked muscleMassTier: 1 at Level 1 with 400
+    const lockedConfig = createDefaultCustomizationConfig('HUMAN');
+    lockedConfig.morphs.muscleMassTier = 1;
+    const lockedRes = await app.inject({
+      method: 'POST',
+      url: '/api/characters',
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        name: 'Muscled Lv1',
+        gameMode: 'IRONMAN_VERIFIED',
+        race: 'HUMAN',
+        customizationConfig: lockedConfig,
+      },
+    });
+    expect(lockedRes.statusCode).toBe(400);
+    expect(lockedRes.json().error).toMatch(/muscleMassTier/i);
+  });
+
+  it('PATCH /api/characters/:characterId enforces stat-locked customization thresholds and rejects cross-race morphs', async () => {
+    const { mockDb, testUser, memoryCharacters } = createTestDb();
+    const app = await buildServerApp({ db: mockDb });
+    const token = app.jwt.sign({ userId: testUser.id, email: testUser.email, username: testUser.username });
+
+    const lowStatHuman = {
+      id: 'char_low_human',
+      userId: testUser.id,
+      name: 'Low Stat Human',
+      gameMode: 'STANDARD',
+      appearanceId: 'wayfarer',
+      avatarSpriteId: 'wayfarer',
+      race: 'HUMAN',
+      customizationConfig: createDefaultCustomizationConfig('HUMAN'),
+      deletedAt: null,
+      dexLevel: 1,
+      conLevel: 1,
+      wisLevel: 1,
+      sprLevel: 1,
+      stats: { strengthLevel: 5, enduranceLevel: 1, agilityLevel: 1 },
+      fatigueState: {},
+      equipmentLoadout: {},
+    };
+    memoryCharacters.push(lowStatHuman);
+
+    // STR 5 allows muscleMassTier 1, but NOT muscleMassTier 2 (requires STR >= 12)
+    const strLocked = createDefaultCustomizationConfig('HUMAN');
+    strLocked.morphs.muscleMassTier = 2;
+    const strRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${lowStatHuman.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: strLocked },
+    });
+    expect(strRes.statusCode).toBe(400);
+    expect(strRes.json().error).toMatch(/muscleMassTier/i);
+
+    // CON 1 rejects frameTier 1 (requires CON >= 5)
+    const conLocked = createDefaultCustomizationConfig('HUMAN');
+    conLocked.morphs.frameTier = 1;
+    const conRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${lowStatHuman.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: conLocked },
+    });
+    expect(conRes.statusCode).toBe(400);
+    expect(conRes.json().error).toMatch(/frameTier/i);
+
+    // AGI 1 / DEX 1 rejects phantom_step (requires AGI >= 14 && DEX >= 10)
+    const stanceLocked = createDefaultCustomizationConfig('HUMAN');
+    stanceLocked.morphs.combatStance = 'phantom_step';
+    const stanceRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${lowStatHuman.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: stanceLocked },
+    });
+    expect(stanceRes.statusCode).toBe(400);
+    expect(stanceRes.json().error).toMatch(/combatStance/i);
+
+    // END 1 rejects scarsTier 1 (requires END >= 5) and vascularityTier 1 (requires END >= 8)
+    const endLocked = createDefaultCustomizationConfig('HUMAN');
+    endLocked.morphs.scarsTier = 1;
+    endLocked.morphs.vascularityTier = 1;
+    const endRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${lowStatHuman.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: endLocked },
+    });
+    expect(endRes.statusCode).toBe(400);
+    expect(endRes.json().error).toMatch(/scarsTier/i);
+    expect(endRes.json().error).toMatch(/vascularityTier/i);
+
+    // High-WIS HUMAN still cannot equip Oni horns (oniHornTier: 1)
+    const highWisHuman = {
+      ...lowStatHuman,
+      id: 'char_high_wis_human',
+      wisLevel: 20,
+      sprLevel: 20,
+    };
+    memoryCharacters.push(highWisHuman);
+    const crossRaceHorn = createDefaultCustomizationConfig('HUMAN');
+    crossRaceHorn.morphs.oniHornTier = 1;
+    const crossRaceRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${highWisHuman.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: crossRaceHorn },
+    });
+    expect(crossRaceRes.statusCode).toBe(400);
+    expect(crossRaceRes.json().error).toMatch(/oniHornTier/i);
+
+    // Low-WIS/SPR ONI rejects oniHornTier 1 (requires WIS >= 5 || SPR >= 5) and auraTier 1
+    const lowOni = {
+      ...lowStatHuman,
+      id: 'char_low_oni',
+      race: 'ONI',
+      customizationConfig: createDefaultCustomizationConfig('ONI'),
+    };
+    memoryCharacters.push(lowOni);
+    const oniHornLocked = createDefaultCustomizationConfig('ONI');
+    oniHornLocked.morphs.oniHornTier = 1;
+    oniHornLocked.morphs.auraTier = 1;
+    const oniHornRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${lowOni.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: oniHornLocked },
+    });
+    expect(oniHornRes.statusCode).toBe(400);
+    expect(oniHornRes.json().error).toMatch(/oniHornTier/i);
+    expect(oniHornRes.json().error).toMatch(/auraTier/i);
+
+    // Low-WIS/SPR KITSUNE rejects kitsuneTailCount 2 (requires WIS >= 3 || SPR >= 3)
+    const lowKitsune = {
+      ...lowStatHuman,
+      id: 'char_low_kitsune',
+      race: 'KITSUNE',
+      customizationConfig: createDefaultCustomizationConfig('KITSUNE'),
+    };
+    memoryCharacters.push(lowKitsune);
+    const kitsuneTailLocked = createDefaultCustomizationConfig('KITSUNE');
+    kitsuneTailLocked.morphs.kitsuneTailCount = 2;
+    const kitsuneTailRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${lowKitsune.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: kitsuneTailLocked },
+    });
+    expect(kitsuneTailRes.statusCode).toBe(400);
+    expect(kitsuneTailRes.json().error).toMatch(/kitsuneTailCount/i);
+  });
+
+  it('PATCH /api/characters/:characterId unlocks higher morphs when stats meet thresholds and allows opting back down', async () => {
+    const { mockDb, testUser, memoryCharacters } = createTestDb();
+    const app = await buildServerApp({ db: mockDb });
+    const token = app.jwt.sign({ userId: testUser.id, email: testUser.email, username: testUser.username });
+
+    const veteranKitsune = {
+      id: 'char_vet_kitsune',
+      userId: testUser.id,
+      name: 'Nine-Tail Sovereign',
+      gameMode: 'STANDARD',
+      appearanceId: 'solar_mystic',
+      avatarSpriteId: 'solar_mystic',
+      race: 'KITSUNE',
+      customizationConfig: createDefaultCustomizationConfig('KITSUNE'),
+      deletedAt: null,
+      dexLevel: 15,
+      conLevel: 25,
+      wisLevel: 35,
+      sprLevel: 30,
+      stats: { strengthLevel: 35, enduranceLevel: 25, agilityLevel: 16 },
+      fatigueState: {},
+      equipmentLoadout: {},
+    };
+    memoryCharacters.push(veteranKitsune);
+
+    // Upgrade to max unlocked morphs
+    const maxedConfig = createDefaultCustomizationConfig('KITSUNE');
+    maxedConfig.morphs.muscleMassTier = 4;
+    maxedConfig.morphs.frameTier = 3;
+    maxedConfig.morphs.leanDefinitionTier = 2;
+    maxedConfig.morphs.combatStance = 'phantom_step';
+    maxedConfig.morphs.scarsTier = 3;
+    maxedConfig.morphs.vascularityTier = 2;
+    maxedConfig.morphs.kitsuneTailCount = 9;
+    maxedConfig.morphs.auraTier = 3;
+
+    const upRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${veteranKitsune.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: maxedConfig },
+    });
+    expect(upRes.statusCode).toBe(200);
+    expect(upRes.json().character.customizationConfig.morphs.muscleMassTier).toBe(4);
+    expect(upRes.json().character.customizationConfig.morphs.kitsuneTailCount).toBe(9);
+    expect(upRes.json().character.customizationConfig.morphs.auraTier).toBe(3);
+
+    // Opt back down to minimal morphs on the same high-stat hero
+    const optedDownConfig = {
+      ...maxedConfig,
+      morphs: {
+        ...maxedConfig.morphs,
+        muscleMassTier: 0,
+        auraTier: 0,
+        scarsTier: 0,
+        kitsuneTailCount: 1,
+      },
+    };
+    const downRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/characters/${veteranKitsune.id}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { customizationConfig: optedDownConfig },
+    });
+    expect(downRes.statusCode).toBe(200);
+    expect(downRes.json().character.customizationConfig.morphs.muscleMassTier).toBe(0);
+    expect(downRes.json().character.customizationConfig.morphs.auraTier).toBe(0);
+    expect(downRes.json().character.customizationConfig.morphs.scarsTier).toBe(0);
+    expect(downRes.json().character.customizationConfig.morphs.kitsuneTailCount).toBe(1);
   });
 });

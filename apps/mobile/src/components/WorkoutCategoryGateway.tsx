@@ -18,7 +18,16 @@ import {
   WorkoutPresetDefinition,
 } from '@goki/game-engine';
 import { MODALITY_BADGE_SVGS } from '../assets/v0Vault';
+import { RpgIcon, RpgIconName } from './icons/RpgIcon';
+import { COLORS, SURFACES } from '../theme';
 import { triggerSensoryCue } from '../utils/sensoryFeedback';
+
+const CATEGORY_RPG_ICONS: Record<WorkoutCategory, RpgIconName> = {
+  GYM: 'train',
+  CARDIO: 'stat-end',
+  SPORT: 'stat-agi',
+  RECOVERY: 'stat-wis',
+};
 
 const COMPACT_PILL_LABELS: Record<WorkoutCategory, string> = {
   GYM: 'Gym',
@@ -158,25 +167,31 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
               const catDesc = WORKOUT_CATEGORIES.find((c) => c.key === preset.category);
               const exerciseCount = preset.blocks?.exerciseBlocks?.length ?? 0;
               return (
-                <TouchableOpacity
-                  key={preset.id}
-                  style={styles.presetChip}
-                  onPress={() => {
-                    triggerSensoryCue('WORKOUT_PRESET_LOADED');
-                    onLoadPreset(preset);
-                  }}
-                  activeOpacity={0.75}
-                >
-                  <Text style={styles.presetChipIcon}>{catDesc?.icon || '📋'}</Text>
-                  <View style={styles.presetChipTextContainer}>
-                    <Text style={styles.presetChipName} numberOfLines={1}>
-                      {preset.name}
-                    </Text>
-                    <Text style={styles.presetChipMeta}>
-                      {exerciseCount} exercises • {preset.category}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+              <TouchableOpacity
+                key={preset.id}
+                style={styles.presetChip}
+                onPress={() => {
+                  triggerSensoryCue('WORKOUT_PRESET_LOADED');
+                  onLoadPreset(preset);
+                }}
+                activeOpacity={0.75}
+              >
+                <View style={styles.presetChipIconWrap}>
+                  <RpgIcon
+                    name={CATEGORY_RPG_ICONS[preset.category] ?? 'scroll'}
+                    size={16}
+                    color={CATEGORY_COLORS[preset.category] ?? COLORS.gold}
+                  />
+                </View>
+                <View style={styles.presetChipTextContainer}>
+                  <Text style={styles.presetChipName} numberOfLines={1}>
+                    {preset.name}
+                  </Text>
+                  <Text style={styles.presetChipMeta}>
+                    {exerciseCount} exercises • {preset.category}
+                  </Text>
+                </View>
+              </TouchableOpacity>
               );
             })}
           </ScrollView>
@@ -232,15 +247,22 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                 activeOpacity={0.75}
                 testID={`discipline-pill-${cat.key}`}
               >
-                <Text
-                  style={[
-                    styles.switchCategoryText,
-                    isActive && { color, fontWeight: '900' },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {cat.icon} {COMPACT_PILL_LABELS[cat.key]}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <RpgIcon
+                    name={CATEGORY_RPG_ICONS[cat.key]}
+                    size={12}
+                    color={isActive ? color : '#D1D5DB'}
+                  />
+                  <Text
+                    style={[
+                      styles.switchCategoryText,
+                      isActive && { color, fontWeight: '900' },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {COMPACT_PILL_LABELS[cat.key]}
+                  </Text>
+                </View>
               </TouchableOpacity>
 
               {isActive && (
@@ -267,7 +289,6 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
         <View style={styles.secondarySegmentsInlineWrap}>
           {orderedSegments.length > 1 ? (
             orderedSegments.map((segCat, idx) => {
-              const segMeta = WORKOUT_CATEGORIES.find((c) => c.key === segCat);
               const segColor = CATEGORY_COLORS[segCat];
               return (
                 <View
@@ -275,7 +296,7 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                   style={[styles.secSegmentPill, { borderColor: segColor }]}
                 >
                   <Text style={[styles.secSegmentText, { color: segColor }]}>
-                    #{idx + 1} {segMeta?.icon} {COMPACT_PILL_LABELS[segCat]}
+                    #{idx + 1} {COMPACT_PILL_LABELS[segCat]}
                   </Text>
                   <TouchableOpacity
                     onPress={() => {
@@ -285,15 +306,18 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
                     hitSlop={{ top: 8, bottom: 8, left: 6, right: 8 }}
                     style={styles.secSegmentCloseBtn}
                   >
-                    <Text style={styles.secSegmentCloseText}>✕</Text>
+                    <RpgIcon name="close" size={10} color="#9CA3AF" />
                   </TouchableOpacity>
                 </View>
               );
             })
           ) : (
-            <Text style={styles.dragHintLabel} numberOfLines={1}>
-              ⠿ Hold &amp; drag cards to reorder
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon name="grip" size={12} color="#64738F" />
+              <Text style={styles.dragHintLabel} numberOfLines={1}>
+                Hold &amp; drag to reorder
+              </Text>
+            </View>
           )}
         </View>
 
@@ -303,7 +327,10 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
             onPress={() => setShowPresetsDrawer(true)}
             activeOpacity={0.7}
           >
-            <Text style={styles.presetsBtnText}>📋 Presets</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon name="scroll" size={12} color="#D1D5DB" />
+              <Text style={styles.presetsBtnText}>Presets</Text>
+            </View>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -473,21 +500,19 @@ export const WorkoutCategoryGateway: React.FC<WorkoutCategoryGatewayProps> = ({
 
 const styles = StyleSheet.create({
   gatewayContainer: {
-    padding: 16,
-    backgroundColor: '#161518',
+    padding: 14,
+    backgroundColor: SURFACES.layer1,
     borderRadius: 14,
-    borderColor: '#2F2D33',
-    borderWidth: 1,
-    marginVertical: 12,
+    marginVertical: 8,
   },
   gatewayHeader: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   gatewayTitle: {
     fontSize: 20,
     fontWeight: '900',
     color: '#E8E6E1',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   gatewaySubtitle: {
     fontSize: 12,
@@ -496,14 +521,12 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   categoryGrid: {
-    gap: 12,
+    gap: 10,
   },
   categoryCard: {
-    backgroundColor: '#1F1E24',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#36343C',
-    borderLeftWidth: 4,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: 12,
+    borderLeftWidth: 3,
     padding: 14,
   },
   cardHeaderRow: {
@@ -612,14 +635,21 @@ const styles = StyleSheet.create({
   presetChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E1D22',
-    borderColor: '#3D3842',
-    borderWidth: 1,
-    borderRadius: 8,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginRight: 10,
     maxWidth: 240,
+    gap: 8,
+  },
+  presetChipIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: SURFACES.layer3,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   presetChipIcon: {
     fontSize: 20,
@@ -639,12 +669,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   compactHeaderBanner: {
-    backgroundColor: '#1A191C',
-    borderColor: '#36343C',
-    borderWidth: 1,
-    borderRadius: 10,
+    backgroundColor: SURFACES.layer1,
+    borderRadius: 12,
     padding: 10,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   compactMainRow: {
     flexDirection: 'row',
@@ -659,11 +687,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 5,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 8,
-    backgroundColor: '#2A282E',
-    borderColor: '#4A4650',
-    borderWidth: 1,
+    backgroundColor: SURFACES.layer2,
     gap: 3,
   },
   pillSelectMainTouch: {

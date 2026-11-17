@@ -33,10 +33,13 @@ import { WeeklyVolumeLandmarksCard } from '../components/WeeklyVolumeLandmarksCa
 import { MetricInfoBadge, MetricInfoTooltipModal } from '../components/MetricInfoTooltipModal';
 import { ShareableWorkoutReceiptModal } from '../components/ShareableWorkoutReceiptModal';
 import { WipeTrainingHistoryModal } from '../components/WipeTrainingHistoryModal';
+import { RpgIcon } from '../components/icons/RpgIcon';
+import { COLORS, SURFACES } from '../theme';
 
 export interface TrainingHistoryScreenProps {
   onBack: () => void;
   visible?: boolean;
+  embedded?: boolean;
   onLoadSessionIntoWorkout?: (workout: CompletedWorkoutRecord) => void;
 }
 
@@ -204,6 +207,7 @@ const DeltaPill: React.FC<{ delta: ProgressionDelta }> = ({ delta }) => {
 export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
   onBack,
   visible = true,
+  embedded = false,
   onLoadSessionIntoWorkout,
 }) => {
   const game = useGame();
@@ -350,20 +354,31 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
   }, [pinnedExerciseId, matrix.rows]);
 
   const content = (
-    <View style={[styles.root, { paddingBottom: safeBottom }]}>
+    <View style={[styles.root, { paddingBottom: embedded ? 0 : safeBottom }]}>
       {/* 1. TOP HEADER BAR */}
-      <View style={[styles.topBar, { paddingTop: safeTop + 8, paddingBottom: 12 }]}>
+      <View
+        style={[
+          styles.topBar,
+          { paddingTop: embedded ? 10 : safeTop + 8, paddingBottom: 12 },
+        ]}
+      >
         <TouchableOpacity
           style={styles.backBtn}
           onPress={onBack}
           testID="history-back-btn"
           activeOpacity={0.7}
         >
-          <Text style={styles.backBtnText}>← Back</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <RpgIcon name="chevron-left" size={14} color="#D1D5DB" />
+            <Text style={styles.backBtnText}>Back</Text>
+          </View>
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
-          <Text style={styles.screenTitle}>📊 TRAINING HISTORY</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <RpgIcon name="history" size={15} color={COLORS.gold} />
+            <Text style={styles.screenTitle}>TRAINING HISTORY</Text>
+          </View>
           <Text style={styles.screenSubtitle}>
             {mode === 'ROUTINE'
               ? 'Cross-Session Progression Matrix'
@@ -381,7 +396,7 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
               activeOpacity={0.7}
             >
               <Text style={styles.sortToggleText}>
-                {sortOrder === 'LATEST_FIRST' ? '📅 Newest' : '📅 Oldest'}
+                {sortOrder === 'LATEST_FIRST' ? 'Newest' : 'Oldest'}
               </Text>
             </TouchableOpacity>
           )}
@@ -394,7 +409,10 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
             activeOpacity={0.75}
             testID="open-wipe-history-modal-btn"
           >
-            <Text style={styles.wipeHeaderBtnText}>🗑️ Wipe</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon name="trash" size={12} color="#FCA5A5" />
+              <Text style={styles.wipeHeaderBtnText}>Wipe</Text>
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -1244,6 +1262,10 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
     </View>
   );
 
+  if (embedded) {
+    return visible ? content : null;
+  }
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onBack}>
       {content}
@@ -1258,7 +1280,7 @@ export const TrainingHistoryScreen: React.FC<TrainingHistoryScreenProps> = ({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#121114',
+    backgroundColor: SURFACES.canvas,
   },
   prBadgeRow: {
     flexDirection: 'row',
@@ -1319,9 +1341,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#19181D',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2B2930',
+    backgroundColor: SURFACES.canvas,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACES.hairline,
   },
   backBtn: {
     paddingHorizontal: 12,

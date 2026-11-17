@@ -14,8 +14,11 @@ import {
   AggregatedTalentModifiers,
   ArrivalBoon,
   ArrivalTriggerType,
+  CharacterCustomizationConfig,
+  CharacterRace,
   CombatantCharacterInput,
   ConsolidatedSpoilsSummary,
+  CoreStatBlock,
   DEFAULT_DUNGEON_CATALOG,
   DEFAULT_TALENT_TREES,
   DerivedCombatAttributes,
@@ -114,6 +117,11 @@ import {
   upsertExerciseMachineLoadMode,
   upsertExerciseStickyNote,
   upsertExerciseWeightUnit,
+  adaptCustomizationForRaceChange,
+  createDefaultCustomizationConfig,
+  deriveCustomizationFromLegacyAppearance,
+  normalizeCustomizationConfig,
+  validateCustomizationConfig,
 } from '@goki/game-engine';
 import {
   OfflineDraftCardioItem,
@@ -481,6 +489,8 @@ interface GameContextValue {
   gameMode: 'STANDARD' | 'IRONMAN_VERIFIED';
   setGameMode: (mode: 'STANDARD' | 'IRONMAN_VERIFIED') => void;
   appearanceId: string;
+  race: CharacterRace;
+  customizationConfig: CharacterCustomizationConfig;
   characters: PersistedCharacterProfile[];
   deletedCharacters: PersistedCharacterProfile[];
   activeCharacterId: string | null;
@@ -488,11 +498,21 @@ interface GameContextValue {
   createCharacter: (
     name: string,
     mode: 'STANDARD' | 'IRONMAN_VERIFIED',
-    appearanceIdOrAvatar?: string
+    appearanceIdOrAvatar?: string,
+    options?: { race?: CharacterRace; customizationConfig?: CharacterCustomizationConfig }
   ) => Promise<{ ok: boolean; error?: string }>;
   updateCharacterAppearance: (
     appearanceId: string,
     characterId?: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  updateCharacterCustomization: (
+    updates: {
+      race?: CharacterRace;
+      customizationConfig?: CharacterCustomizationConfig;
+      appearanceId?: string;
+      name?: string;
+    },
+    targetCharacterId?: string
   ) => Promise<{ ok: boolean; error?: string }>;
   deleteCharacter: (
     characterId: string,
@@ -876,6 +896,63 @@ function createLevelOneStats() {
   };
 }
 
+function isValidCharacterRace(val: unknown): val is CharacterRace {
+  return val === 'HUMAN' || val === 'ONI' || val === 'KITSUNE';
+}
+
+function resolveCharacterCustomization(
+  char:
+    | {
+        race?: unknown;
+        customizationConfig?: unknown;
+        appearanceId?: string | null;
+        avatarSpriteId?: string | null;
+      }
+    | null
+    | undefined,
+  existingLocal: PersistedCharacterProfile | null | undefined,
+  fallbackAppearanceId: string
+): { race: CharacterRace; customizationConfig: CharacterCustomizationConfig } {
+  const hasIncomingConfig = Boolean(
+    char?.customizationConfig && typeof char.customizationConfig === 'object'
+  );
+  const resolvedRace: CharacterRace =
+    hasIncomingConfig && isValidCharacterRace(char?.race)
+      ? char.race
+      : isValidCharacterRace(existingLocal?.race)
+      ? existingLocal.race
+      : isValidCharacterRace(char?.race)
+      ? char.race
+      : deriveCustomizationFromLegacyAppearance(fallbackAppearanceId).race;
+
+  const rawConfig = hasIncomingConfig
+    ? char?.customizationConfig
+    : (existingLocal?.customizationConfig ?? char?.customizationConfig ?? null);
+
+  return {
+    race: resolvedRace,
+    customizationConfig: normalizeCustomizationConfig(
+      rawConfig,
+      resolvedRace,
+      fallbackAppearanceId
+    ),
+  };
+}
+
+function toCoreStatBlock(
+  s: PersistedCharacterProfile['stats'] | ReturnType<typeof createLevelOneStats> | undefined
+): CoreStatBlock {
+  return {
+    strengthLevel: s?.STRENGTH?.level ?? 1,
+    enduranceLevel: s?.ENDURANCE?.level ?? 1,
+    agilityLevel: s?.AGILITY?.level ?? 1,
+    dexLevel: s?.DEXTERITY?.level ?? 1,
+    conLevel: s?.CONSTITUTION?.level ?? 1,
+    wisLevel: s?.WISDOM?.level ?? 1,
+    sprLevel: s?.SPIRIT?.level ?? 1,
+  };
+}
+
 function createCleanInitialFatigueState(): FatigueStateSnapshot {
   return {
     isRestingInTavern: true,
@@ -985,6 +1062,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [gameMode, setGameMode] = useState<'STANDARD' | 'IRONMAN_VERIFIED'>('STANDARD');
   const [characterArtUri, setCharacterArtUri] = useState<string | null>(null);
   const [appearanceId, setAppearanceId] = useState<string>('oni_warlord');
+  const [race, setRace] = useState<CharacterRace>('HUMAN');
+  const raceRef = useRef<CharacterRace>('HUMAN');
+  raceRef.current = race;
+  const [customizationConfig, setCustomizationConfig] = useState<CharacterCustomizationConfig>(() =>
+    createDefaultCustomizationConfig('HUMAN')
+  );
+  const customizationConfigRef = useRef<CharacterCustomizationConfig>(customizationConfig);
+  customizationConfigRef.current = customizationConfig;
   const [deletedCharacters, setDeletedCharacters] = useState<PersistedCharacterProfile[]>([]);
   const deletedCharactersRef = useRef<PersistedCharacterProfile[]>([]);
   deletedCharactersRef.current = deletedCharacters;
@@ -1527,6 +1612,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setGameMode(cp.gameMode);
         const apper = cp.appearanceId || cp.avatarSpriteId || 'oni_warlord';
         setAppearanceId(apper);
+        const resolvedCustom = resolveCharacterCustomization(cp, null, apper);
+        raceRef.current = resolvedCustom.race;
+        setRace(resolvedCustom.race);
+        customizationConfigRef.current = resolvedCustom.customizationConfig;
+        setCustomizationConfig(resolvedCustom.customizationConfig);
         const hydratedRank = (cp.adventurerRank || 'COPPER') as AdventurerRank;
         setAdventurerRank(hydratedRank);
         if (typeof cp.adventurerReputation === 'number') setAdventurerReputation(cp.adventurerReputation);
@@ -2064,12 +2154,24 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           : incomingAppearance || 'oni_warlord';
       setAppearanceId(resolvedAppearance);
 
+      const resolvedCustom = resolveCharacterCustomization(
+        char,
+        existingLocal,
+        resolvedAppearance
+      );
+      raceRef.current = resolvedCustom.race;
+      setRace(resolvedCustom.race);
+      customizationConfigRef.current = resolvedCustom.customizationConfig;
+      setCustomizationConfig(resolvedCustom.customizationConfig);
+
       const charProfile: PersistedCharacterProfile = {
         id: char.id,
         name: char.name,
         gameMode: mode,
         appearanceId: resolvedAppearance,
         avatarSpriteId: resolvedAppearance,
+        race: resolvedCustom.race,
+        customizationConfig: resolvedCustom.customizationConfig,
         overallLevel: char.overallLevel ?? 1,
         adventurerRank: resolvedRank,
         adventurerReputation: resolvedRep,
@@ -2151,6 +2253,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     cancelStaminaRechargedNotification().catch(() => {});
     setLastWorkoutResult(null);
     setLastHybridConsolidation(null);
+    raceRef.current = 'HUMAN';
+    setRace('HUMAN');
+    const resetCustom = createDefaultCustomizationConfig('HUMAN');
+    customizationConfigRef.current = resetCustom;
+    setCustomizationConfig(resetCustom);
   }, []);
 
   const syncRemoteCharacters = useCallback(
@@ -2232,12 +2339,20 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ? Math.max(localChar.gold, c.gold ?? 100)
             : c.gold ?? 100;
 
+        const resolvedCustom = resolveCharacterCustomization(
+          c,
+          localChar,
+          effectiveAppearance
+        );
+
         return {
           id: c.id,
           name: c.name,
           gameMode: c.gameMode,
           appearanceId: effectiveAppearance,
           avatarSpriteId: effectiveAppearance,
+          race: resolvedCustom.race,
+          customizationConfig: resolvedCustom.customizationConfig,
           deletedAt: null,
           overallLevel: c.overallLevel ?? 1,
           adventurerRank: c.adventurerRank || 'COPPER',
@@ -2394,7 +2509,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     async (
       name: string,
       mode: 'STANDARD' | 'IRONMAN_VERIFIED',
-      appearanceIdOrAvatar?: string
+      appearanceIdOrAvatar?: string,
+      options?: { race?: CharacterRace; customizationConfig?: CharacterCustomizationConfig }
     ): Promise<{ ok: boolean; error?: string }> => {
       // Enforce the 2-character limit: 1 Standard, 1 Ironman (active only)
       if (availableCharactersRef.current.length >= 2) {
@@ -2413,8 +2529,31 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
 
-      characterSwitchSeqRef.current += 1;
       const chosenAppearance = appearanceIdOrAvatar || 'oni_warlord';
+      const legacyDerived = deriveCustomizationFromLegacyAppearance(chosenAppearance);
+      const chosenRace: CharacterRace = options?.race ?? legacyDerived.race;
+      const chosenConfig: CharacterCustomizationConfig =
+        options?.customizationConfig ??
+        (options?.race ? createDefaultCustomizationConfig(chosenRace) : legacyDerived.config);
+
+      const check = validateCustomizationConfig({
+        race: chosenRace,
+        config: chosenConfig,
+        stats: {
+          strengthLevel: 1,
+          enduranceLevel: 1,
+          agilityLevel: 1,
+          dexLevel: 1,
+          conLevel: 1,
+          wisLevel: 1,
+          sprLevel: 1,
+        },
+      });
+      if (!check.valid || !check.normalizedConfig) {
+        return { ok: false, error: check.errors[0] ?? 'Invalid starting customization.' };
+      }
+
+      characterSwitchSeqRef.current += 1;
 
       if (serverOnline) {
         try {
@@ -2423,10 +2562,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             gameMode: mode,
             appearanceId: chosenAppearance,
             avatarSpriteId: chosenAppearance,
+            race: chosenRace,
+            customizationConfig: check.normalizedConfig,
           });
           if (res.ok && res.data?.character) {
             const newChar = {
               ...res.data.character,
+              race: isValidCharacterRace(res.data.character.race)
+                ? res.data.character.race
+                : chosenRace,
+              customizationConfig:
+                res.data.character.customizationConfig ?? check.normalizedConfig,
               inventory: [],
               equipmentLoadout: { ...EMPTY_EQUIPMENT_LOADOUT },
               workoutsLoggedCount: 0,
@@ -2459,6 +2605,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         gameMode: mode,
         appearanceId: chosenAppearance,
         avatarSpriteId: chosenAppearance,
+        race: chosenRace,
+        customizationConfig: check.normalizedConfig,
         overallLevel: 1,
         adventurerRank: 'COPPER',
         adventurerReputation: 0,
@@ -2480,24 +2628,203 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [serverOnline, syncRemoteCharacters]
   );
 
+  const updateCharacterCustomization = useCallback(
+    async (
+      updates: {
+        race?: CharacterRace;
+        customizationConfig?: CharacterCustomizationConfig;
+        appearanceId?: string;
+        name?: string;
+      },
+      targetCharacterId?: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const targetId = targetCharacterId || activeCharacterIdRef.current;
+      const targetChar = targetId
+        ? availableCharactersRef.current.find((c) => c.id === targetId) ||
+          (currentProfileRef.current?.id === targetId ? currentProfileRef.current : null)
+        : null;
+      const isTargetActive = !targetId || targetId === activeCharacterIdRef.current;
+
+      const currentCharRace: CharacterRace = isValidCharacterRace(targetChar?.race)
+        ? targetChar.race
+        : isTargetActive
+        ? raceRef.current
+        : 'HUMAN';
+
+      const currentCharConfig: CharacterCustomizationConfig = targetChar?.customizationConfig
+        ? normalizeCustomizationConfig(
+            targetChar.customizationConfig,
+            currentCharRace,
+            targetChar.appearanceId
+          )
+        : isTargetActive
+        ? customizationConfigRef.current
+        : createDefaultCustomizationConfig(currentCharRace);
+
+      const coreStats = toCoreStatBlock(
+        targetChar?.stats ?? (isTargetActive ? statsRef.current : undefined)
+      );
+      const nextRace: CharacterRace = updates.race ?? currentCharRace;
+      const nextConfig: CharacterCustomizationConfig =
+        updates.customizationConfig ??
+        adaptCustomizationForRaceChange(currentCharConfig, nextRace);
+
+      const check = validateCustomizationConfig({
+        race: nextRace,
+        config: nextConfig,
+        stats: coreStats,
+      });
+      if (!check.valid || !check.normalizedConfig) {
+        return {
+          ok: false,
+          error: check.errors[0] ?? 'Customization locked or invalid.',
+        };
+      }
+
+      const finalConfig = check.normalizedConfig;
+
+      if (serverOnline && targetId && !targetId.startsWith('local_')) {
+        try {
+          const res = await updateCharacterAccount(targetId, {
+            race: nextRace,
+            customizationConfig: finalConfig,
+            ...(updates.appearanceId ? { appearanceId: updates.appearanceId } : {}),
+            ...(updates.name ? { name: updates.name } : {}),
+          });
+          if (
+            !res.ok &&
+            (res.statusCode === 400 || res.statusCode === 403 || res.statusCode === 409)
+          ) {
+            return {
+              ok: false,
+              error: res.error ?? 'Server rejected customization update.',
+            };
+          }
+        } catch (err: any) {
+          console.warn(
+            '[GameContext] Remote updateCharacterCustomization exception:',
+            err.message
+          );
+        }
+      }
+
+      if (isTargetActive) {
+        raceRef.current = nextRace;
+        setRace(nextRace);
+        customizationConfigRef.current = finalConfig;
+        setCustomizationConfig(finalConfig);
+        if (updates.appearanceId) setAppearanceId(updates.appearanceId);
+        if (updates.name) setCharacterName(updates.name);
+      }
+
+      const nextList = targetId
+        ? availableCharactersRef.current.map((c) =>
+            c.id === targetId
+              ? {
+                  ...c,
+                  race: nextRace,
+                  customizationConfig: finalConfig,
+                  ...(updates.appearanceId
+                    ? {
+                        appearanceId: updates.appearanceId,
+                        avatarSpriteId: updates.appearanceId,
+                      }
+                    : {}),
+                  ...(updates.name ? { name: updates.name } : {}),
+                }
+              : c
+          )
+        : availableCharactersRef.current;
+
+      setAvailableCharacters(nextList);
+      availableCharactersRef.current = nextList;
+
+      if (currentProfileRef.current && (!targetId || currentProfileRef.current.id === targetId)) {
+        currentProfileRef.current = {
+          ...currentProfileRef.current,
+          race: nextRace,
+          customizationConfig: finalConfig,
+          ...(updates.appearanceId
+            ? {
+                appearanceId: updates.appearanceId,
+                avatarSpriteId: updates.appearanceId,
+              }
+            : {}),
+          ...(updates.name ? { name: updates.name } : {}),
+        };
+      }
+
+      persistBundleSnapshot({
+        availableCharacters: nextList,
+        characterProfile: currentProfileRef.current,
+      });
+
+      return { ok: true };
+    },
+    [persistBundleSnapshot, serverOnline]
+  );
+
   const updateCharacterAppearance = useCallback(
     async (
       newAppearanceId: string,
       targetCharacterId?: string
     ): Promise<{ ok: boolean; error?: string }> => {
       const targetId = targetCharacterId || activeCharacterIdRef.current;
+      const derived = deriveCustomizationFromLegacyAppearance(newAppearanceId);
+      const targetChar = targetId
+        ? availableCharactersRef.current.find((c) => c.id === targetId) ||
+          (currentProfileRef.current?.id === targetId ? currentProfileRef.current : null)
+        : null;
+      const isTargetActive = !targetId || targetId === activeCharacterIdRef.current;
+      const baseMorphs = (
+        targetChar?.customizationConfig ??
+        (isTargetActive ? customizationConfigRef.current : derived.config)
+      ).morphs;
+      const adaptedCandidate = adaptCustomizationForRaceChange(
+        {
+          version: 1,
+          identity: derived.config.identity,
+          morphs: baseMorphs,
+        },
+        derived.race
+      );
+      const coreStats = toCoreStatBlock(
+        targetChar?.stats ?? (isTargetActive ? statsRef.current : undefined)
+      );
+      const check = validateCustomizationConfig({
+        race: derived.race,
+        config: adaptedCandidate,
+        stats: coreStats,
+      });
+      const resolvedConfig =
+        check.valid && check.normalizedConfig ? check.normalizedConfig : derived.config;
+
       if (!targetId) {
         setAppearanceId(newAppearanceId);
+        raceRef.current = derived.race;
+        setRace(derived.race);
+        customizationConfigRef.current = resolvedConfig;
+        setCustomizationConfig(resolvedConfig);
         return { ok: true };
       }
 
       if (targetId === activeCharacterIdRef.current) {
         setAppearanceId(newAppearanceId);
+        raceRef.current = derived.race;
+        setRace(derived.race);
+        customizationConfigRef.current = resolvedConfig;
+        setCustomizationConfig(resolvedConfig);
       }
 
       const nextList = availableCharactersRef.current.map((c) =>
         c.id === targetId
-          ? { ...c, appearanceId: newAppearanceId, avatarSpriteId: newAppearanceId }
+          ? {
+              ...c,
+              appearanceId: newAppearanceId,
+              avatarSpriteId: newAppearanceId,
+              race: derived.race,
+              customizationConfig: resolvedConfig,
+            }
           : c
       );
       setAvailableCharacters(nextList);
@@ -2508,6 +2835,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           ...currentProfileRef.current,
           appearanceId: newAppearanceId,
           avatarSpriteId: newAppearanceId,
+          race: derived.race,
+          customizationConfig: resolvedConfig,
         };
       }
 
@@ -2518,7 +2847,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (serverOnline && !targetId.startsWith('local_')) {
         try {
-          const res = await updateCharacterAccount(targetId, { appearanceId: newAppearanceId });
+          const res = await updateCharacterAccount(targetId, {
+            appearanceId: newAppearanceId,
+            race: derived.race,
+            customizationConfig: resolvedConfig,
+          });
           if (!res.ok) {
             if (res.statusCode === 409) {
               return { ok: false, error: res.error };
@@ -6256,12 +6589,15 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     gameMode,
     setGameMode,
     appearanceId,
+    race,
+    customizationConfig,
     characters: availableCharacters,
     deletedCharacters,
     activeCharacterId,
     switchCharacter,
     createCharacter,
     updateCharacterAppearance,
+    updateCharacterCustomization,
     deleteCharacter,
     restoreCharacter,
     refreshCharacterSheet,

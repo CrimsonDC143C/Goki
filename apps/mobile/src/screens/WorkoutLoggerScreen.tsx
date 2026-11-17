@@ -78,7 +78,12 @@ import { Image } from 'expo-image';
 import { getLootChestSpriteUri, LOOT_SPRITES } from '../assets/sprites';
 import { getItemIconSource } from '../assets/itemArtRegistry';
 import { audioManager } from '../services/AudioManager';
-import { COLORS, RARITY_COLORS, CRIMSON_ONI } from '../theme';
+import { RpgIcon } from '../components/icons/RpgIcon';
+import {
+  DisclosureActionRow,
+  DisclosureBottomSheet,
+} from '../components/ui/SurfacePrimitives';
+import { COLORS, RARITY_COLORS, CRIMSON_ONI, SURFACES } from '../theme';
 import {
   DEMON_BOSS_SPRITE_CONFIG,
   GREATSWORD_SKELETON_SPRITE_CONFIG,
@@ -223,6 +228,9 @@ export interface WorkoutLoggerScreenProps {
   onNavigateToPaperdoll?: () => void;
   onBackToLanding?: () => void;
   onFinishAndReturn?: () => void;
+  onOpenHistory?: () => void;
+  externalLoadedSession?: CompletedWorkoutRecord | null;
+  onConsumeExternalSession?: () => void;
 }
 
 // ============================================================================
@@ -235,6 +243,9 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   onNavigateToPaperdoll,
   onBackToLanding,
   onFinishAndReturn,
+  onOpenHistory,
+  externalLoadedSession,
+  onConsumeExternalSession,
 }) => {
   const {
     activeCharacterId,
@@ -912,6 +923,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
     },
     [convertSessionToBlocks]
   );
+
+  useEffect(() => {
+    if (externalLoadedSession) {
+      handleLoadSessionIntoWorkout(externalLoadedSession);
+      onConsumeExternalSession?.();
+    }
+  }, [externalLoadedSession, handleLoadSessionIntoWorkout, onConsumeExternalSession]);
 
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -1964,22 +1982,37 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
       <View style={styles.topBar}>
         <View style={styles.topBarLeftGroup}>
           <Pressable style={styles.backBtn} onPress={handleBackPress}>
-            <Text style={styles.backBtnText}>← Back</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+              <RpgIcon name="chevron-left" size={14} color="#D1D5DB" />
+              <Text style={styles.backBtnText}>Back</Text>
+            </View>
           </Pressable>
 
           <TouchableOpacity
             style={styles.topBarHistoryBtn}
-            onPress={() => setShowTrainingHistory(true)}
+            onPress={() => {
+              if (onOpenHistory) {
+                onOpenHistory();
+              } else {
+                setShowTrainingHistory(true);
+              }
+            }}
             testID="online-history-top-btn"
             activeOpacity={0.7}
           >
-            <Text style={styles.topBarHistoryText}>📊 History</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon name="history" size={13} color="#FDE68A" />
+              <Text style={styles.topBarHistoryText}>History</Text>
+            </View>
           </TouchableOpacity>
         </View>
 
         <View style={styles.sessionTimerBadge}>
           <Text style={styles.sessionClock}>{formatDuration(sessionElapsedSec)}</Text>
-          <Text style={styles.sessionSubRaid}>⚔️ Online Raid</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <RpgIcon name="combat" size={10} color={COLORS.gold} />
+            <Text style={styles.sessionSubRaid}>Online Raid</Text>
+          </View>
         </View>
       </View>
 
@@ -2033,18 +2066,24 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                 style={styles.preflightPill}
                 onPress={() => setGymIndex((i) => i + 1)}
               >
-                <Text style={styles.preflightPillText}>
-                  📍 {selectedGym.name} ({selectedGym.xpMultiplier}x)
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <RpgIcon name="pin" size={11} color="#E5E7EB" />
+                  <Text style={styles.preflightPillText}>
+                    {selectedGym.name} ({selectedGym.xpMultiplier}x)
+                  </Text>
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.preflightPill}
                 onPress={() => setBossIndex((i) => i + 1)}
               >
-                <Text style={styles.preflightPillText}>
-                  🐉 Target: {selectedBoss.name}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <RpgIcon name="raid" size={11} color={COLORS.gold} />
+                  <Text style={styles.preflightPillText}>
+                    Target: {selectedBoss.name}
+                  </Text>
+                </View>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -2054,14 +2093,21 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                   await toggleWearableLink();
                 }}
               >
-                <Text
-                  style={[
-                    styles.preflightPillText,
-                    wearableLinked && styles.preflightPillTextActive,
-                  ]}
-                >
-                  ⌚ Wearable: {wearableLinked ? `${liveBpm} BPM` : wearableSource}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <RpgIcon
+                    name="watch"
+                    size={11}
+                    color={wearableLinked ? '#38BDF8' : '#E5E7EB'}
+                  />
+                  <Text
+                    style={[
+                      styles.preflightPillText,
+                      wearableLinked && styles.preflightPillTextActive,
+                    ]}
+                  >
+                    Wearable: {wearableLinked ? `${liveBpm} BPM` : wearableSource}
+                  </Text>
+                </View>
               </TouchableOpacity>
             </View>
 
@@ -2070,7 +2116,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
               onPress={handleStartHybridSession}
               testID="workout-preflight-enter-btn"
             >
-              <Text style={styles.engageBossBtnText}>⚔️ Engage Boss</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <RpgIcon name="combat" size={13} color={SURFACES.canvas} />
+                <Text style={styles.engageBossBtnText}>Engage Boss</Text>
+              </View>
             </TouchableOpacity>
           </View>
         )}
@@ -2102,9 +2151,12 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
               <View style={styles.bossDetailCol}>
                 <View style={styles.bossNameRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.bossNameText}>
-                      🐉 {selectedBoss.name} • {selectedBoss.title}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <RpgIcon name="raid" size={13} color={COLORS.gold} />
+                      <Text style={styles.bossNameText} numberOfLines={1}>
+                        {selectedBoss.name} • {selectedBoss.title}
+                      </Text>
+                    </View>
                     <Text style={styles.bossHpNumText}>
                       HP {currentBossHp.toLocaleString()} / {maxBossHp.toLocaleString()} ({bossHpPct}%)
                     </Text>
@@ -2114,9 +2166,11 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                     style={styles.chevronToggleBtn}
                     onPress={() => setBossCardCollapsed(!bossCardCollapsed)}
                   >
-                    <Text style={styles.chevronToggleText}>
-                      {bossCardCollapsed ? '▼' : '▲'}
-                    </Text>
+                    <RpgIcon
+                      name={bossCardCollapsed ? 'chevron-down' : 'chevron-up'}
+                      size={14}
+                      color="#9CA3AF"
+                    />
                   </TouchableOpacity>
                 </View>
 
@@ -2131,13 +2185,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             {!bossCardCollapsed && (
               <View style={styles.bossTelemetryRow}>
                 <Text style={styles.liveCounterBadge} numberOfLines={1}>
-                  ✨ +{liveHudXp} XP • 🪙 {liveHudGold}g
+                  +{liveHudXp} XP • {liveHudGold}g
                 </Text>
                 {arrivalBoonActive && (
-                  <Text style={styles.arrivalBoonBadge} numberOfLines={1}>⚡ Boon: +5% All Stats</Text>
+                  <Text style={styles.arrivalBoonBadge} numberOfLines={1}>Boon: +5% All Stats</Text>
                 )}
                 <Text style={styles.gymMultiplierBadge} numberOfLines={1}>
-                  📍 {selectedGym.name} ({selectedGym.xpMultiplier}x)
+                  {selectedGym.name} ({selectedGym.xpMultiplier}x)
                 </Text>
               </View>
             )}
@@ -2158,7 +2212,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
           onResetCategory={handleResetCategory}
           onLoadPreset={handleLoadPreset}
           onOpenPresetDesigner={() => setShowPresetDesigner(true)}
-          onOpenTrainingHistory={() => setShowTrainingHistory(true)}
+          onOpenTrainingHistory={() => {
+            if (onOpenHistory) {
+              onOpenHistory();
+            } else {
+              setShowTrainingHistory(true);
+            }
+          }}
         />
 
         {/* 6 & 7. ORDERED WORKOUT SEGMENTS (Press-and-Hold Drag-to-Reorder: Gym, Cardio, Sport, Recovery) */}
@@ -2193,10 +2253,11 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                         style={styles.dragHandleBadge}
                         {...getSegmentPanHandlers('GYM')}
                       >
-                        <Text style={styles.dragHandleIcon}>⠿</Text>
+                        <RpgIcon name="grip" size={14} color="#D1D5DB" />
                       </View>
                     )}
-                    <Text style={styles.sectionHeading}>🏋️ RESISTANCE SETS</Text>
+                    <RpgIcon name="train" size={15} color={COLORS.gold} />
+                    <Text style={styles.sectionHeading}>RESISTANCE SETS</Text>
                   </View>
                   <View style={styles.sectionHeaderRightGroup}>
                     <Text style={styles.sectionCountMeta}>
@@ -2211,7 +2272,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                       activeOpacity={0.75}
                       testID="remove-segment-header-GYM"
                     >
-                      <Text style={styles.removeSegmentHeaderBtnText}>✕ Remove</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                        <RpgIcon name="close" size={10} color="#FCA5A5" />
+                        <Text style={styles.removeSegmentHeaderBtnText}>Remove</Text>
+                      </View>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -2325,7 +2389,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                               style={styles.dragHandleBadge}
                               {...getBlockPanHandlers(block.blockId)}
                             >
-                              <Text style={styles.dragHandleIcon}>⠿</Text>
+                              <RpgIcon name="grip" size={14} color="#9CA3AF" />
                             </View>
                           )}
 
@@ -2338,15 +2402,17 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                 {exMeta?.name ?? block.exerciseName ?? block.exerciseId}
                               </Text>
                               <View style={styles.swapExercisePill}>
-                                <Text style={styles.swapExercisePillText}>⇄ Swap</Text>
+                                <RpgIcon name="swap" size={11} color="#FDE68A" />
+                                <Text style={styles.swapExercisePillText}>Swap</Text>
                               </View>
                             </Pressable>
 
                             <View style={styles.subMetaRow}>
                               {prRecord && prRecord.bestE1RM > 0 ? (
                                 <View style={styles.e1rmInlineBadge}>
+                                  <RpgIcon name="trophy" size={11} color={COLORS.gold} />
                                   <Text style={styles.prevSessionHintText}>
-                                    🏆 Best:{' '}
+                                    Best:{' '}
                                     {formatCleanWeightNumber(
                                       convertKgToDisplayWeight(prRecord.bestE1RM, blockUnit)
                                     )}
@@ -2379,87 +2445,13 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                             activeOpacity={0.75}
                             testID={`exercise-menu-btn-${block.blockId}`}
                           >
-                            <Text
-                              style={[
-                                styles.blockActionMenuTriggerText,
-                                isMenuOpen && styles.blockActionMenuTriggerTextActive,
-                              ]}
-                            >
-                              ⋯
-                            </Text>
+                            <RpgIcon
+                              name="more-horizontal"
+                              size={16}
+                              color={isMenuOpen ? '#FDE68A' : '#E5E7EB'}
+                            />
                           </TouchableOpacity>
                         </View>
-
-                        {/* Compact `⋯` Exercise Action Drawer (Set Designations & Removal Only — No Duplicate Buttons) */}
-                        {isMenuOpen && (
-                          <View style={styles.blockActionMenuDrawer}>
-                            <TouchableOpacity
-                              style={[
-                                styles.blockMenuActionPill,
-                                isGrouped && styles.linkSupersetBtnActive,
-                              ]}
-                              onPress={() => {
-                                handleToggleSuperset(bIdx);
-                                setOpenBlockMenuId(null);
-                              }}
-                            >
-                              <Text
-                                style={[
-                                  styles.blockMenuActionText,
-                                  isGrouped && styles.linkSupersetBtnTextActive,
-                                ]}
-                              >
-                                {isGrouped ? '🔗 Unlink Superset (A1/A2)' : '🔗 Link Superset (A1/A2)'}
-                              </Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              style={styles.blockMenuActionPill}
-                              onPress={() => {
-                                handleSetOrAppendDesignation(block.blockId, 'WARMUP');
-                                setOpenBlockMenuId(null);
-                              }}
-                            >
-                              <Text style={styles.blockMenuActionText}>🌡️ Set / Add Warm-Up [W]</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              style={styles.blockMenuActionPill}
-                              onPress={() => {
-                                handleSetOrAppendDesignation(block.blockId, 'DROP_SET');
-                                setOpenBlockMenuId(null);
-                              }}
-                            >
-                              <Text style={styles.blockMenuActionText}>🔥 Set / Add Drop-Set [D]</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                              style={styles.blockMenuActionPill}
-                              onPress={() => {
-                                handleSetOrAppendDesignation(block.blockId, 'FAILURE');
-                                setOpenBlockMenuId(null);
-                              }}
-                            >
-                              <Text style={styles.blockMenuActionText}>
-                                ⚡ Set / Add Failure / AMRAP [F]
-                              </Text>
-                            </TouchableOpacity>
-
-                            {exerciseBlocks.length > 1 && (
-                              <TouchableOpacity
-                                style={[styles.blockMenuActionPill, styles.blockMenuActionDanger]}
-                                onPress={() => {
-                                  handleRemoveExerciseBlock(block.blockId);
-                                  setOpenBlockMenuId(null);
-                                }}
-                              >
-                                <Text style={styles.blockMenuActionDangerText}>
-                                  🗑️ Remove Exercise
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        )}
 
                         {/* Gym-Aware Sticky Per-Exercise Note */}
                         <ExerciseStickyNoteRow
@@ -2594,18 +2586,25 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                 }}
                                 activeOpacity={0.75}
                               >
-                                <Text
-                                  style={[
-                                    styles.platesHelperBtnText,
-                                    machineLoadMode === 'PLATE_LOADED'
-                                      ? styles.platesHelperBtnTextPlateLoaded
-                                      : styles.platesHelperBtnTextCableStack,
-                                  ]}
-                                >
-                                  {machineLoadMode === 'PLATE_LOADED'
-                                    ? '🏋️ Plate-Loaded'
-                                    : '⚙️ Cable Stack'}
-                                </Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                  <RpgIcon
+                                    name={machineLoadMode === 'PLATE_LOADED' ? 'plates' : 'cog'}
+                                    size={11}
+                                    color={machineLoadMode === 'PLATE_LOADED' ? '#6EE7B7' : '#CBD5E1'}
+                                  />
+                                  <Text
+                                    style={[
+                                      styles.platesHelperBtnText,
+                                      machineLoadMode === 'PLATE_LOADED'
+                                        ? styles.platesHelperBtnTextPlateLoaded
+                                        : styles.platesHelperBtnTextCableStack,
+                                    ]}
+                                  >
+                                    {machineLoadMode === 'PLATE_LOADED'
+                                      ? 'Plate-Loaded'
+                                      : 'Cable Stack'}
+                                  </Text>
+                                </View>
                               </TouchableOpacity>
                             ) : (
                               <TouchableOpacity
@@ -2615,9 +2614,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                 }
                                 activeOpacity={0.75}
                               >
-                                <Text style={styles.platesHelperBtnText}>
-                                  🧮 Plates Visualizer
-                                </Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                  <RpgIcon name="plates" size={11} color="#7DD3FC" />
+                                  <Text style={styles.platesHelperBtnText}>Plates</Text>
+                                </View>
                               </TouchableOpacity>
                             )}
 
@@ -2628,7 +2628,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                               }
                               activeOpacity={0.75}
                             >
-                              <Text style={styles.warmupHelperBtnText}>🌡️ Warm-Up Sets</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <RpgIcon name="flame" size={11} color="#FDE68A" />
+                                <Text style={styles.warmupHelperBtnText}>Warm-Up</Text>
+                              </View>
                             </TouchableOpacity>
 
                             <TouchableOpacity
@@ -2822,14 +2825,9 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                 onPress={() => handleToggleSetCompleted(block.blockId, row.id)}
                                 testID="set-complete-btn"
                               >
-                                <Text
-                                  style={[
-                                    styles.checkBtnText,
-                                    row.completed && styles.checkBtnTextCompleted,
-                                  ]}
-                                >
-                                  {row.completed ? '✓' : ''}
-                                </Text>
+                                {row.completed ? (
+                                  <RpgIcon name="check" size={16} color="#FFFFFF" />
+                                ) : null}
                               </Pressable>
 
                               {/* Delete Set Row Button */}
@@ -2838,7 +2836,7 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
                                   style={styles.deleteSetBtn}
                                   onPress={() => handleRemoveSetRow(block.blockId, row.id)}
                                 >
-                                  <Text style={styles.deleteSetText}>✕</Text>
+                                  <RpgIcon name="close" size={12} color="#64738F" />
                                 </Pressable>
                               )}
                             </View>
@@ -3340,6 +3338,81 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
         );
       })()}
 
+      {/* 15b. Progressive Disclosure Exercise Action Bottom Sheet */}
+      {(() => {
+        const menuIdx = openBlockMenuId
+          ? exerciseBlocks.findIndex((b) => b.blockId === openBlockMenuId)
+          : -1;
+        const menuBlk = menuIdx >= 0 ? exerciseBlocks[menuIdx] ?? null : null;
+        const menuExMeta = menuBlk ? exercises.find((e) => e.id === menuBlk.exerciseId) : null;
+        const isGrouped = Boolean(menuBlk?.supersetGroupId);
+        return (
+          <DisclosureBottomSheet
+            visible={menuBlk !== null}
+            onClose={() => setOpenBlockMenuId(null)}
+            title={menuExMeta?.name ?? menuBlk?.exerciseName ?? 'Exercise Options'}
+            subtitle="Set designations, superset linking & block controls"
+            testID="online-exercise-options-sheet"
+          >
+            {menuBlk ? (
+              <>
+                <DisclosureActionRow
+                  icon="link"
+                  label={isGrouped ? 'Unlink Superset (A1/A2)' : 'Link Superset (A1/A2)'}
+                  subtitle="Pair consecutive exercises into an alternating superset"
+                  active={isGrouped}
+                  onPress={() => {
+                    handleToggleSuperset(menuIdx);
+                    setOpenBlockMenuId(null);
+                  }}
+                />
+                <DisclosureActionRow
+                  icon="flame"
+                  label="Set / Add Warm-Up [W]"
+                  subtitle="Convert or append a warm-up set row"
+                  onPress={() => {
+                    handleSetOrAppendDesignation(menuBlk.blockId, 'WARMUP');
+                    setOpenBlockMenuId(null);
+                  }}
+                />
+                <DisclosureActionRow
+                  icon="flame"
+                  label="Set / Add Drop-Set [D]"
+                  subtitle="Convert or append a drop-set row"
+                  onPress={() => {
+                    handleSetOrAppendDesignation(menuBlk.blockId, 'DROP_SET');
+                    setOpenBlockMenuId(null);
+                  }}
+                />
+                <DisclosureActionRow
+                  icon="bolt"
+                  label="Set / Add Failure / AMRAP [F]"
+                  subtitle="Convert or append an AMRAP failure row"
+                  showDivider={exerciseBlocks.length > 1}
+                  onPress={() => {
+                    handleSetOrAppendDesignation(menuBlk.blockId, 'FAILURE');
+                    setOpenBlockMenuId(null);
+                  }}
+                />
+                {exerciseBlocks.length > 1 ? (
+                  <DisclosureActionRow
+                    icon="trash"
+                    label="Remove Exercise"
+                    subtitle="Delete this exercise block from the session"
+                    destructive
+                    showDivider={false}
+                    onPress={() => {
+                      handleRemoveExerciseBlock(menuBlk.blockId);
+                      setOpenBlockMenuId(null);
+                    }}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </DisclosureBottomSheet>
+        );
+      })()}
+
       {/* 16. Beginner-Friendly Metric Info `(i)` Tooltip Modal */}
       <MetricInfoTooltipModal
         metricKey={tooltipState?.key ?? null}
@@ -3380,12 +3453,10 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#121114',
+    backgroundColor: SURFACES.canvas,
   },
   shareReceiptActionBtn: {
-    backgroundColor: '#292214',
-    borderColor: '#C69A45',
-    borderWidth: 1.5,
+    backgroundColor: SURFACES.layer2,
     borderRadius: 10,
     paddingVertical: 11,
     paddingHorizontal: 14,
@@ -3405,9 +3476,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: '#19181D',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2B2930',
+    backgroundColor: SURFACES.canvas,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACES.hairline,
   },
   topBarLeftGroup: {
     flexDirection: 'row',
@@ -3415,10 +3486,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   backBtn: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#26242B',
+    borderRadius: 8,
+    backgroundColor: SURFACES.layer2,
   },
   backBtnText: {
     color: '#D1D5DB',
@@ -3436,8 +3507,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 6,
-    backgroundColor: '#24222B',
+    borderRadius: 8,
+    backgroundColor: SURFACES.layer2,
   },
   sessionClock: {
     fontSize: 14,
@@ -3473,10 +3544,8 @@ const styles = StyleSheet.create({
   topBarHistoryBtn: {
     paddingHorizontal: 8,
     paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#2D2316',
-    borderColor: '#C69A45',
-    borderWidth: 1,
+    borderRadius: 8,
+    backgroundColor: SURFACES.layer2,
   },
   topBarHistoryText: {
     color: '#FDE68A',
@@ -3486,10 +3555,8 @@ const styles = StyleSheet.create({
   finishTopBtn: {
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 8,
     backgroundColor: '#5E1924',
-    borderWidth: 1,
-    borderColor: '#C69A45',
   },
   finishTopBtnText: {
     color: '#FDE68A',
@@ -3531,9 +3598,9 @@ const styles = StyleSheet.create({
 
   // 3. Pre-Flight Bar Styles
   preflightCompactCard: {
-    backgroundColor: '#1E1D24',
-    borderColor: '#C69A45',
-    borderWidth: 1.5,
+    backgroundColor: SURFACES.layer1,
+    borderColor: SURFACES.goldHairline,
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,
     padding: 10,
     marginBottom: 12,
@@ -3549,15 +3616,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   preflightPill: {
-    backgroundColor: '#282631',
-    borderColor: '#3D3A49',
-    borderWidth: 1,
+    backgroundColor: SURFACES.layer2,
     borderRadius: 7,
     paddingHorizontal: 8,
     paddingVertical: 5,
   },
   preflightPillActive: {
-    borderColor: '#38BDF8',
     backgroundColor: '#162C3D',
   },
   preflightPillText: {
@@ -3584,10 +3648,10 @@ const styles = StyleSheet.create({
 
   // 4. Live Boss HP & Sprite Card Styles
   liveBossCard: {
-    backgroundColor: '#1A1821',
+    backgroundColor: SURFACES.layer1,
     borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#C69A45',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.goldHairline,
     padding: 10,
     marginBottom: 12,
   },
@@ -3600,9 +3664,9 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 8,
-    backgroundColor: '#282433',
-    borderWidth: 1,
-    borderColor: '#C69A45',
+    backgroundColor: SURFACES.layer2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.goldHairline,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -3740,37 +3804,38 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   exerciseCard: {
-    backgroundColor: '#1B1920',
-    borderRadius: 12,
-    borderColor: '#2F2C38',
-    borderWidth: 1,
-    padding: 12,
-    marginBottom: 10,
+    backgroundColor: 'transparent',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACES.hairline,
+    paddingHorizontal: 2,
+    paddingVertical: 14,
+    marginBottom: 4,
   },
   exerciseCardLinkedNext: {
     marginBottom: 0,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
     borderBottomWidth: 0,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.gold,
+    paddingLeft: 10,
   },
   exerciseCardLinkedPrev: {
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
+    marginTop: 0,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.gold,
+    paddingLeft: 10,
   },
   supersetBanner: {
-    backgroundColor: '#2E2211',
-    borderColor: '#C69A45',
-    borderWidth: 1,
+    backgroundColor: SURFACES.layer2,
     borderRadius: 6,
-    paddingVertical: 2,
+    paddingVertical: 3,
     paddingHorizontal: 8,
     alignSelf: 'flex-start',
     marginBottom: 8,
   },
   supersetBannerText: {
-    color: '#FDE68A',
+    color: COLORS.gold,
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '800',
     letterSpacing: 0.5,
   },
   exerciseCardHeader: {
@@ -3787,9 +3852,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   exerciseSelectorText: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#F3F4F6',
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
     flexShrink: 1,
   },
   exerciseSelectorCaret: {
@@ -3981,9 +4046,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   platesHelperBtn: {
-    backgroundColor: '#1D2430',
-    borderColor: '#38BDF8',
-    borderWidth: 1,
+    backgroundColor: SURFACES.layer2,
     borderRadius: 7,
     paddingHorizontal: 9,
     paddingVertical: 6,
@@ -3992,17 +4055,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   platesHelperBtnCableStack: {
-    backgroundColor: '#1F1E28',
-    borderColor: '#64748B',
+    backgroundColor: SURFACES.layer2,
   },
   platesHelperBtnPlateLoaded: {
-    backgroundColor: '#182A24',
-    borderColor: '#10B981',
+    backgroundColor: 'rgba(16, 185, 129, 0.14)',
   },
   platesHelperBtnText: {
     color: '#7DD3FC',
     fontSize: 10.5,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   platesHelperBtnTextCableStack: {
     color: '#CBD5E1',
@@ -4011,9 +4072,7 @@ const styles = StyleSheet.create({
     color: '#6EE7B7',
   },
   warmupHelperBtn: {
-    backgroundColor: '#292014',
-    borderColor: '#F59E0B',
-    borderWidth: 1,
+    backgroundColor: SURFACES.layer2,
     borderRadius: 7,
     paddingHorizontal: 9,
     paddingVertical: 6,
@@ -4024,7 +4083,7 @@ const styles = StyleSheet.create({
   warmupHelperBtnText: {
     color: '#FDE68A',
     fontSize: 10.5,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   sectionHeaderRightGroup: {
     flexDirection: 'row',
@@ -4035,19 +4094,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 6,
-    backgroundColor: 'rgba(239, 68, 68, 0.16)',
-    borderWidth: 1,
-    borderColor: '#EF4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.14)',
   },
   removeSegmentHeaderBtnText: {
     color: '#FCA5A5',
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   unitTogglePill: {
-    backgroundColor: '#24222F',
-    borderColor: '#4A4658',
-    borderWidth: 1,
+    backgroundColor: SURFACES.layer2,
     borderRadius: 7,
     paddingHorizontal: 8,
     paddingVertical: 6,
@@ -4057,8 +4112,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   unitTogglePillImperial: {
-    borderColor: '#C69A45',
-    backgroundColor: '#332716',
+    backgroundColor: SURFACES.layer3,
   },
   unitTogglePillText: {
     color: '#E5E7EB',
@@ -4072,8 +4126,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     paddingBottom: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2B2836',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: SURFACES.hairline,
     marginBottom: 6,
   },
   colHeaderWithInfo: {
@@ -4085,10 +4139,8 @@ const styles = StyleSheet.create({
   dragHandleBadge: {
     width: 28,
     height: 28,
-    borderRadius: 6,
-    backgroundColor: '#25232E',
-    borderColor: '#454154',
-    borderWidth: 1,
+    borderRadius: 7,
+    backgroundColor: SURFACES.layer2,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
@@ -4100,11 +4152,11 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   colHeader: {
-    color: '#8A8794',
-    fontSize: 9,
-    fontWeight: '800',
+    color: '#64748B',
+    fontSize: 9.5,
+    fontWeight: '700',
     textAlign: 'center',
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
   },
   colInput: {
     flex: 1,
@@ -4119,24 +4171,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingVertical: 3,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    borderRadius: 8,
   },
   setRowCompleted: {
-    opacity: 0.85,
+    backgroundColor: SURFACES.emeraldTint,
   },
   dropSetRowIndent: {
     paddingLeft: 6,
-    backgroundColor: '#241719',
+    borderLeftWidth: 2,
+    borderLeftColor: '#EF4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
     borderRadius: 6,
   },
   setTypeBtn: {
     width: 36,
     height: 36,
-    borderWidth: 1,
-    borderRadius: 6,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#22202B',
+    backgroundColor: SURFACES.layer2,
   },
   setTypeBtnText: {
     fontSize: 11,
@@ -4145,10 +4200,8 @@ const styles = StyleSheet.create({
   prevSetPill: {
     width: 58,
     height: 36,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#343140',
-    backgroundColor: '#1B1922',
+    borderRadius: 7,
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 3,
@@ -4157,68 +4210,60 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   prevSetMainText: {
-    color: '#D1D5DB',
-    fontSize: 10,
-    fontWeight: '800',
+    color: '#9BA8C2',
+    fontSize: 10.5,
+    fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
   prevSetSubText: {
-    color: '#9CA3AF',
-    fontSize: 8,
-    fontWeight: '700',
+    color: '#64738F',
+    fontSize: 8.5,
+    fontWeight: '600',
     marginTop: -1,
   },
   prevSetEmptyText: {
-    color: '#6B7280',
+    color: '#64738F',
     fontSize: 10,
     fontWeight: '700',
   },
   numericInput: {
     flex: 1,
     height: 36,
-    backgroundColor: '#25232F',
-    borderWidth: 1,
-    borderColor: '#383545',
-    borderRadius: 6,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: 7,
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: '800',
     textAlign: 'center',
     paddingHorizontal: 3,
     fontVariant: ['tabular-nums'],
   },
   numericInputCompleted: {
-    borderColor: '#10B981',
-    backgroundColor: '#172722',
+    backgroundColor: 'rgba(16, 185, 129, 0.16)',
   },
   rpePillBtn: {
     width: 44,
     height: 36,
-    backgroundColor: '#23212C',
-    borderWidth: 1,
-    borderColor: '#3A3749',
-    borderRadius: 6,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
   },
   rpePillText: {
     color: '#FDE68A',
-    fontSize: 11,
+    fontSize: 11.5,
     fontWeight: '800',
   },
   checkBtn: {
     width: 38,
     height: 36,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#4B5563',
-    backgroundColor: '#23212C',
+    borderRadius: 7,
+    backgroundColor: SURFACES.layer2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   checkBtnCompleted: {
     backgroundColor: '#10B981',
-    borderColor: '#059669',
   },
   checkBtnText: {
     color: '#FFFFFF',
@@ -4240,15 +4285,13 @@ const styles = StyleSheet.create({
   },
   addSetRowBtn: {
     marginTop: 8,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#383446',
-    backgroundColor: '#22202B',
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: SURFACES.layer1,
     alignItems: 'center',
   },
   addSetRowText: {
-    color: '#C69A45',
+    color: COLORS.gold,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -4273,32 +4316,30 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   swapExercisePill: {
-    backgroundColor: '#2D2316',
-    borderColor: '#C69A45',
-    borderWidth: 1,
-    borderRadius: 5,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     marginLeft: 8,
   },
   swapExercisePillText: {
     color: '#FDE68A',
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   blockActionMenuTrigger: {
     width: 34,
     height: 32,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#4A4656',
-    backgroundColor: '#25232C',
+    borderRadius: 8,
+    backgroundColor: SURFACES.layer2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   blockActionMenuTriggerActive: {
-    backgroundColor: '#362A18',
-    borderColor: '#C69A45',
+    backgroundColor: SURFACES.layer3,
   },
   blockActionMenuTriggerText: {
     color: '#E5E7EB',
@@ -4396,25 +4437,21 @@ const styles = StyleSheet.create({
   },
   addExerciseBlockBtn: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#C69A45',
-    backgroundColor: '#2B2317',
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: SURFACES.layer2,
     alignItems: 'center',
   },
   addExerciseBlockText: {
     color: '#FDE68A',
-    fontSize: 12,
-    fontWeight: '900',
+    fontSize: 12.5,
+    fontWeight: '800',
   },
   managePresetsBottomBtn: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#4A4656',
-    backgroundColor: '#22202B',
+    borderRadius: 10,
+    backgroundColor: SURFACES.layer2,
     alignItems: 'center',
   },
   managePresetsBottomText: {
@@ -4425,11 +4462,9 @@ const styles = StyleSheet.create({
 
   // Cardio & Non-Resistance Section Styles
   cardioCard: {
-    backgroundColor: '#1B1920',
-    borderRadius: 12,
-    borderColor: '#2F2C38',
-    borderWidth: 1,
-    padding: 12,
+    backgroundColor: SURFACES.layer1,
+    borderRadius: 14,
+    padding: 14,
     marginBottom: 10,
   },
   cardioSelectHeader: {

@@ -14,7 +14,8 @@ import { AuthModal } from '../components/AuthModal';
 import { CharacterManagerModal } from '../components/CharacterManagerModal';
 import { useGame } from '../state/GameContext';
 import { LOOT_CHEST_SVGS, RANK_CREST_SVGS } from '../assets/v0Vault';
-import { CRIMSON_ONI } from '../theme';
+import { RpgIcon } from '../components/icons/RpgIcon';
+import { COLORS, CRIMSON_ONI, SURFACES } from '../theme';
 
 const GOKI_EMBLEM_SOURCE: ImageSourcePropType = require('../../assets/favicon.png');
 
@@ -39,6 +40,9 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
     characterName,
     characterArtUri,
     appearanceId,
+    race,
+    customizationConfig,
+    equipmentLoadout,
     overallLevel,
     adventurerRank,
     location,
@@ -154,6 +158,9 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
               variant="hero"
               height={360}
               appearanceId={appearanceId}
+              race={race}
+              customizationConfig={customizationConfig}
+              equippedLoadout={equipmentLoadout}
               imageSource={characterImageSource ?? characterArtUri}
             >
               <View style={styles.nameplateBanner}>
@@ -232,11 +239,18 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             onPress={openHallOfHeroes}
             testID="landing-manage-heroes-btn"
           >
-            <Text style={styles.heroManageBtnText}>
-              {hasActiveHero
-                ? `${gameMode === 'IRONMAN_VERIFIED' ? '🛡️ Ironman Verified' : '⚔️ Standard Honesty'} • Hall of Heroes (Switch / Forge)`
-                : '⚔️ Open Hall of Heroes (Manage / Restore Roster)'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <RpgIcon
+                name={hasActiveHero && gameMode === 'IRONMAN_VERIFIED' ? 'shield' : 'combat'}
+                size={13}
+                color={CRIMSON_ONI.agedGoldBright}
+              />
+              <Text style={styles.heroManageBtnText}>
+                {hasActiveHero
+                  ? `${gameMode === 'IRONMAN_VERIFIED' ? 'Ironman Verified' : 'Standard Honesty'} • Hall of Heroes (Switch / Forge)`
+                  : 'Open Hall of Heroes (Manage / Restore Roster)'}
+              </Text>
+            </View>
           </Pressable>
         </View>
 
@@ -254,7 +268,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           >
             <View style={styles.actionHeaderRow}>
               <View style={styles.actionTitleCluster}>
-                <Text style={styles.actionIcon}>📓</Text>
+                <RpgIcon name="train" size={18} color={COLORS.textPrimary} accentColor={COLORS.gold} />
                 <Text style={styles.actionTitle}>Quick Offline Workout</Text>
               </View>
               {draftCompletedItems > 0 ? (
@@ -264,7 +278,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                   </Text>
                 </View>
               ) : (
-                <Text style={styles.chevron}>→</Text>
+                <RpgIcon name="chevron-right" size={16} color={CRIMSON_ONI.ashGray} />
               )}
             </View>
             <Text style={styles.actionSubtitle}>
@@ -291,7 +305,11 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           >
             <View style={styles.actionHeaderRow}>
               <View style={styles.actionTitleCluster}>
-                <Text style={styles.actionIcon}>{hasActiveHero ? '⚔️' : '🔒'}</Text>
+                <RpgIcon
+                  name={hasActiveHero ? 'combat' : 'lock'}
+                  size={18}
+                  color={hasActiveHero ? CRIMSON_ONI.agedGoldBright : CRIMSON_ONI.ashGray}
+                />
                 <Text
                   style={[
                     styles.actionTitle,
@@ -313,7 +331,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                   </Text>
                 </View>
               ) : (
-                <Text style={styles.chevronGold}>→</Text>
+                <RpgIcon name="chevron-right" size={16} color={CRIMSON_ONI.agedGoldBright} />
               )}
             </View>
             <Text style={styles.actionSubtitle}>
@@ -353,7 +371,12 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
             )}
             <View style={styles.actionHeaderRow}>
               <View style={styles.actionTitleCluster}>
-                <Text style={styles.actionIcon}>{hasActiveHero ? '🏰' : '🔒'}</Text>
+                <RpgIcon
+                  name={hasActiveHero ? 'dungeon' : 'lock'}
+                  size={18}
+                  color={hasActiveHero ? COLORS.textPrimary : CRIMSON_ONI.ashGray}
+                  accentColor={COLORS.gold}
+                />
                 <Text style={[styles.actionTitle, !hasActiveHero && styles.actionTitleLocked]}>
                   Enter World
                 </Text>
@@ -363,7 +386,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                   <Text style={styles.lockedActionPillText}>Hero Required</Text>
                 </View>
               ) : (
-                <Text style={styles.chevronCrimson}>→</Text>
+                <RpgIcon name="chevron-right" size={16} color={CRIMSON_ONI.agedGoldBright} />
               )}
             </View>
             <Text style={styles.actionSubtitle}>

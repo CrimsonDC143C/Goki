@@ -44,10 +44,16 @@ import {
   STAT_GLYPH_SVGS,
 } from '../assets/v0Vault';
 import { getItemIconSource } from '../assets/itemArtRegistry';
-import { COLORS, CRIMSON_ONI, RARITY_COLORS } from '../theme';
+import {
+  RpgIcon,
+  RpgIconName,
+  getHolisticStatIconName,
+} from '../components/icons/RpgIcon';
+import { COLORS, CRIMSON_ONI, RARITY_COLORS, SURFACES } from '../theme';
 
 export interface CharacterProfileScreenProps {
   onJumpToTalents?: (stat?: HolisticStatType | StatType) => void;
+  onOpenAppearance?: () => void;
   characterImageSource?: ImageSourcePropType | string | null;
 }
 
@@ -166,6 +172,49 @@ const RIGHT_PAPERDOLL_SLOTS: { slot: EquipmentSlot; label: string; icon: string 
   { slot: 'accessory2', label: 'Amulet', icon: '📿' },
 ];
 
+const SLOT_RPG_ICONS: Record<EquipmentSlot, RpgIconName> = {
+  mainHand: 'slot-weapon',
+  offHand: 'slot-offhand',
+  head: 'slot-head',
+  chest: 'slot-chest',
+  legs: 'slot-legs',
+  boots: 'slot-boots',
+  accessory1: 'slot-ring',
+  accessory2: 'slot-amulet',
+};
+
+function getItemRpgIconName(
+  item?: InventoryEntry | null,
+  slotFallback?: EquipmentSlot
+): RpgIconName {
+  if (!item) {
+    if (slotFallback) return SLOT_RPG_ICONS[slotFallback] ?? 'shield';
+    return 'backpack';
+  }
+  const type = (item.itemType as string) ?? '';
+  if (type === 'WEAPON') return 'slot-weapon';
+  if (type === 'OFFHAND') return 'slot-offhand';
+  if (type === 'HEAD') return 'slot-head';
+  if (type === 'CHEST') return 'slot-chest';
+  if (type === 'LEGS') return 'slot-legs';
+  if (type === 'BOOTS') return 'slot-boots';
+  if (type === 'ACCESSORY') {
+    const n = item.name.toLowerCase();
+    if (n.includes('ring') || n.includes('band')) return 'slot-ring';
+    if (n.includes('amulet') || n.includes('pendant') || n.includes('necklace')) return 'slot-amulet';
+    return 'sparkles';
+  }
+  if (type === 'CONSUMABLE') return 'prof-alchemy';
+  if (type === 'CRAFTING_MATERIAL' || type === 'MATERIAL') {
+    const n = item.name.toLowerCase();
+    if (n.includes('ore') || n.includes('ingot') || n.includes('metal')) return 'prof-mining';
+    if (n.includes('herb') || n.includes('flower') || n.includes('leaf')) return 'prof-foraging';
+    if (n.includes('gem') || n.includes('crystal') || n.includes('shard')) return 'sparkles';
+    return 'anvil';
+  }
+  return 'backpack';
+}
+
 function getItemArtworkGlyph(
   item?: InventoryEntry | null,
   slotFallback?: EquipmentSlot
@@ -250,12 +299,15 @@ function getCompactItemBadge(item: InventoryEntry): string {
 
 export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   onJumpToTalents,
+  onOpenAppearance,
   characterImageSource,
 }) => {
   const {
     characterName,
     characterArtUri,
     appearanceId,
+    race,
+    customizationConfig,
     overallLevel,
     adventurerRank,
     stats,
@@ -568,7 +620,14 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   };
 
   // Fatigue & Rest Status Pill Calculation
-  const restPillConfig = (() => {
+  const restPillConfig = ((): {
+    icon: RpgIconName;
+    label: string;
+    bg: string;
+    border: string;
+    text: string;
+    summary: string;
+  } => {
     if (combatPenalties.stacks > 0) {
       const accLossPct = Math.round((1 - combatPenalties.accuracyMultiplier) * 100);
       const dodgeLossPct = Math.round((1 - combatPenalties.dodgeMultiplier) * 100);
@@ -576,7 +635,8 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
         (1 - combatPenalties.statEffectivenessMultiplier) * 100
       );
       return {
-        label: `⚠️ Systemic Fatigue (${combatPenalties.stacks} Stack${
+        icon: 'flame',
+        label: `Systemic Fatigue (${combatPenalties.stacks} Stack${
           combatPenalties.stacks === 1 ? '' : 's'
         })`,
         bg: '#3B181B',
@@ -588,7 +648,8 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
 
     if (fatigueState.activeRecoveryBuffActive && fatigueState.wellRestedMultiplier > 1) {
       return {
-        label: `🌿 +25% Recovery + ${fatigueState.wellRestedMultiplier.toFixed(
+        icon: 'prof-foraging',
+        label: `+25% Recovery + ${fatigueState.wellRestedMultiplier.toFixed(
           2
         )}x Well-Rested`,
         bg: COLORS.enduranceDim,
@@ -604,7 +665,8 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
 
     if (fatigueState.activeRecoveryBuffActive) {
       return {
-        label: '🌿 +25% Active Recovery Buff',
+        icon: 'prof-foraging',
+        label: '+25% Active Recovery Buff',
         bg: COLORS.enduranceDim,
         border: COLORS.endurance,
         text: '#80CBC4',
@@ -616,7 +678,8 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
 
     if (fatigueState.isRestingInTavern && fatigueState.wellRestedMultiplier > 1) {
       return {
-        label: `🍺 Well-Rested (${fatigueState.wellRestedMultiplier.toFixed(2)}x Tavern)`,
+        icon: 'tavern',
+        label: `Well-Rested (${fatigueState.wellRestedMultiplier.toFixed(2)}x Tavern)`,
         bg: CRIMSON_ONI.agedGoldDim,
         border: CRIMSON_ONI.agedGold,
         text: CRIMSON_ONI.agedGoldBright,
@@ -629,9 +692,10 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     }
 
     return {
-      label: `⚔️ Battle-Ready (${nextWorkoutMultiplier.toFixed(2)}x XP)`,
-      bg: CRIMSON_ONI.charcoalElevated,
-      border: CRIMSON_ONI.border,
+      icon: 'combat',
+      label: `Battle-Ready (${nextWorkoutMultiplier.toFixed(2)}x XP)`,
+      bg: SURFACES.layer2,
+      border: SURFACES.hairline,
       text: CRIMSON_ONI.ghostWhite,
       summary: `Fresh & combat-ready (Fatigue Score ${Math.round(
         fatigueState.fatigueScore
@@ -692,7 +756,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
               height={18}
             />
           ) : (
-            <Text style={{ fontSize: 14 }}>{meta.emoji}</Text>
+            <RpgIcon name={getHolisticStatIconName(meta.key)} size={16} color={meta.color} />
           )}
           <Text style={[styles.hexStatCode, { color: meta.color }]}>{meta.abbrev}</Text>
           <Text style={styles.hexLevelText}>Lv.{s.level}</Text>
@@ -769,7 +833,12 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           />
         ) : (
           <>
-            <Text style={styles.paperdollSlotIcon}>{getItemArtworkGlyph(item, slot)}</Text>
+            <RpgIcon
+              name={getItemRpgIconName(item, slot)}
+              size={20}
+              color={COLORS.textMuted}
+              accentColor={COLORS.textSecondary}
+            />
             <Text style={styles.paperdollSlotLabel} numberOfLines={1}>
               {label.toUpperCase()}
             </Text>
@@ -824,7 +893,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
       {pendingWorkoutReceipts.length > 0 && consolidatedSpoils && (
         <View style={styles.spoilsChestCard}>
           <View style={styles.spoilsHeaderRow}>
-            <Text style={styles.spoilsChestIcon}>🎁</Text>
+            <SvgXml xml={LOOT_CHEST_SVGS.MYTHIC} width={38} height={32} />
             <View style={{ flex: 1 }}>
               <Text style={styles.spoilsEyebrow}>DEFERRED OFFLINE REWARDS READY</Text>
               <Text style={styles.spoilsTitle}>Unclaimed Training Spoils Chest</Text>
@@ -843,9 +912,12 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             onPress={() => setSpoilsModalOpen(true)}
             testID="claim-spoils-banner-btn"
           >
-            <Text style={styles.claimSpoilsBtnText}>
-              ✨ Claim Spoils &amp; View Receipt
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <RpgIcon name="sparkles" size={15} color={CRIMSON_ONI.charcoalDeep} />
+              <Text style={styles.claimSpoilsBtnText}>
+                Claim Spoils &amp; View Receipt
+              </Text>
+            </View>
           </Pressable>
         </View>
       )}
@@ -870,9 +942,16 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             onPress={() => setCharManagerModalVisible(true)}
             testID="profile-open-roster-btn"
           >
-            <Text style={styles.heroRosterPillText}>
-              {gameMode === 'IRONMAN_VERIFIED' ? '🛡️ Ironman' : '⚔️ Standard'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon
+                name={gameMode === 'IRONMAN_VERIFIED' ? 'shield' : 'combat'}
+                size={12}
+                color={CRIMSON_ONI.agedGoldBright}
+              />
+              <Text style={styles.heroRosterPillText}>
+                {gameMode === 'IRONMAN_VERIFIED' ? 'Ironman' : 'Standard'}
+              </Text>
+            </View>
           </Pressable>
         </View>
 
@@ -882,8 +961,13 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             onPress={() => void audioManager.toggleMute()}
             testID="profile-audio-mute-btn"
           >
+            <RpgIcon
+              name={isMuted ? 'volume-off' : 'volume-on'}
+              size={13}
+              color={isMuted ? '#FB7185' : '#E5E7EB'}
+            />
             <Text style={[styles.utilityBtnText, isMuted && styles.utilityBtnTextActive]}>
-              {isMuted ? '🔇 Muted' : '🔊 SFX'}
+              {isMuted ? 'Muted' : 'SFX'}
             </Text>
           </Pressable>
 
@@ -893,7 +977,8 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
               onPress={() => setDevTriageModalVisible(true)}
               testID="profile-open-triage-btn"
             >
-              <Text style={[styles.utilityBtnText, styles.utilityBtnTextGold]}>🛠️ Dev Triage</Text>
+              <RpgIcon name="cog" size={13} color="#DFB660" />
+              <Text style={[styles.utilityBtnText, styles.utilityBtnTextGold]}>Dev Triage</Text>
             </Pressable>
           )}
 
@@ -911,13 +996,11 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             }
             testID="profile-check-updates-btn"
           >
-            <Text style={styles.utilityBtnText}>
-              {updateState.status === 'CHECKING'
-                ? '⏳'
-                : updateState.status === 'DOWNLOADING_OTA'
-                ? '📥'
-                : '🔄'}
-            </Text>
+            <RpgIcon
+              name={updateState.status === 'CHECKING' || updateState.status === 'DOWNLOADING_OTA' ? 'bolt' : 'refresh'}
+              size={13}
+              color="#E5E7EB"
+            />
             <Pressable
               style={styles.versionBadgeInline}
               onPress={(e) => {
@@ -956,12 +1039,22 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           ]}
           onPress={() => setShowFatigueDetails((prev) => !prev)}
         >
-          <Text style={[styles.fatiguePillText, { color: restPillConfig.text }]}>
-            {restPillConfig.label}
-          </Text>
-          <Text style={[styles.fatigueToggleHint, { color: restPillConfig.text }]}>
-            {showFatigueDetails ? 'Hide ▲' : 'Details ▼'}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+            <RpgIcon name={restPillConfig.icon} size={13} color={restPillConfig.text} />
+            <Text style={[styles.fatiguePillText, { color: restPillConfig.text }]} numberOfLines={1}>
+              {restPillConfig.label}
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            <Text style={[styles.fatigueToggleHint, { color: restPillConfig.text }]}>
+              {showFatigueDetails ? 'Hide' : 'Details'}
+            </Text>
+            <RpgIcon
+              name={showFatigueDetails ? 'chevron-up' : 'chevron-down'}
+              size={12}
+              color={restPillConfig.text}
+            />
+          </View>
         </Pressable>
 
         {(showFatigueDetails || combatPenalties.stacks > 0) && (
@@ -1087,6 +1180,10 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           <Pressable
             style={styles.appearanceHeaderBtn}
             onPress={() => {
+              if (onOpenAppearance) {
+                onOpenAppearance();
+                return;
+              }
               setCharManagerInitialCustomizeId(activeCharacterId ?? null);
               setCharManagerModalVisible(true);
             }}
@@ -1094,10 +1191,16 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             accessibilityLabel="Customize Character Appearance"
             testID="profile-customize-appearance-btn"
           >
-            <Text style={styles.appearanceHeaderBtnText}>🎨 Appearance</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon name="palette" size={12} color={CRIMSON_ONI.agedGoldBright} />
+              <Text style={styles.appearanceHeaderBtnText}>Appearance</Text>
+            </View>
           </Pressable>
           <View style={styles.itemPowerHeaderBadge}>
-            <Text style={styles.itemPowerHeaderBadgeText}>⚡ Power {totalItemPower}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon name="bolt" size={12} color={CRIMSON_ONI.agedGoldBright} />
+              <Text style={styles.itemPowerHeaderBadgeText}>Power {totalItemPower}</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -1123,6 +1226,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             height={330}
             bottomClearance={30}
             appearanceId={appearanceId}
+            race={race}
+            customizationConfig={customizationConfig}
+            equippedLoadout={equipmentLoadout}
             imageSource={characterImageSource ?? characterArtUri}
           />
           <View style={styles.paperdollCenterBaseBadge}>
@@ -1152,7 +1258,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
         testID="profile-satchel-toggle-btn"
       >
         <View style={styles.satchelToggleTitleCluster}>
-          <Text style={styles.satchelIcon}>🎒</Text>
+          <View style={styles.satchelIconWrap}>
+            <RpgIcon name="backpack" size={20} color={CRIMSON_ONI.agedGoldBright} />
+          </View>
           <View>
             <Text style={styles.satchelHeading}>
               {isSatchelOpen ? 'Close Satchel Drawer' : 'Open Satchel Drawer'}
@@ -1163,7 +1271,14 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           </View>
         </View>
         <View style={styles.satchelChevronPill}>
-          <Text style={styles.satchelChevronText}>{isSatchelOpen ? '▲ Hide' : '▼ Open'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <RpgIcon
+              name={isSatchelOpen ? 'chevron-up' : 'chevron-down'}
+              size={12}
+              color={CRIMSON_ONI.agedGoldBright}
+            />
+            <Text style={styles.satchelChevronText}>{isSatchelOpen ? 'Hide' : 'Open'}</Text>
+          </View>
         </View>
       </Pressable>
 
@@ -1280,7 +1395,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                           contentFit="cover"
                         />
                       ) : (
-                        <Text style={styles.itemIconGlyph}>{getItemArtworkGlyph(item)}</Text>
+                        <RpgIcon name={getItemRpgIconName(item)} size={20} color={rarityCol} />
                       )}
                       {item.tier ? (
                         <View style={[styles.itemTierBadgeCorner, { backgroundColor: rarityCol }]}>
@@ -1310,7 +1425,10 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                       </View>
                     ) : !reqCheck.valid ? (
                       <View style={styles.satchelGatePill}>
-                        <Text style={styles.satchelGateText}>🔒 Stat Gate</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                          <RpgIcon name="lock" size={10} color="#EF5350" />
+                          <Text style={styles.satchelGateText}>Stat Gate</Text>
+                        </View>
                       </View>
                     ) : (
                       <Text style={styles.satchelChevron}>›</Text>
@@ -1362,7 +1480,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                           contentFit="cover"
                         />
                       ) : (
-                        <Text style={styles.itemIconGlyphLg}>{getItemArtworkGlyph(item)}</Text>
+                        <RpgIcon name={getItemRpgIconName(item)} size={24} color={rarityCol} />
                       )}
                       {item.tier ? (
                         <View style={[styles.itemTierBadgeCorner, { backgroundColor: rarityCol }]}>
@@ -2143,9 +2261,9 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   spoilsChestCard: {
-    backgroundColor: '#2B2214',
-    borderWidth: 1.5,
-    borderColor: CRIMSON_ONI.agedGoldBright,
+    backgroundColor: SURFACES.layer2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.goldHairline,
     borderRadius: 14,
     padding: 14,
     marginBottom: 14,
@@ -2188,9 +2306,9 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   utilityHeaderCard: {
-    backgroundColor: CRIMSON_ONI.charcoalCard,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.borderGold,
+    backgroundColor: SURFACES.layer1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     borderRadius: 14,
     padding: 12,
     marginBottom: 14,
@@ -2374,9 +2492,9 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   radarCard: {
-    backgroundColor: CRIMSON_ONI.charcoalCard,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.borderGold,
+    backgroundColor: SURFACES.layer1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     borderRadius: 14,
     padding: 10,
     marginBottom: 12,
@@ -2456,10 +2574,10 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   derivedCard: {
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.borderHighlight,
-    borderRadius: 12,
+    backgroundColor: SURFACES.layer1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
+    borderRadius: 14,
     padding: 12,
     marginBottom: 14,
   },
@@ -2692,10 +2810,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: CRIMSON_ONI.charcoalCard,
-    borderWidth: 1.5,
-    borderColor: CRIMSON_ONI.borderGold,
-    borderRadius: 12,
+    backgroundColor: SURFACES.layer1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.goldHairline,
+    borderRadius: 14,
     padding: 12,
     marginBottom: 10,
   },
@@ -2703,6 +2821,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  satchelIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    backgroundColor: SURFACES.layer2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   satchelIcon: {
     fontSize: 22,
@@ -2761,12 +2887,10 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   bagCard: {
-    backgroundColor: COLORS.bgCard,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
+    backgroundColor: SURFACES.layer1,
+    borderRadius: 14,
     padding: 8,
-    gap: 7,
+    gap: 6,
   },
   emptyBagText: {
     color: COLORS.textMuted,
@@ -2778,10 +2902,8 @@ const styles = StyleSheet.create({
     minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.bgDeep,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: 10,
     paddingVertical: 6,
     paddingHorizontal: 8,
     overflow: 'hidden',

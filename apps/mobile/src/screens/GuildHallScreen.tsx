@@ -7,7 +7,8 @@ import {
   GREATSWORD_SKELETON_SPRITE_CONFIG,
 } from '../components/battle/sprites/spriteManifest';
 import { SpriteAnimator } from '../components/battle/sprites/SpriteAnimator';
-import { COLORS, RARITY_COLORS } from '../theme';
+import { RpgIcon } from '../components/icons/RpgIcon';
+import { COLORS, RARITY_COLORS, SURFACES } from '../theme';
 
 const RANK_LADDER = [
   'COPPER',
@@ -49,8 +50,9 @@ export const GuildHallScreen: React.FC = () => {
       return {
         isReady: false,
         progressPct: 100,
-        pills: ['✓ Completed'],
-        buttonLabel: '✓ Claimed',
+        pills: ['Completed'],
+        buttonLabel: 'Claimed',
+        buttonState: 'DONE' as const,
       };
     }
 
@@ -61,8 +63,9 @@ export const GuildHallScreen: React.FC = () => {
       return {
         isReady,
         progressPct: pct,
-        pills: [`🏋️ ${doneWorkouts}/3 Workouts`],
-        buttonLabel: isReady ? '✨ Claim' : `🔒 ${doneWorkouts}/3`,
+        pills: [`${doneWorkouts}/3 Workouts`],
+        buttonLabel: isReady ? 'Claim' : `${doneWorkouts}/3`,
+        buttonState: isReady ? ('READY' as const) : ('LOCKED' as const),
       };
     }
 
@@ -75,10 +78,11 @@ export const GuildHallScreen: React.FC = () => {
         isReady,
         progressPct: pct,
         pills: [
-          `${hasIron ? '✓' : '🔒'} IRON Rank`,
-          `⚡ ${statClamped}/15 Core Stats`,
+          `${hasIron ? 'Done:' : 'Req:'} IRON Rank`,
+          `${statClamped}/15 Core Stats`,
         ],
-        buttonLabel: isReady ? '✨ Claim' : `🔒 ${statClamped}/15`,
+        buttonLabel: isReady ? 'Claim' : `${statClamped}/15`,
+        buttonState: isReady ? ('READY' as const) : ('LOCKED' as const),
       };
     }
 
@@ -89,8 +93,9 @@ export const GuildHallScreen: React.FC = () => {
     return {
       isReady,
       progressPct: isReady ? 100 : 0,
-      pills: [`🏃 ${done}/1 Workout or Gathering`],
-      buttonLabel: isReady ? '✨ Claim' : '🔒 0/1',
+      pills: [`${done}/1 Workout or Gathering`],
+      buttonLabel: isReady ? 'Claim' : '0/1',
+      buttonState: isReady ? ('READY' as const) : ('LOCKED' as const),
     };
   };
 
@@ -143,10 +148,14 @@ export const GuildHallScreen: React.FC = () => {
             ]}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.bountyTitle}>
-                {b.isRankUpTrial ? '🏅 ' : '📜 '}
-                {b.title}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <RpgIcon
+                  name={b.isRankUpTrial ? 'trophy' : 'scroll'}
+                  size={14}
+                  color={COLORS.gold}
+                />
+                <Text style={styles.bountyTitle}>{b.title}</Text>
+              </View>
               <Text style={styles.bountyDesc}>{b.description}</Text>
 
               {/* Inline Progress Bar & Requirement Pills */}
@@ -197,15 +206,34 @@ export const GuildHallScreen: React.FC = () => {
                 else setNotice(`Completed '${b.title}'!`);
               }}
             >
-              <Text
-                style={[
-                  styles.claimBtnText,
-                  !prog.isReady && !b.completed && styles.claimBtnTextLocked,
-                  b.completed && styles.claimBtnTextDone,
-                ]}
-              >
-                {prog.buttonLabel}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <RpgIcon
+                  name={
+                    prog.buttonState === 'DONE'
+                      ? 'check'
+                      : prog.buttonState === 'READY'
+                      ? 'sparkles'
+                      : 'lock'
+                  }
+                  size={12}
+                  color={
+                    prog.buttonState === 'DONE'
+                      ? COLORS.success
+                      : prog.buttonState === 'READY'
+                      ? COLORS.bgDeep
+                      : COLORS.textMuted
+                  }
+                />
+                <Text
+                  style={[
+                    styles.claimBtnText,
+                    !prog.isReady && !b.completed && styles.claimBtnTextLocked,
+                    b.completed && styles.claimBtnTextDone,
+                  ]}
+                >
+                  {prog.buttonLabel}
+                </Text>
+              </View>
             </Pressable>
           </View>
         );
@@ -229,7 +257,10 @@ export const GuildHallScreen: React.FC = () => {
         </View>
       </View>
       <View style={styles.guildHeaderCard}>
-        <Text style={styles.guildNameText}>🛡️ {guildName}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <RpgIcon name="shield" size={16} color={COLORS.gold} />
+          <Text style={styles.guildNameText}>{guildName}</Text>
+        </View>
         <Text style={styles.subText}>
           Guild Reputation: {guildReputation.toLocaleString()} • Unlocks Private Guild-Only 7-Day
           Boss Raids
@@ -442,10 +473,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   card: {
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: SURFACES.layer1,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     padding: 14,
     marginBottom: 10,
   },
@@ -505,10 +536,10 @@ const styles = StyleSheet.create({
   bountyCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.bgCard,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    backgroundColor: SURFACES.layer1,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     padding: 12,
     marginBottom: 8,
     gap: 10,

@@ -1,12 +1,20 @@
 import { PrismaClient } from '@goki/database';
 import {
   BASE_EQUIPPABLE_ITEM_BY_SLUG,
+  CharacterCustomizationConfig,
+  CharacterRace,
+  CoreStatBlock,
   EquipItemType,
   EquipmentSlot,
+  adaptCustomizationForRaceChange,
   aggregateTalentModifiers,
+  createDefaultCustomizationConfig,
+  deriveCustomizationFromLegacyAppearance,
   evaluateFatigueStateAtTime,
   getAvailableStrenuousXpMultiplier,
   getSystemicFatigueCombatPenalties,
+  normalizeCustomizationConfig,
+  validateCustomizationConfig,
   validateEquipmentRequirements,
 } from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
@@ -45,17 +53,75 @@ const equipSchema = z.object({
   inventoryItemId: z.string().nullable(),
 });
 
+const LEVEL_ONE_CORE_STATS: CoreStatBlock = {
+  strengthLevel: 1,
+  enduranceLevel: 1,
+  agilityLevel: 1,
+  dexLevel: 1,
+  conLevel: 1,
+  wisLevel: 1,
+  sprLevel: 1,
+};
+
+export function resolveStarterCustomization(params: {
+  race?: CharacterRace;
+  appearanceId?: string;
+  avatarSpriteId?: string;
+  customizationConfig?: unknown;
+}):
+  | { ok: true; race: CharacterRace; config: CharacterCustomizationConfig }
+  | { ok: false; errors: string[] } {
+  const explicitAppearance = params.appearanceId || params.avatarSpriteId;
+  const chosenRace: CharacterRace = params.race
+    ? params.race
+    : explicitAppearance
+      ? deriveCustomizationFromLegacyAppearance(explicitAppearance).race
+      : 'HUMAN';
+
+  if (params.customizationConfig !== undefined) {
+    const validation = validateCustomizationConfig({
+      race: chosenRace,
+      config: params.customizationConfig,
+      stats: LEVEL_ONE_CORE_STATS,
+    });
+    if (!validation.valid || !validation.normalizedConfig) {
+      return { ok: false, errors: validation.errors };
+    }
+    return {
+      ok: true,
+      race: chosenRace,
+      config: validation.normalizedConfig,
+    };
+  }
+
+  const config = params.race
+    ? createDefaultCustomizationConfig(chosenRace)
+    : explicitAppearance
+      ? deriveCustomizationFromLegacyAppearance(explicitAppearance).config
+      : createDefaultCustomizationConfig('HUMAN');
+
+  return {
+    ok: true,
+    race: chosenRace,
+    config,
+  };
+}
+
 const createCharacterSchema = z.object({
   name: z.string().min(2).max(32),
   gameMode: z.enum(['STANDARD', 'IRONMAN_VERIFIED']).default('STANDARD'),
   appearanceId: z.string().optional(),
   avatarSpriteId: z.string().optional(),
+  race: z.enum(['HUMAN', 'ONI', 'KITSUNE']).optional(),
+  customizationConfig: z.unknown().optional(),
 });
 
 const patchCharacterSchema = z.object({
   name: z.string().min(2).max(32).optional(),
   appearanceId: z.string().min(1).optional(),
   avatarSpriteId: z.string().min(1).optional(),
+  race: z.enum(['HUMAN', 'ONI', 'KITSUNE']).optional(),
+  customizationConfig: z.unknown().optional(),
 });
 
 export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient): void {
@@ -132,6 +198,21 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
     const body = createCharacterSchema.parse(request.body);
     const chosenName = body.name.trim();
     const chosenAppearance = body.appearanceId || body.avatarSpriteId || 'oni_warlord';
+
+    const starterCustomization = resolveStarterCustomization({
+      race: body.race,
+      appearanceId: body.appearanceId,
+      avatarSpriteId: body.avatarSpriteId,
+      customizationConfig: body.customizationConfig,
+    });
+    if (!starterCustomization.ok) {
+      return reply.status(400).send({
+        error: starterCustomization.errors.join(' '),
+        errors: starterCustomization.errors,
+      });
+    }
+    const chosenRace = starterCustomization.race;
+    const resolvedConfig = starterCustomization.config;
 
     let txResult:
       | { ok: true; character: any }
@@ -231,6 +312,8 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
               gameMode: body.gameMode,
               appearanceId: chosenAppearance,
               avatarSpriteId: chosenAppearance,
+              race: chosenRace,
+              customizationConfig: resolvedConfig as any,
               stats: { create: {} },
               fatigueState: { create: {} },
               equipmentLoadout: { create: {} },
@@ -273,6 +356,7 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
 
     const character = await db.character.findUnique({
       where: { id: characterId },
+      include: { stats: true },
     });
 
     if (!character) {
@@ -286,6 +370,76 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
     }
 
     const dataToUpdate: Record<string, any> = {};
+
+    const characterCoreStats: CoreStatBlock = {
+      strengthLevel: (character as any).stats?.strengthLevel ?? 1,
+      enduranceLevel: (character as any).stats?.enduranceLevel ?? 1,
+      agilityLevel: (character as any).stats?.agilityLevel ?? 1,
+      dexLevel: (character as any).dexLevel ?? 1,
+      conLevel: (character as any).conLevel ?? 1,
+      wisLevel: (character as any).wisLevel ?? 1,
+      sprLevel: (character as any).sprLevel ?? 1,
+    };
+
+    if (body.race !== undefined || body.customizationConfig !== undefined) {
+      const currentRace: CharacterRace =
+        ((character as any).race as CharacterRace | undefined) ?? 'HUMAN';
+      const targetRace: CharacterRace = body.race ?? currentRace;
+
+      if (body.customizationConfig !== undefined) {
+        const validation = validateCustomizationConfig({
+          race: targetRace,
+          config: body.customizationConfig,
+          stats: characterCoreStats,
+        });
+        if (!validation.valid || !validation.normalizedConfig) {
+          return reply.status(400).send({
+            error: validation.errors.join(' '),
+            errors: validation.errors,
+          });
+        }
+        dataToUpdate.race = targetRace;
+        dataToUpdate.customizationConfig = validation.normalizedConfig as any;
+      } else {
+        const existingConfig = normalizeCustomizationConfig(
+          (character as any).customizationConfig,
+          currentRace,
+          character.appearanceId
+        );
+        let adapted = adaptCustomizationForRaceChange(existingConfig, targetRace);
+        const validation = validateCustomizationConfig({
+          race: targetRace,
+          config: adapted,
+          stats: characterCoreStats,
+        });
+        if (!validation.valid) {
+          const clamped: CharacterCustomizationConfig = {
+            ...adapted,
+            morphs: {
+              ...adapted.morphs,
+              oniHornTier: 0,
+              kitsuneTailCount: targetRace === 'KITSUNE' ? 1 : 0,
+            },
+          };
+          const recheck = validateCustomizationConfig({
+            race: targetRace,
+            config: clamped,
+            stats: characterCoreStats,
+          });
+          if (!recheck.valid || !recheck.normalizedConfig) {
+            return reply.status(400).send({
+              error: recheck.errors.join(' '),
+              errors: recheck.errors,
+            });
+          }
+          adapted = recheck.normalizedConfig;
+        } else if (validation.normalizedConfig) {
+          adapted = validation.normalizedConfig;
+        }
+        dataToUpdate.race = targetRace;
+        dataToUpdate.customizationConfig = adapted as any;
+      }
+    }
 
     if (body.name !== undefined) {
       const trimmedName = body.name.trim();

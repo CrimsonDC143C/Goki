@@ -23,7 +23,8 @@ import {
   HUD_SVGS,
   STAT_GLYPH_SVGS,
 } from '../assets/v0Vault';
-import { COLORS, CRIMSON_ONI } from '../theme';
+import { RpgIcon } from '../components/icons/RpgIcon';
+import { COLORS, CRIMSON_ONI, SURFACES } from '../theme';
 
 export interface TalentBuilderScreenProps {
   initialStat?: HolisticStatType | StatType;
@@ -292,21 +293,30 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
             onPress={() => setShowCombatSummary((prev) => !prev)}
             testID="talent-toggle-bonuses-btn"
           >
-            <Text style={styles.resetTalentsBtnText}>
-              📊 Bonuses {showCombatSummary ? '▴' : '▾'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon name="history" size={12} color="#D1D5DB" />
+              <Text style={styles.resetTalentsBtnText}>Bonuses</Text>
+              <RpgIcon
+                name={showCombatSummary ? 'chevron-up' : 'chevron-down'}
+                size={11}
+                color="#D1D5DB"
+              />
+            </View>
           </Pressable>
 
           <Pressable
             style={styles.resetTalentsBtn}
             onPress={() => {
               setErrorBanner(
-                'Talent Respec: Visit the Tavern Keeper in a major settlement to respec talent points.'
+                'Talent Respec: Visit the Trainer in a major settlement to respec talent points.'
               );
             }}
             testID="talent-reset-btn"
           >
-            <Text style={styles.resetTalentsBtnText}>🔄 Reset</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <RpgIcon name="refresh" size={12} color="#D1D5DB" />
+              <Text style={styles.resetTalentsBtnText}>Reset</Text>
+            </View>
           </Pressable>
         </View>
 
@@ -334,9 +344,10 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
 
       {/* Focus Protocol or Error Banner */}
       {!progressionUnlocked && (
-        <View style={styles.focusActiveBox}>
-          <Text style={styles.focusActiveText}>
-            🔒 Intra-Workout Focus Active ({workoutMachine.phase}): Stat allocation &amp;
+        <View style={[styles.focusActiveBox, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+          <RpgIcon name="lock" size={14} color={COLORS.strength} />
+          <Text style={[styles.focusActiveText, { flex: 1 }]}>
+            Intra-Workout Focus Active ({workoutMachine.phase}): Stat allocation &amp;
             upgrades unlock automatically during post-workout LootReview!
           </Text>
         </View>
@@ -702,15 +713,24 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
                 <View style={styles.inspectorFooterRow}>
                   <View style={{ flex: 1 }}>
                     {isMaxed ? (
-                      <Text style={styles.prereqMetText}>★ MAX RANK UNLOCKED</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <RpgIcon name="trophy" size={12} color={COLORS.gold} />
+                        <Text style={styles.prereqMetText}>MAX RANK UNLOCKED</Text>
+                      </View>
                     ) : validation.valid ? (
-                      <Text style={styles.prereqReadyText}>
-                        ✓ Prerequisite Met — Ready to Allocate
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <RpgIcon name="check" size={12} color={COLORS.success} />
+                        <Text style={styles.prereqReadyText}>
+                          Prerequisite Met — Ready to Allocate
+                        </Text>
+                      </View>
                     ) : (
-                      <Text style={styles.prereqLockedText}>
-                        🔒 {validation.error ?? 'Prerequisites not met'}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <RpgIcon name="lock" size={12} color={COLORS.danger} />
+                        <Text style={styles.prereqLockedText}>
+                          {validation.error ?? 'Prerequisites not met'}
+                        </Text>
+                      </View>
                     )}
                   </View>
 
@@ -725,18 +745,25 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
                     disabled={!validation.valid || !progressionUnlocked || isMaxed}
                     testID="talent-spend-point-btn"
                   >
-                    <Text
-                      style={[
-                        styles.spendPointBtnText,
-                        isMaxed && styles.spendPointBtnTextMaxed,
-                      ]}
-                    >
-                      {!progressionUnlocked
-                        ? '🔒 Workout Focus'
-                        : isMaxed
-                        ? '★ MAXED'
-                        : `✨ Spend ${activeSelectedNode.pointCostPerRank} Pt (+1)`}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <RpgIcon
+                        name={!progressionUnlocked ? 'lock' : isMaxed ? 'trophy' : 'sparkles'}
+                        size={13}
+                        color={isMaxed ? COLORS.gold : !progressionUnlocked ? COLORS.textMuted : '#111620'}
+                      />
+                      <Text
+                        style={[
+                          styles.spendPointBtnText,
+                          isMaxed && styles.spendPointBtnTextMaxed,
+                        ]}
+                      >
+                        {!progressionUnlocked
+                          ? 'Workout Focus'
+                          : isMaxed
+                          ? 'MAXED'
+                          : `Spend ${activeSelectedNode.pointCostPerRank} Pt (+1)`}
+                      </Text>
+                    </View>
                   </Pressable>
                 </View>
               </>
@@ -755,9 +782,9 @@ const styles = StyleSheet.create({
   },
   /* Sticky 7-Stat Horizontal Selector Bar */
   stickyStatBarContainer: {
-    backgroundColor: CRIMSON_ONI.charcoalCard,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.borderGold,
+    backgroundColor: SURFACES.layer1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     borderRadius: 12,
     paddingVertical: 8,
     paddingHorizontal: 6,
@@ -814,9 +841,9 @@ const styles = StyleSheet.create({
   },
   /* Compact Single-Row Summary */
   selectedStatSummaryCard: {
-    backgroundColor: CRIMSON_ONI.charcoalElevated,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.border,
+    backgroundColor: SURFACES.layer1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -844,12 +871,10 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   resetTalentsBtn: {
-    backgroundColor: '#26242E',
-    borderWidth: 1,
-    borderColor: '#4B5563',
+    backgroundColor: SURFACES.layer2,
     borderRadius: 6,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
   },
   resetTalentsBtnText: {
     color: '#D1D5DB',

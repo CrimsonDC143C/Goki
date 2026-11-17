@@ -23,7 +23,8 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import { GatheringNodeItem, useGame } from '../state/GameContext';
 import { getItemIconSource } from '../assets/itemArtRegistry';
-import { COLORS, CRIMSON_ONI, RARITY_COLORS } from '../theme';
+import { RpgIcon, RpgIconName } from '../components/icons/RpgIcon';
+import { COLORS, CRIMSON_ONI, RARITY_COLORS, SURFACES } from '../theme';
 
 export type GoalMode = 'TIME' | 'RESOURCE';
 
@@ -46,30 +47,35 @@ function formatClock(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, '0')}`;
 }
 
-function getNodeCompactLabel(node: { slug: string; name?: string; title?: string; professionType?: string }): string {
+function getNodeCompactMeta(node: {
+  slug: string;
+  name?: string;
+  title?: string;
+  professionType?: string;
+}): { icon: RpgIconName; label: string } {
   const s = node.slug.toLowerCase().replace(/_/g, '-');
   if (s.includes('iron') || s.includes('mine') || node.professionType === 'MINING') {
-    return '⛏️ Mine Iron';
+    return { icon: 'prof-mining', label: 'Mine Iron' };
   }
   if (s.includes('whisperwood') || s.includes('forag') || node.professionType === 'FORAGING') {
-    return '🌿 Forage Herbs';
+    return { icon: 'prof-foraging', label: 'Forage Herbs' };
   }
   if (s.includes('smelt') || s.includes('obsidian') || s.includes('foundry') || node.professionType === 'SMELTING') {
-    return '🔥 Smelt Ingots';
+    return { icon: 'prof-smelting', label: 'Smelt Ingots' };
   }
   if (s.includes('alchem') || s.includes('brew') || node.professionType === 'ALCHEMY') {
-    return '⚗️ Brew Elixirs';
+    return { icon: 'prof-alchemy', label: 'Brew Elixirs' };
   }
-  const icon =
+  const icon: RpgIconName =
     node.professionType === 'MINING'
-      ? '⛏️'
+      ? 'prof-mining'
       : node.professionType === 'FORAGING'
-      ? '🌿'
+      ? 'prof-foraging'
       : node.professionType === 'SMELTING'
-      ? '🔥'
-      : '⚗️';
+      ? 'prof-smelting'
+      : 'prof-alchemy';
   const text = (node.name || node.title || 'Gathering Node').trim();
-  return `${icon} ${text.split(' ').slice(0, 2).join(' ')}`;
+  return { icon, label: text.split(' ').slice(0, 2).join(' ') };
 }
 
 export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
@@ -327,16 +333,28 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
                   setErrorMsg(null);
                 }}
               >
-                <Text
-                  style={[
-                    styles.nodePillText,
-                    isSelected && styles.nodePillTextSelected,
-                    isActive && styles.nodePillTextActive,
-                  ]}
-                >
-                  {isActive ? '⏳ ' : ''}
-                  {getNodeCompactLabel(node)}
-                </Text>
+                {(() => {
+                  const meta = getNodeCompactMeta(node);
+                  const pillColor = isActive
+                    ? '#FBBF24'
+                    : isSelected
+                    ? CRIMSON_ONI.agedGoldBright
+                    : CRIMSON_ONI.ghostWhite;
+                  return (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <RpgIcon name={isActive ? 'watch' : meta.icon} size={13} color={pillColor} />
+                      <Text
+                        style={[
+                          styles.nodePillText,
+                          isSelected && styles.nodePillTextSelected,
+                          isActive && styles.nodePillTextActive,
+                        ]}
+                      >
+                        {meta.label}
+                      </Text>
+                    </View>
+                  );
+                })()}
               </Pressable>
             );
           })}
@@ -426,7 +444,10 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
 
           {/* Fast-forward dev preview button */}
           <Pressable style={styles.claimNowBtn} onPress={completeGatheringNow}>
-            <Text style={styles.claimNowBtnText}>⚡ Fast-Forward &amp; Claim Spoils</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <RpgIcon name="bolt" size={14} color={CRIMSON_ONI.charcoalDeep} />
+              <Text style={styles.claimNowBtnText}>Fast-Forward &amp; Claim Spoils</Text>
+            </View>
           </Pressable>
         </View>
       ) : (
@@ -676,11 +697,18 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
               disabled={!meetsRequirements || isAnyNodeActive}
               onPress={handleStartTask}
             >
-              <Text style={styles.startExpeditionBtnText}>
-                {isAnyNodeActive
-                  ? 'Character Busy on Active Task'
-                  : `⚔️ Begin ${targetMinutes}m Gathering Expedition`}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <RpgIcon
+                  name={isAnyNodeActive ? 'watch' : 'combat'}
+                  size={14}
+                  color={CRIMSON_ONI.charcoalDeep}
+                />
+                <Text style={styles.startExpeditionBtnText}>
+                  {isAnyNodeActive
+                    ? 'Character Busy on Active Task'
+                    : `Begin ${targetMinutes}m Gathering Expedition`}
+                </Text>
+              </View>
             </Pressable>
           </View>
         </View>
@@ -788,7 +816,7 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: CRIMSON_ONI.charcoalDeep,
+    backgroundColor: SURFACES.canvas,
   },
   content: {
     padding: 16,
@@ -1017,10 +1045,10 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   projectionCard: {
-    backgroundColor: CRIMSON_ONI.charcoalCard,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.borderGold,
+    backgroundColor: SURFACES.layer1,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     padding: 14,
   },
   sectionHeader: {
@@ -1037,11 +1065,9 @@ const styles = StyleSheet.create({
   },
   metricCell: {
     flex: 1,
-    backgroundColor: CRIMSON_ONI.charcoalElevated,
-    borderRadius: 8,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: 10,
     padding: 10,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.border,
   },
   metricLabel: {
     color: CRIMSON_ONI.ashGray,
@@ -1085,10 +1111,10 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   setupCard: {
-    backgroundColor: CRIMSON_ONI.charcoalCard,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: CRIMSON_ONI.border,
+    backgroundColor: SURFACES.layer1,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: SURFACES.hairline,
     padding: 14,
   },
   goalModeToggleRow: {
