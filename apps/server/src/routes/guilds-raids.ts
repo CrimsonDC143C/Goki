@@ -28,8 +28,9 @@ const spawnRaidSchema = z.object({
   bossSlug: z.string().min(2),
   bossName: z.string().min(2),
   bossTier: z.number().int().min(1).max(10).default(1),
-  accessType: z.enum(['PUBLIC_WORLD', 'GUILD_ONLY']),
+  accessType: z.enum(['PUBLIC_WORLD', 'CLAN_ONLY', 'GUILD_ONLY']),
   guildId: z.string().optional(),
+  gymClanId: z.string().optional(),
   maxHp: z.number().int().positive(),
   baseGoldPool: z.number().int().positive().default(10_000),
   baseGuildRepPool: z.number().int().positive().default(2_500),
@@ -41,10 +42,10 @@ export function registerGuildAndRaidRoutes(
   timers: GameTimerScheduler,
   wsManager: WebSocketManager = websocketManager
 ): void {
-  // List Social Guilds & Guild Bounties / Rank-Up Trials
+  // List Social Gym Clans & Guild Bounties / Rank-Up Trials
   app.get('/api/guilds', async (_request, reply) => {
-    const guilds = await db.guild.findMany({
-      orderBy: { guildReputation: 'desc' },
+    const guilds = await db.gymClan.findMany({
+      orderBy: { clanReputation: 'desc' },
       include: {
         members: { include: { character: true } },
       },
@@ -55,7 +56,7 @@ export function registerGuildAndRaidRoutes(
     return reply.send({ guilds, bounties });
   });
 
-  // Create a Social Adventurers' Guild
+  // Create a Social Gym Clan
   app.post('/api/guilds', { preHandler: [requireAuth] }, async (request, reply) => {
     const body = createGuildSchema.parse(request.body);
     const leaderCharacterId = body.leaderCharacterId ?? body.founderCharacterId;
@@ -64,15 +65,29 @@ export function registerGuildAndRaidRoutes(
     }
     await assertCharacterActiveAndOwned(db, leaderCharacterId, request.user.userId);
 
-    const guild = await db.guild.create({
+    const slugBase = body.name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 32) || 'gym_clan';
+    const uniqueSuffix = Date.now().toString(36);
+
+    const guild = await db.gymClan.create({
       data: {
+        slug: `${slugBase}_${uniqueSuffix}`,
+        venueKey: `legacy:${slugBase}:${uniqueSuffix}`,
         name: body.name,
         tag: body.tag,
         description: body.description ?? null,
-        leaderCharacterId,
+        kind: 'GYM_VENUE',
+        venueSource: 'USER_SUBMITTED',
+        wardenCharacterId: leaderCharacterId,
         members: {
           create: {
             characterId: leaderCharacterId,
+            userId: request.user.userId,
+            clanKind: 'GYM_VENUE',
             role: 'LEADER',
           },
         },
@@ -83,13 +98,13 @@ export function registerGuildAndRaidRoutes(
     return reply.status(201).send({ guild });
   });
 
-  // Join an Adventurers' Guild
+  // Join a Social Gym Clan
   app.post('/api/guilds/:guildId/join', { preHandler: [requireAuth] }, async (request, reply) => {
     const { guildId } = z.object({ guildId: z.string() }).parse(request.params);
     const { characterId } = z.object({ characterId: z.string() }).parse(request.body);
     await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
 
-    const guild = await db.guild.findUnique({
+    const guild = await db.gymClan.findUnique({
       where: { id: guildId },
       include: { members: true },
     });
@@ -100,10 +115,17 @@ export function registerGuildAndRaidRoutes(
       return reply.status(400).send({ error: 'Guild is at maximum capacity.' });
     }
 
-    const membership = await db.guildMember.upsert({
-      where: { characterId },
-      update: { guildId, role: 'MEMBER' },
-      create: { guildId, characterId, role: 'MEMBER' },
+    const clanKind = guild.kind === 'OPEN_WORLD_HOME' ? 'OPEN_WORLD_HOME' : 'GYM_VENUE';
+    const membership = await db.gymClanMember.upsert({
+      where: { characterId_clanKind: { characterId, clanKind } },
+      update: { gymClanId: guildId, userId: request.user.userId, role: 'MEMBER' },
+      create: {
+        gymClanId: guildId,
+        userId: request.user.userId,
+        characterId,
+        clanKind,
+        role: 'MEMBER',
+      },
     });
 
     return reply.send({ membership });
@@ -324,19 +346,20 @@ export function registerGuildAndRaidRoutes(
     return reply.send({ character: txResult.character, bounty: txResult.bounty });
   });
 
-  // List Active 7-Day Boss Raids (Public World & Guild-Only)
+  // List Active 7-Day Boss Raids (Public World & Clan/Guild-Only)
   app.get('/api/raids', async (request, reply) => {
-    const { guildId } = z
-      .object({ guildId: z.string().optional() })
+    const { guildId, gymClanId } = z
+      .object({ guildId: z.string().optional(), gymClanId: z.string().optional() })
       .parse(request.query ?? {});
+    const resolvedClanId = gymClanId ?? guildId;
 
     const raids = await db.raidBossInstance.findMany({
-      where: guildId
-        ? { OR: [{ accessType: 'PUBLIC_WORLD' }, { guildId }] }
+      where: resolvedClanId
+        ? { OR: [{ accessType: 'PUBLIC_WORLD' }, { gymClanId: resolvedClanId }] }
         : undefined,
       orderBy: { startsAt: 'desc' },
       include: {
-        guild: true,
+        gymClan: true,
         contributions: {
           orderBy: { totalContributionScore: 'desc' },
           include: { character: true },
@@ -347,22 +370,23 @@ export function registerGuildAndRaidRoutes(
     return reply.send({ raids });
   });
 
-  // Spawn a 7-Day Raid Boss Instance (Public World or Guild-Only) & Schedule 7d BullMQ Rollover
+  // Spawn a 7-Day Raid Boss Instance (Public World or Clan/Guild-Only) & Schedule 7d BullMQ Rollover
   app.post('/api/raids', { preHandler: [requireAuth] }, async (request, reply) => {
     const body = spawnRaidSchema.parse(request.body);
-    if (body.accessType === 'GUILD_ONLY' && !body.guildId) {
-      return reply.status(400).send({ error: 'GUILD_ONLY raid requires a guildId.' });
+    const resolvedClanId = body.gymClanId ?? body.guildId;
+    if ((body.accessType === 'GUILD_ONLY' || body.accessType === 'CLAN_ONLY') && !resolvedClanId) {
+      return reply.status(400).send({ error: `${body.accessType} raid requires a gymClanId.` });
     }
-    if (body.guildId && typeof (db as any).guildMember?.findFirst === 'function') {
-      const member = await db.guildMember.findFirst({
+    if (resolvedClanId && typeof (db as any).gymClanMember?.findFirst === 'function') {
+      const member = await db.gymClanMember.findFirst({
         where: {
-          guildId: body.guildId,
+          gymClanId: resolvedClanId,
           character: { userId: request.user.userId, deletedAt: null },
         },
       });
       if (!member) {
         return reply.status(403).send({
-          error: 'Forbidden: You must have an active character in this guild to spawn a guild raid.',
+          error: 'Forbidden: You must have an active character in this clan to spawn a clan raid.',
         });
       }
     }
@@ -378,7 +402,7 @@ export function registerGuildAndRaidRoutes(
         bossName: body.bossName,
         bossTier: body.bossTier,
         accessType: body.accessType,
-        guildId: body.guildId ?? null,
+        gymClanId: resolvedClanId ?? null,
         maxHp: maxHpBig,
         currentHp: maxHpBig,
         startsAt,
@@ -426,7 +450,7 @@ export function registerGuildAndRaidRoutes(
           where: { id: characterId },
           include: {
             stats: true,
-            guildMembership: true,
+            gymClanMemberships: true,
             talentUnlocks: { include: { talentNode: true } },
           },
         });
@@ -434,15 +458,17 @@ export function registerGuildAndRaidRoutes(
           return { ok: false as const, statusCode: 404, error: 'Character not found.' };
         }
 
-        if (
-          raid.accessType === 'GUILD_ONLY' &&
-          character.guildMembership?.guildId !== raid.guildId
-        ) {
-          return {
-            ok: false as const,
-            statusCode: 403,
-            error: 'This is a private Guild-Only Raid Boss.',
-          };
+        if (raid.accessType === 'CLAN_ONLY' || raid.accessType === 'GUILD_ONLY') {
+          const isMember = (character as any).gymClanMemberships?.some(
+            (m: any) => m.gymClanId === raid.gymClanId
+          );
+          if (!isMember) {
+            return {
+              ok: false as const,
+              statusCode: 403,
+              error: 'This is a private Clan-Only Raid Boss.',
+            };
+          }
         }
 
         const existingContrib = await tx.raidParticipantContribution.findUnique({

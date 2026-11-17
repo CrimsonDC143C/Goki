@@ -17,16 +17,22 @@ import { registerGatheringRoutes } from './routes/gathering';
 import { registerGuildAndRaidRoutes } from './routes/guilds-raids';
 import { registerNpcHubRoutes } from './routes/npc-hub';
 import { registerPresetRoutes } from './routes/presets';
+import { registerSocialRoutes } from './routes/social';
 import { registerTalentRoutes } from './routes/talents';
 import { registerVersionRoutes } from './routes/version';
 import { registerWebSocketRoutes } from './routes/websocket';
 import { registerWorkoutRoutes } from './routes/workouts';
+import {
+  CompositeGymDiscoveryService,
+  GymDiscoveryProvider,
+} from './services/gym-discovery-provider';
 import { WebSocketManager, websocketManager } from './services/websocket-manager';
 
 export interface BuildServerOptions {
   db: PrismaClient;
   timers?: GameTimerScheduler;
   wsManager?: WebSocketManager;
+  gymDiscoveryProvider?: GymDiscoveryProvider;
   logger?: boolean;
 }
 
@@ -37,6 +43,8 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
 
   const timers = options.timers ?? createNoopTimerScheduler();
   const wsManager = options.wsManager ?? websocketManager;
+  const gymDiscoveryProvider =
+    options.gymDiscoveryProvider ?? new CompositeGymDiscoveryService();
 
   await app.register(cors, {
     origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN,
@@ -130,6 +138,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
   registerCraftingRoutes(app, options.db);
   registerNpcHubRoutes(app, options.db);
   registerGuildAndRaidRoutes(app, options.db, timers, wsManager);
+  registerSocialRoutes(app, options.db, timers, wsManager, gymDiscoveryProvider);
 
   return app;
 }

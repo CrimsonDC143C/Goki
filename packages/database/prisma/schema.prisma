@@ -175,16 +175,48 @@ enum GuildQuestRunStatus {
   ABANDONED
 }
 
-enum GuildRole {
+enum RaidAccessType {
+  PUBLIC_WORLD
+  CLAN_ONLY
+  GUILD_ONLY
+}
+
+enum GymClanKind {
+  OPEN_WORLD_HOME
+  GYM_VENUE
+}
+
+enum GymVenueSource {
+  SYSTEM_SEED
+  OSM_OVERPASS
+  USER_SUBMITTED
+  EXTERNAL_PLACES
+}
+
+enum ClanRole {
   LEADER
+  WARDEN
+  OFFICER
+  MEMBER
+}
+
+enum CompanyRole {
+  COMMANDER
   OFFICER
   VETERAN
   MEMBER
 }
 
-enum RaidAccessType {
-  PUBLIC_WORLD
-  GUILD_ONLY
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  BLOCKED
+}
+
+enum ArenaMatchOutcome {
+  CHALLENGER_VICTORY
+  DEFENDER_VICTORY
 }
 
 enum RaidStatus {
@@ -257,8 +289,11 @@ model User {
   workoutSessions WorkoutSession[]
   registeredGyms  RegisteredGymGuild[]
   exercisePRs     UserExercisePR[]
-  workoutPresets  WorkoutPreset[]
-  bugReports      BugReport[]
+  workoutPresets      WorkoutPreset[]
+  bugReports          BugReport[]
+  gymClanMemberships  GymClanMember[]
+  friendshipsSent     Friendship[]           @relation("FriendshipsSent")
+  friendshipsReceived Friendship[]           @relation("FriendshipsReceived")
 }
 
 model Character {
@@ -273,6 +308,9 @@ model Character {
   gameMode             GameMode               @default(STANDARD)
   adventurerRank       AdventurerRank         @default(COPPER)
   adventurerReputation Int                    @default(0)
+  arenaRating          Int                    @default(1000)
+  arenaWins            Int                    @default(0)
+  arenaLosses          Int                    @default(0)
   gold                 Int                    @default(100)
   overallLevel         Int                    @default(1)
 
@@ -307,9 +345,14 @@ model Character {
   equipmentLoadout      EquipmentLoadout?
   ledDungeonRuns        DungeonRun[]                  @relation("DungeonRunLeader")
   dungeonParticipations DungeonRunParticipant[]
-  ledGuilds             Guild[]                       @relation("GuildLeader")
+  wardenGymClans        GymClan[]                     @relation("GymClanWarden")
+  gymClanMemberships    GymClanMember[]
+  commandedCompanies    AdventurerCompany[]           @relation("CompanyCommander")
+  companyMembership     AdventurerCompanyMember?
+  arenaChallenges       ArenaMatch[]                  @relation("ArenaChallenger")
+  arenaDefenses         ArenaMatch[]                  @relation("ArenaDefender")
+  arenaVictories        ArenaMatch[]                  @relation("ArenaWinner")
   bugReports            BugReport[]
-  guildMembership       GuildMember?
   bountyCompletions     CharacterBountyCompletion[]
   raidContributions     RaidParticipantContribution[]
   guildQuestRuns        GuildQuestRun[]               @relation("CharacterGuildQuestRuns")
@@ -318,6 +361,7 @@ model Character {
   // CREATE UNIQUE INDEX IF NOT EXISTS "Character_userId_gameMode_active_key" ON "Character"("userId", "gameMode") WHERE "deletedAt" IS NULL;
   @@index([userId, gameMode, deletedAt])
   @@index([adventurerRank])
+  @@index([arenaRating])
 }
 
 model CharacterStats {
@@ -876,7 +920,7 @@ model DungeonRun {
   id                   String           @id @default(cuid())
   dungeonId            String
   leaderCharacterId    String
-  guildId              String?
+  companyId            String?
   status               DungeonRunStatus @default(RECRUITING)
   requiresVerifiedMode Boolean          @default(false)
 
@@ -899,13 +943,13 @@ model DungeonRun {
 
   dungeon          Dungeon                 @relation(fields: [dungeonId], references: [id], onDelete: Restrict)
   leaderCharacter  Character               @relation("DungeonRunLeader", fields: [leaderCharacterId], references: [id], onDelete: Restrict)
-  guild            Guild?                  @relation(fields: [guildId], references: [id], onDelete: SetNull)
+  company          AdventurerCompany?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
   participants     DungeonRunParticipant[]
   injectedWorkouts WorkoutLog[]            @relation("DungeonInjectedWorkouts")
   combatReplay     DungeonCombatReplay?
 
   @@index([status, resolvesAt])
-  @@index([guildId])
+  @@index([companyId])
 }
 
 model DungeonRunParticipant {
@@ -941,41 +985,171 @@ model DungeonCombatReplay {
 }
 
 // ============================================================================
-// 7. ADVENTURERS' GUILDS, RANK TRIALS, & 7-DAY BOSS RAIDS
+// 7. GYM CLANS, ADVENTURER COMPANIES, FRIENDSHIPS, ARENA, & 7-DAY BOSS RAIDS
 // ============================================================================
 
-model Guild {
+model GymClan {
+  id                   String         @id @default(cuid())
+  slug                 String         @unique
+  venueKey             String         @unique
+  name                 String
+  tag                  String
+  description          String?
+  emblemIcon           String         @default("shield_crest")
+  kind                 GymClanKind    @default(GYM_VENUE)
+  venueSource          GymVenueSource @default(USER_SUBMITTED)
+  externalPlaceId      String?
+  address              String?
+  city                 String?
+  countryCode          String?
+  latitude             Float?
+  longitude            Float?
+  radiusMeters         Int            @default(150)
+  wardenCharacterId    String?
+  clanLevel            Int            @default(1)
+  clanReputation       Int            @default(0)
+  maxMembers           Int            @default(200)
+  requiresVerifiedMode Boolean        @default(false)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  wardenCharacter Character?         @relation("GymClanWarden", fields: [wardenCharacterId], references: [id], onDelete: SetNull)
+  members         GymClanMember[]
+  raidInstances   RaidBossInstance[]
+  seasons         GymClanSeason[]
+
+  @@index([kind])
+  @@index([latitude, longitude])
+  @@index([clanReputation])
+}
+
+model GymClanMember {
+  id                    String      @id @default(cuid())
+  gymClanId             String
+  userId                String
+  characterId           String
+  clanKind              GymClanKind @default(GYM_VENUE)
+  role                  ClanRole    @default(MEMBER)
+  contributedReputation Int         @default(0)
+  joinedAt              DateTime    @default(now())
+
+  gymClan   GymClan   @relation(fields: [gymClanId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([gymClanId, characterId])
+  @@unique([characterId, clanKind])
+  @@index([gymClanId])
+  @@index([userId])
+}
+
+model AdventurerCompany {
   id                   String   @id @default(cuid())
   name                 String   @unique
   tag                  String   @unique
+  motto                String?
   description          String?
-  emblemIcon           String   @default("shield_crest")
-  leaderCharacterId    String
-  guildLevel           Int      @default(1)
-  guildReputation      Int      @default(0)
-  maxMembers           Int      @default(50)
+  emblemIcon           String   @default("banners")
+  commanderCharacterId String
+  companyLevel         Int      @default(1)
+  companyReputation    Int      @default(0)
+  maxRosterSize        Int      @default(30)
+  maxActiveSquadSize   Int      @default(4)
   requiresVerifiedMode Boolean  @default(false)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  leaderCharacter Character          @relation("GuildLeader", fields: [leaderCharacterId], references: [id], onDelete: Restrict)
-  members         GuildMember[]
-  raidInstances   RaidBossInstance[]
-  dungeonRuns     DungeonRun[]
+  commanderCharacter Character                 @relation("CompanyCommander", fields: [commanderCharacterId], references: [id], onDelete: Restrict)
+  members            AdventurerCompanyMember[]
+  dungeonRuns        DungeonRun[]
 }
 
-model GuildMember {
-  id                    String    @id @default(cuid())
-  guildId               String
-  characterId           String    @unique
-  role                  GuildRole @default(MEMBER)
-  contributedReputation Int       @default(0)
-  joinedAt              DateTime  @default(now())
+model AdventurerCompanyMember {
+  id                    String      @id @default(cuid())
+  companyId             String
+  characterId           String      @unique
+  role                  CompanyRole @default(MEMBER)
+  activeSquadSlot       Int?
+  contributedReputation Int         @default(0)
+  joinedAt              DateTime    @default(now())
 
-  guild     Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
-  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  company   AdventurerCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  character Character         @relation(fields: [characterId], references: [id], onDelete: Cascade)
 
-  @@index([guildId])
+  @@unique([companyId, activeSquadSlot])
+  @@index([companyId])
+}
+
+model Friendship {
+  id          String           @id @default(cuid())
+  requesterId String
+  addresseeId String
+  pairKey     String           @unique
+  status      FriendshipStatus @default(PENDING)
+  respondedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  requester User @relation("FriendshipsSent", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee User @relation("FriendshipsReceived", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([requesterId, status])
+  @@index([addresseeId, status])
+}
+
+model GymClanSeason {
+  id                 String   @id @default(cuid())
+  gymClanId          String
+  seasonKey          String
+  totalSeasonPoints  Int      @default(0)
+  workoutPoints      Int      @default(0)
+  raidPoints         Int      @default(0)
+  arenaPoints        Int      @default(0)
+  workoutsCount      Int      @default(0)
+  raidBossesDefeated Int      @default(0)
+  arenaVictories     Int      @default(0)
+  activeMemberCount  Int      @default(0)
+  startsAt           DateTime
+  endsAt             DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  gymClan GymClan @relation(fields: [gymClanId], references: [id], onDelete: Cascade)
+
+  @@unique([gymClanId, seasonKey])
+  @@index([seasonKey, totalSeasonPoints])
+}
+
+model ArenaMatch {
+  id                     String            @id @default(cuid())
+  challengerCharacterId  String
+  defenderCharacterId    String?
+  defenderName           String
+  isNpcRival             Boolean           @default(false)
+  winnerCharacterId      String?
+  seasonKey              String
+  outcome                ArenaMatchOutcome
+  randomSeed             String
+  totalTurns             Int               @default(1)
+  challengerDamageDealt  Int               @default(0)
+  defenderDamageDealt    Int               @default(0)
+  challengerRatingBefore Int               @default(1000)
+  challengerRatingAfter  Int               @default(1000)
+  defenderRatingBefore   Int               @default(1000)
+  defenderRatingAfter    Int               @default(1000)
+  goldAwarded            Int               @default(0)
+  seasonPointsAwarded    Int               @default(0)
+  combatSummary          Json
+  createdAt              DateTime          @default(now())
+
+  challengerCharacter Character  @relation("ArenaChallenger", fields: [challengerCharacterId], references: [id], onDelete: Cascade)
+  defenderCharacter   Character? @relation("ArenaDefender", fields: [defenderCharacterId], references: [id], onDelete: SetNull)
+  winnerCharacter     Character? @relation("ArenaWinner", fields: [winnerCharacterId], references: [id], onDelete: SetNull)
+
+  @@index([challengerCharacterId, createdAt])
+  @@index([defenderCharacterId, createdAt])
+  @@index([seasonKey])
 }
 
 model GuildBounty {
@@ -1062,7 +1236,7 @@ model RaidBossInstance {
   bossName             String
   bossTier             Int            @default(1)
   accessType           RaidAccessType @default(PUBLIC_WORLD)
-  guildId              String?        // Null for PUBLIC_WORLD; set for GUILD_ONLY private raids
+  gymClanId            String?        // Null for unattached raids; set for OPEN_WORLD_HOME or CLAN_ONLY clan raids
   requiresVerifiedMode Boolean        @default(false)
 
   // Boss Health & Configuration
@@ -1083,12 +1257,12 @@ model RaidBossInstance {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
-  guild             Guild?                        @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  gymClan           GymClan?                      @relation(fields: [gymClanId], references: [id], onDelete: Cascade)
   contributions     RaidParticipantContribution[]
   channeledWorkouts WorkoutLog[]                  @relation("RaidChanneledWorkouts")
 
   @@index([accessType, status, endsAt])
-  @@index([guildId, status])
+  @@index([gymClanId, status])
 }
 
 model RaidParticipantContribution {

@@ -9,6 +9,7 @@ import {
   computeDaysRemaining,
   resolveStarterCustomization,
 } from './characters';
+import { ensureOpenWorldHomeClanAndMembership } from './social';
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -130,6 +131,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: PrismaClient): void
               equipmentLoadout: true,
             },
           });
+
+          if (typeof (tx as any).gymClan?.upsert === 'function') {
+            await ensureOpenWorldHomeClanAndMembership(tx, createdCharacter.id, createdUser.id);
+          }
 
           return { createdUser, createdCharacter };
         },

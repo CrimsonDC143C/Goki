@@ -24,6 +24,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { assertCharacterActiveAndOwned, requireAuth } from '../middleware/auth';
 import { isPrismaUniqueConstraintError, withDbTransaction } from '../services/game-operations';
+import { ensureOpenWorldHomeClanAndMembership } from './social';
 
 export const SOFT_DELETE_RETENTION_DAYS = 30;
 export const SOFT_DELETE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -329,6 +330,10 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
               equipmentLoadout: true,
             },
           });
+
+          if (typeof (tx as any).gymClan?.upsert === 'function') {
+            await ensureOpenWorldHomeClanAndMembership(tx, character.id, userId);
+          }
 
           return { ok: true as const, character };
         },
@@ -758,7 +763,8 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
           include: { gatheringNode: true },
           take: 1,
         },
-        guildMembership: { include: { guild: true } },
+        gymClanMemberships: { include: { gymClan: true } },
+        companyMembership: { include: { company: true } },
         bountyCompletions: { include: { bounty: true } },
         _count: { select: { workoutLogs: true } },
       },

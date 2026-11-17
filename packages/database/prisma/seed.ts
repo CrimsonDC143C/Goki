@@ -494,9 +494,83 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
   }
 
   // --------------------------------------------------------------------------
-  // 7. Active 7-Day Public World Boss Raid (No Demo User / Character Seeded)
+  // 7. Default Open-World Home Gym Clan, Current Season, & World Boss Raid
   // --------------------------------------------------------------------------
   const now = new Date();
+  const seasonKey = now.toISOString().slice(0, 7);
+  const seasonStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+  const seasonEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
+
+  const homeClan = await db.gymClan.upsert({
+    where: { slug: 'open_world_home' },
+    update: {
+      name: 'Hearthstone Open-World Sanctum',
+      tag: 'HOME',
+      kind: 'OPEN_WORLD_HOME',
+      venueSource: 'SYSTEM_SEED',
+      maxMembers: 1_000_000,
+      description:
+        'The global sanctuary clan uniting all home, outdoor, and traveling athletes for weekly World Boss Raids.',
+    },
+    create: {
+      slug: 'open_world_home',
+      venueKey: 'system:open_world_home',
+      name: 'Hearthstone Open-World Sanctum',
+      tag: 'HOME',
+      kind: 'OPEN_WORLD_HOME',
+      venueSource: 'SYSTEM_SEED',
+      maxMembers: 1_000_000,
+      description:
+        'The global sanctuary clan uniting all home, outdoor, and traveling athletes for weekly World Boss Raids.',
+    },
+  });
+
+  await db.gymClanSeason.upsert({
+    where: {
+      gymClanId_seasonKey: {
+        gymClanId: homeClan.id,
+        seasonKey,
+      },
+    },
+    update: {
+      startsAt: seasonStart,
+      endsAt: seasonEnd,
+    },
+    create: {
+      gymClanId: homeClan.id,
+      seasonKey,
+      startsAt: seasonStart,
+      endsAt: seasonEnd,
+    },
+  });
+
+  const activeCharacters = await db.character.findMany({
+    where: { deletedAt: null },
+    select: { id: true, userId: true },
+  });
+
+  for (const c of activeCharacters) {
+    await db.gymClanMember.upsert({
+      where: {
+        characterId_clanKind: {
+          characterId: c.id,
+          clanKind: 'OPEN_WORLD_HOME',
+        },
+      },
+      update: {
+        gymClanId: homeClan.id,
+        userId: c.userId,
+      },
+      create: {
+        gymClanId: homeClan.id,
+        userId: c.userId,
+        characterId: c.id,
+        clanKind: 'OPEN_WORLD_HOME',
+        role: 'MEMBER',
+      },
+    });
+  }
+
   const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const existingPublicRaid = await db.raidBossInstance.findFirst({
@@ -510,6 +584,7 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
         bossName: 'Ignisrax, the World-Forge Wyrm',
         bossTier: 3,
         accessType: 'PUBLIC_WORLD',
+        gymClanId: homeClan.id,
         maxHp: 2_500_000n,
         currentHp: 2_500_000n,
         totalRaidDamage: 0n,
@@ -536,6 +611,11 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
           },
         ],
       },
+    });
+  } else if (!existingPublicRaid.gymClanId) {
+    await db.raidBossInstance.update({
+      where: { id: existingPublicRaid.id },
+      data: { gymClanId: homeClan.id },
     });
   }
 

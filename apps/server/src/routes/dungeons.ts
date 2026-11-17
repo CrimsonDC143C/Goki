@@ -13,6 +13,7 @@ import { WebSocketManager, websocketManager } from '../services/websocket-manage
 
 const createRunSchema = z.object({
   leaderCharacterId: z.string(),
+  companyId: z.string().optional(),
   guildId: z.string().optional(),
   startImmediately: z.boolean().default(true),
   partyMemberCharacterIds: z.array(z.string()).max(4).default([]),
@@ -80,7 +81,7 @@ export function registerDungeonRoutes(
       data: {
         dungeonId: dungeon.id,
         leaderCharacterId: body.leaderCharacterId,
-        guildId: body.guildId ?? null,
+        companyId: body.companyId ?? body.guildId ?? null,
         status: body.startImmediately ? 'ACTIVE_WINDOW' : 'RECRUITING',
         startedAt: body.startImmediately ? now : null,
         resolvesAt,

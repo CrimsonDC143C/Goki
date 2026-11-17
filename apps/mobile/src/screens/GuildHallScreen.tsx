@@ -20,7 +20,11 @@ const RANK_LADDER = [
   'MYTHIC',
 ] as const;
 
-export const GuildHallScreen: React.FC = () => {
+export interface GuildHallScreenProps {
+  embedded?: boolean;
+}
+
+export const GuildHallScreen: React.FC<GuildHallScreenProps> = ({ embedded = false }) => {
   const {
     characterName,
     stats,
@@ -103,8 +107,8 @@ export const GuildHallScreen: React.FC = () => {
   const raidRooms = useMemo(() => raids.map((r) => `raid:${r.id}`), [raids]);
   const { isConnected: isWsConnected } = useWebSocket({ room: raidRooms });
 
-  return (
-    <ScrollView contentContainerStyle={styles.scrollContent}>
+  const content = (
+    <>
       {/* Adventurer Rank Ladder */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Adventurers&apos; Guild Rank Progression</Text>
@@ -241,7 +245,7 @@ export const GuildHallScreen: React.FC = () => {
 
       {/* Social Guild Banner */}
       <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionTitle}>Social Guild & 7-Day Boss Raids</Text>
+        <Text style={styles.sectionTitle}>Home Sanctum &amp; Gym Clan 7-Day Raids</Text>
         <View
           style={[
             styles.liveSyncBadge,
@@ -262,8 +266,8 @@ export const GuildHallScreen: React.FC = () => {
           <Text style={styles.guildNameText}>{guildName}</Text>
         </View>
         <Text style={styles.subText}>
-          Guild Reputation: {guildReputation.toLocaleString()} • Unlocks Private Guild-Only 7-Day
-          Boss Raids
+          Affiliation Reputation: {guildReputation.toLocaleString()} • Public World Raid bound to
+          Home Clan &amp; Gym Clan Raids
         </Text>
       </View>
 
@@ -295,7 +299,9 @@ export const GuildHallScreen: React.FC = () => {
                 <View style={styles.raidTopRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.raidName}>
-                      {raid.accessType === 'GUILD_ONLY' ? '🛡️ GUILD RAID: ' : '🌍 PUBLIC RAID: '}
+                      {raid.accessType === 'GUILD_ONLY' || raid.accessType === 'CLAN_ONLY'
+                        ? '🛡️ CLAN RAID: '
+                        : '🌍 PUBLIC RAID: '}
                       {raid.bossName}
                     </Text>
                     <Text style={styles.subText}>
@@ -424,14 +430,24 @@ export const GuildHallScreen: React.FC = () => {
           </View>
         );
       })}
-    </ScrollView>
+    </>
   );
+
+  if (embedded) {
+    return <View style={styles.embeddedContainer}>{content}</View>;
+  }
+
+  return <ScrollView contentContainerStyle={styles.scrollContent}>{content}</ScrollView>;
 };
 
 const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 36,
+  },
+  embeddedContainer: {
+    paddingTop: 4,
+    paddingBottom: 24,
   },
   sectionHeaderRow: {
     flexDirection: 'row',

@@ -21,3 +21,4 @@ export * from './character-customization';
 export * from './turn-based-combat';
 export * from './crafting-economy';
 export * from './fitness-coaching';
+export * from './social-hub-engine';

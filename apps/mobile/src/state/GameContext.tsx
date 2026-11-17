@@ -312,7 +312,7 @@ export interface ActiveDungeonRunState {
 export interface RaidBossState {
   id: string;
   bossName: string;
-  accessType: 'PUBLIC_WORLD' | 'GUILD_ONLY';
+  accessType: 'PUBLIC_WORLD' | 'GUILD_ONLY' | 'CLAN_ONLY';
   guildName?: string;
   maxHp: number;
   currentHp: number;
@@ -349,6 +349,7 @@ interface GameContextValue {
   adventurerRank: AdventurerRank;
   adventurerReputation: number;
   guildName: string;
+  setGuildName: (name: string) => void;
   guildReputation: number;
   gold: number;
   location: GameLocation;
@@ -1249,7 +1250,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const locallyPermanentlyErasedIdsRef = useRef<Set<string>>(new Set<string>());
   const [adventurerRank, setAdventurerRank] = useState<AdventurerRank>('COPPER');
   const [adventurerReputation, setAdventurerReputation] = useState(0);
-  const [guildName] = useState('Iron Vanguard [IRON]');
+  const [guildName, setGuildName] = useState('Hearthstone Open-World Sanctum [HOME]');
   const [guildReputation, setGuildReputation] = useState(1450);
   const [gold, setGold] = useState(0);
   const [location, setLocation] = useState<GameLocation>('TAVERN');
@@ -1363,7 +1364,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: 'raid_guild_colossus',
         bossName: 'Vaelgor, Guild Dread-Colossus',
         accessType: 'GUILD_ONLY',
-        guildName: 'Iron Vanguard [IRON]',
+        guildName: 'Iron Vanguard Gym Clan',
         maxHp: 600_000,
         currentHp: 245_000,
         endsAtMs,
@@ -8289,6 +8290,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     adventurerRank,
     adventurerReputation,
     guildName,
+    setGuildName,
     guildReputation,
     gold,
     location,

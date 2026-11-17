@@ -33,7 +33,7 @@ These core decisions guide every milestone below:
 | **M2** | Modular 2D Bone-Rigged Character & Morphable Gear Engine | `[x]` Complete |
 | **M3** | Live Turn-Based Combat & Adventurer's Guild Hub | `[x]` Complete |
 | **M4** | Artisan Economy, NPC Cast, & Fitness Coaching | `[x]` Complete |
-| **M5** | Social Hub, Real-World Gym Clans, & Adventurer Companies | `[ ]` Planned |
+| **M5** | Social Hub, Real-World Gym Clans, & Adventurer Companies | `[x]` Complete |
 | **M6** | Full RPG Illustration Polish & Real-Time Co-op Readiness | `[ ]` Planned |
 
 ---
@@ -122,24 +122,24 @@ These core decisions guide every milestone below:
 ---
 
 ## Milestone 5: Social Hub, Real-World Gym Clans, & Adventurer Companies
-**Status:** `[ ]` Planned  
+**Status:** `[x]` Complete  
 **Goal:** Replace the legacy `Guild` model and tab with a dedicated `Social` hub housing location-deduped **Gym Clans**, the default **Home/Open-World Clan** with weekly Raids, **Adventurer Companies**, Friends, Leaderboards, and Async Arena Sparring.
 
 ### Actionable Steps
-- [ ] **Database & Domain Split (`packages/database/prisma/schema.prisma`):**
-  - [ ] Refactor `Guild` into:
+- [x] **Database & Domain Split (`packages/database/prisma/schema.prisma`):**
+  - [x] Refactor `Guild` into:
     - `GymClan` (canonical real-world gym venue with normalized coordinates/venue key, plus seeded default `OPEN_WORLD_HOME` clan for all users).
     - `AdventurerCompany` (player-created cross-gym group: max `30` roster members, `4`-player active squad slot designation).
-  - [ ] Add `Friendship` model, `GymClanSeason` standings, and `ArenaMatch` records.
-  - [ ] Bind public `RaidBossInstance` encounters directly to the default **Home/Open-World Clan** and support Gym-Clan-specific raid tiers.
-- [ ] **Gym Discovery & Social APIs (`apps/server`):**
-  - [ ] Build gym venue search & coordinate-deduped Clan creation/joining (OSM/Places lookup + user-submitted venue fallback).
-  - [ ] Build `/api/social` routes for Gym Clans, Weekly Raids, Adventurer Companies (roster + 4-player active squad management), Friends, and Leaderboards.
-  - [ ] Implement Async Arena AI sparring and monthly Gym Clan seasonal scoring endpoints powered by `stepTurnBasedCombat`.
-- [ ] **Social Hub UI (`apps/mobile`):**
-  - [ ] Build the `Social` tab with sub-views for `My Clan & Raid | Company | Friends | Leaderboards | Arena`.
-  - [ ] Integrate **Company Quartermaster NPC** and **Clan Warden NPC** dialogues for roster management, seasonal standings, and raid coordination.
-- [ ] **Verification:** Database migration & seed validation, server authorization/membership tests (1 Gym Clan + default Home Clan + 1 Company), and E2E social flow tests.
+  - [x] Add `Friendship` model, `GymClanSeason` standings, and `ArenaMatch` records.
+  - [x] Bind public `RaidBossInstance` encounters directly to the default **Home/Open-World Clan** and support Gym-Clan-specific raid tiers.
+- [x] **Gym Discovery & Social APIs (`apps/server`):**
+  - [x] Build gym venue search & coordinate-deduped Clan creation/joining (OSM/Places lookup + user-submitted venue fallback).
+  - [x] Build `/api/social` routes for Gym Clans, Weekly Raids, Adventurer Companies (roster + 4-player active squad management), Friends, and Leaderboards.
+  - [x] Implement Async Arena AI sparring and monthly Gym Clan seasonal scoring endpoints powered by `stepTurnBasedCombat`.
+- [x] **Social Hub UI (`apps/mobile`):**
+  - [x] Build the `Social` tab with sub-views for `My Clan & Raid | Company | Friends | Leaderboards | Arena`.
+  - [x] Integrate **Company Quartermaster NPC** and **Clan Warden NPC** dialogues for roster management, seasonal standings, and raid coordination.
+- [x] **Verification:** Database migration & seed validation, server authorization/membership tests (1 Gym Clan + default Home Clan + 1 Company), and E2E social flow tests.
 
 ---
 

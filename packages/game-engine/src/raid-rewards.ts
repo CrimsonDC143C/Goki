@@ -9,7 +9,7 @@ import {
 // CONSTANTS & TIER DEFINITIONS
 // ============================================================================
 
-export type RaidAccessMode = 'PUBLIC_WORLD' | 'GUILD_ONLY';
+export type RaidAccessMode = 'PUBLIC_WORLD' | 'GUILD_ONLY' | 'CLAN_ONLY';
 
 export type RaidContributionTier = 'S' | 'A' | 'B' | 'C' | 'PARTICIPATION';
 
@@ -236,7 +236,9 @@ export function calculateRaidRewards(
   };
 
   const guildModeRepBonus =
-    input.accessType === 'GUILD_ONLY' ? GUILD_RAID_COORDINATION_BONUS : 1.0;
+    input.accessType === 'GUILD_ONLY' || input.accessType === 'CLAN_ONLY'
+      ? GUILD_RAID_COORDINATION_BONUS
+      : 1.0;
 
   // Effective pool unlocked by the raid's collective effort
   const unlockedGoldPool = input.baseGoldPool * damageScalingFactor * killBonusMultiplier;

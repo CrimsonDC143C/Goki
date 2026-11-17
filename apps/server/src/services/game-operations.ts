@@ -962,10 +962,14 @@ export async function resolveRaidBossRolloverOperation(
               });
             }
 
-            if (raid.guildId && reward.guildReputationAwarded > 0) {
-              await tx.guild.update({
-                where: { id: raid.guildId },
-                data: { guildReputation: { increment: reward.guildReputationAwarded } },
+            if (
+              raid.gymClanId &&
+              reward.guildReputationAwarded > 0 &&
+              typeof (tx as any).gymClan?.update === 'function'
+            ) {
+              await tx.gymClan.update({
+                where: { id: raid.gymClanId },
+                data: { clanReputation: { increment: reward.guildReputationAwarded } },
               });
             }
 

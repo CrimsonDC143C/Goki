@@ -34,6 +34,7 @@ import { assertCharacterActiveAndOwned, requireAuth } from '../middleware/auth';
 import { GameTimerScheduler } from '../queues/bullmq-workers';
 import { depositLootToInventory, withDbTransaction } from '../services/game-operations';
 import { WebSocketManager, websocketManager } from '../services/websocket-manager';
+import { incrementClanSeasonMetrics } from './social';
 
 const workoutTypeEnum = z.enum([
   'RESISTANCE',
@@ -1093,6 +1094,21 @@ export function registerWorkoutRoutes(
       };
       wsManager.broadcastToRoom(`raid:${validRaid.id}`, raidHpEvent);
       wsManager.broadcastToRoom('raid:all', raidHpEvent);
+    }
+
+    if (
+      typeof (db as any).gymClanMember?.findMany === 'function' &&
+      typeof (db as any).gymClanSeason?.upsert === 'function'
+    ) {
+      const workoutPointsDelta = Math.max(
+        50,
+        Math.round(50 + (rewardPayload.totalTonnageKg ?? 0) / 100)
+      );
+      await incrementClanSeasonMetrics(db, {
+        characterId,
+        workoutPointsDelta,
+        workoutsCountDelta: 1,
+      });
     }
 
     return reply.status(201).send({

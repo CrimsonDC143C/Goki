@@ -4,6 +4,7 @@ import type {
   AffixReforgeMode,
   CharacterCustomizationConfig,
   CharacterRace,
+  TurnBasedCombatEvent,
 } from '@goki/game-engine';
 import {
   getStoredAuthToken,
@@ -793,4 +794,799 @@ export async function completeOnboardingApi(characterId: string): Promise<{
  */
 export async function logoutAccount(): Promise<void> {
   await removeStoredAuthToken();
+}
+
+// ============================================================================
+// MILESTONE 5: SOCIAL HUB, GYM CLANS, COMPANIES, FRIENDS & ASYNC ARENA APIs
+// ============================================================================
+
+export type SocialLeaderboardCategory = 'GYM_CLANS' | 'COMPANIES' | 'HEROES' | 'ARENA';
+
+export interface SocialGymClanDto {
+  id: string;
+  slug: string;
+  venueKey: string;
+  name: string;
+  tag: string;
+  description?: string | null;
+  emblemIcon?: string;
+  kind: 'OPEN_WORLD_HOME' | 'GYM_VENUE';
+  venueSource?: string;
+  city?: string | null;
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  clanLevel?: number;
+  clanReputation: number;
+  memberCount?: number;
+  seasonPoints?: number;
+  role?: 'WARDEN' | 'OFFICER' | 'MEMBER';
+}
+
+export interface DiscoveredGymVenueDto {
+  id?: string;
+  clanId?: string;
+  venueKey: string;
+  name: string;
+  tag?: string;
+  city?: string | null;
+  address?: string | null;
+  latitude: number;
+  longitude: number;
+  venueSource: string;
+  osmElementType?: string;
+  osmElementId?: string | number;
+  distanceMeters?: number;
+  memberCount?: number;
+  seasonPoints?: number;
+  claimedClanId?: string | null;
+}
+
+export interface SocialCompanyMemberDto {
+  id?: string;
+  characterId: string;
+  characterName: string;
+  overallLevel: number;
+  race?: CharacterRace;
+  role: 'COMMANDER' | 'OFFICER' | 'MEMBER';
+  activeSquadSlot: number | null;
+  contributedReputation?: number;
+}
+
+export interface SocialCompanyDto {
+  id: string;
+  name: string;
+  tag: string;
+  motto?: string | null;
+  description?: string | null;
+  commanderCharacterId: string;
+  companyLevel: number;
+  companyReputation: number;
+  maxRosterSize: number;
+  maxActiveSquadSize: number;
+  memberCount: number;
+  members?: SocialCompanyMemberDto[];
+}
+
+export interface SocialFriendItemDto {
+  friendshipId: string;
+  userId: string;
+  username: string;
+  characterId?: string | null;
+  characterName?: string | null;
+  overallLevel?: number;
+  gymClanTag?: string | null;
+  arenaRating?: number;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED';
+  direction?: 'INCOMING' | 'OUTGOING';
+  createdAt?: string;
+}
+
+export interface SocialFriendsOverviewDto {
+  accepted: SocialFriendItemDto[];
+  incoming: SocialFriendItemDto[];
+  outgoing: SocialFriendItemDto[];
+}
+
+export interface SocialLeaderboardEntryDto {
+  rank: number;
+  id: string;
+  name: string;
+  tag?: string | null;
+  subtitle?: string | null;
+  workoutPoints: number;
+  raidPoints: number;
+  arenaPoints: number;
+  totalPoints: number;
+  wins?: number;
+  losses?: number;
+}
+
+export interface ArenaOpponentDto {
+  characterId: string;
+  name: string;
+  title?: string;
+  overallLevel: number;
+  race?: CharacterRace;
+  gymClanName?: string | null;
+  arenaRating: number;
+  isNpcRival: boolean;
+  isFriend?: boolean;
+}
+
+export interface ArenaMatchSummaryDto {
+  matchId: string;
+  outcome: 'CHALLENGER_VICTORY' | 'DEFENDER_VICTORY';
+  winnerCharacterId: string;
+  loserCharacterId: string;
+  defenderName: string;
+  totalTurns: number;
+  challengerRemainingHp: number;
+  defenderRemainingHp: number;
+  challengerDamageDealt: number;
+  defenderDamageDealt: number;
+  challengerRatingDelta: number;
+  nextChallengerRating: number;
+  goldAwarded: number;
+  seasonPointsAwarded: number;
+  combatLog: TurnBasedCombatEvent[];
+  createdAt?: string;
+}
+
+export interface SocialOverviewDto {
+  seasonKey: string;
+  homeClan: SocialGymClanDto | null;
+  gymClan: SocialGymClanDto | null;
+  company: SocialCompanyDto | null;
+  friendsCount: number;
+  pendingIncomingFriendsCount: number;
+  arenaRating: number;
+  arenaWins: number;
+  arenaLosses: number;
+}
+
+export interface ApiJsonResult<T = any> {
+  ok: boolean;
+  statusCode?: number;
+  data?: T;
+  error?: string;
+}
+
+async function apiJsonRequest<T>(
+  path: string,
+  options: RequestInit,
+  fallbackError: string,
+  timeoutMs = 8000
+): Promise<ApiJsonResult<T>> {
+  try {
+    const res = await apiFetch(path, options, timeoutMs);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        statusCode: res.status,
+        error: (data as { error?: string })?.error || fallbackError,
+      };
+    }
+    return { ok: true, statusCode: res.status, data: data as T };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : fallbackError;
+    return { ok: false, error: message };
+  }
+}
+
+function normalizeGymClanDto(raw: any): SocialGymClanDto | null {
+  if (!raw) return null;
+  return {
+    id: raw.id,
+    slug: raw.slug,
+    venueKey: raw.venueKey,
+    name: raw.name,
+    tag: raw.tag,
+    description: raw.description ?? null,
+    emblemIcon: raw.emblemIcon,
+    kind: raw.kind,
+    venueSource: raw.venueSource,
+    city: raw.city ?? null,
+    address: raw.address ?? null,
+    latitude: raw.latitude ?? null,
+    longitude: raw.longitude ?? null,
+    clanLevel: raw.clanLevel ?? 1,
+    clanReputation: raw.clanReputation ?? 0,
+    memberCount: raw.memberCount ?? raw._count?.members ?? undefined,
+    seasonPoints: raw.seasonPoints ?? raw.seasons?.[0]?.totalSeasonPoints ?? undefined,
+    role: raw.role,
+  };
+}
+
+function normalizeCompanyDto(raw: any): SocialCompanyDto {
+  const members: SocialCompanyMemberDto[] = Array.isArray(raw?.members)
+    ? raw.members.map((m: any) => ({
+        id: m.id,
+        characterId: m.characterId,
+        characterName: m.characterName ?? m.character?.name ?? 'Adventurer',
+        overallLevel: m.overallLevel ?? m.character?.overallLevel ?? 1,
+        race: m.race ?? m.character?.race,
+        role: m.role,
+        activeSquadSlot: m.activeSquadSlot ?? null,
+        contributedReputation: m.contributedReputation ?? 0,
+      }))
+    : [];
+  return {
+    id: raw.id,
+    name: raw.name,
+    tag: raw.tag,
+    motto: raw.motto ?? null,
+    description: raw.description ?? null,
+    commanderCharacterId: raw.commanderCharacterId,
+    companyLevel: raw.companyLevel ?? 1,
+    companyReputation: raw.companyReputation ?? 0,
+    maxRosterSize: raw.maxRosterSize ?? 30,
+    maxActiveSquadSize: raw.maxActiveSquadSize ?? 4,
+    memberCount: raw.memberCount ?? raw._count?.members ?? members.length,
+    members,
+  };
+}
+
+function normalizeFriendRow(
+  row: any,
+  currentUserId?: string,
+  direction?: 'INCOMING' | 'OUTGOING'
+): SocialFriendItemDto {
+  if (row?.friendshipId && row?.username) {
+    return row as SocialFriendItemDto;
+  }
+  const otherUser =
+    direction === 'INCOMING'
+      ? row?.requester
+      : direction === 'OUTGOING'
+        ? row?.addressee
+        : currentUserId && row?.requesterId === currentUserId
+          ? row?.addressee
+          : row?.requester ?? row?.addressee;
+  const primaryChar = otherUser?.characters?.[0] ?? null;
+  return {
+    friendshipId: row.id ?? row.friendshipId,
+    userId: otherUser?.id ?? row.addresseeId ?? row.requesterId ?? '',
+    username: otherUser?.username ?? 'adventurer',
+    characterId: primaryChar?.id ?? null,
+    characterName: primaryChar?.name ?? null,
+    overallLevel: primaryChar?.overallLevel ?? 1,
+    gymClanTag: primaryChar?.gymClanTag ?? null,
+    arenaRating: primaryChar?.arenaRating ?? 1000,
+    status: row.status,
+    direction,
+    createdAt: row.createdAt,
+  };
+}
+
+export async function fetchSocialOverviewApi(
+  characterId: string
+): Promise<ApiJsonResult<SocialOverviewDto>> {
+  const res = await apiJsonRequest<any>(
+    `/api/social/overview?characterId=${encodeURIComponent(characterId)}`,
+    { method: 'GET' },
+    'Failed to load social overview'
+  );
+  if (!res.ok || !res.data) return res;
+  const raw = res.data;
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: {
+      seasonKey: raw.seasonKey,
+      homeClan: normalizeGymClanDto(raw.homeClan),
+      gymClan: normalizeGymClanDto(raw.gymClan),
+      company: raw.company ? normalizeCompanyDto(raw.company) : null,
+      friendsCount: raw.friendsCount ?? 0,
+      pendingIncomingFriendsCount:
+        raw.pendingIncomingFriendsCount ?? raw.pendingFriendRequestsCount ?? 0,
+      arenaRating: raw.arenaRating ?? 1000,
+      arenaWins: raw.arenaWins ?? 0,
+      arenaLosses: raw.arenaLosses ?? 0,
+    },
+  };
+}
+
+export async function discoverGymsApi(params: {
+  lat: number;
+  lon: number;
+  radiusMeters?: number;
+  q?: string;
+}): Promise<ApiJsonResult<{ venues: DiscoveredGymVenueDto[] }>> {
+  const qs = new URLSearchParams({
+    lat: String(params.lat),
+    lon: String(params.lon),
+  });
+  if (params.radiusMeters !== undefined) {
+    qs.set('radiusMeters', String(params.radiusMeters));
+  }
+  if (params.q && params.q.trim().length > 0) {
+    qs.set('q', params.q.trim());
+  }
+  const res = await apiJsonRequest<{ venues: any[] }>(
+    `/api/social/gyms/discover?${qs.toString()}`,
+    { method: 'GET' },
+    'Failed to discover gym venues',
+    10000
+  );
+  if (!res.ok || !res.data) return res as ApiJsonResult<{ venues: DiscoveredGymVenueDto[] }>;
+  const venues: DiscoveredGymVenueDto[] = (res.data.venues ?? []).map((v: any) => {
+    const rawSource = v.venueSource ?? v.source ?? 'USER_SUBMITTED';
+    return {
+      id: v.id ?? v.existingClanId ?? undefined,
+      clanId: v.clanId ?? v.existingClanId ?? undefined,
+      claimedClanId: v.claimedClanId ?? v.existingClanId ?? null,
+      venueKey: v.venueKey,
+      name: v.name,
+      tag: v.tag ?? v.existingClanTag ?? undefined,
+      city: v.city ?? null,
+      address: v.address ?? null,
+      latitude: v.latitude,
+      longitude: v.longitude,
+      venueSource: rawSource === 'OPENSTREETMAP' ? 'OSM_OVERPASS' : rawSource,
+      osmElementType: v.osmElementType ?? undefined,
+      osmElementId: v.osmElementId ?? undefined,
+      distanceMeters: v.distanceMeters,
+      memberCount: v.memberCount,
+      seasonPoints: v.seasonPoints,
+    };
+  });
+  return { ok: true, statusCode: res.statusCode, data: { venues } };
+}
+
+export async function claimOrJoinGymClanApi(payload: {
+  characterId: string;
+  clanId?: string;
+  venue?: {
+    name: string;
+    tag?: string;
+    latitude: number;
+    longitude: number;
+    city?: string;
+    address?: string;
+    venueSource?: string;
+    osmElementType?: string;
+    osmElementId?: string | number;
+  };
+}): Promise<ApiJsonResult<{ clan: SocialGymClanDto; deduplicated?: boolean }>> {
+  const sanitizedPayload = payload.venue
+    ? {
+        ...payload,
+        venue: {
+          ...payload.venue,
+          venueSource:
+            payload.venue.venueSource === 'OPENSTREETMAP'
+              ? 'OSM_OVERPASS'
+              : payload.venue.venueSource,
+        },
+      }
+    : payload;
+  const res = await apiJsonRequest<{ clan: any; deduplicated?: boolean }>(
+    '/api/social/clans/claim-or-join',
+    {
+      method: 'POST',
+      body: JSON.stringify(sanitizedPayload),
+    },
+    'Failed to claim or join gym clan'
+  );
+  if (!res.ok || !res.data) {
+    return res as ApiJsonResult<{ clan: SocialGymClanDto; deduplicated?: boolean }>;
+  }
+  const clan = normalizeGymClanDto(res.data.clan);
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: {
+      clan: clan!,
+      deduplicated: res.data.deduplicated,
+    },
+  };
+}
+
+export function leaveGymClanApi(characterId: string): Promise<ApiJsonResult<{ left: boolean }>> {
+  return apiJsonRequest<{ left: boolean }>(
+    '/api/social/clans/leave-gym',
+    {
+      method: 'POST',
+      body: JSON.stringify({ characterId }),
+    },
+    'Failed to leave gym clan'
+  );
+}
+
+export async function fetchCompaniesApi(): Promise<ApiJsonResult<{ companies: SocialCompanyDto[] }>> {
+  const res = await apiJsonRequest<{ companies: any[] }>(
+    '/api/social/companies',
+    { method: 'GET' },
+    'Failed to fetch adventurer companies'
+  );
+  if (!res.ok || !res.data) return res as ApiJsonResult<{ companies: SocialCompanyDto[] }>;
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: {
+      companies: (res.data.companies ?? []).map(normalizeCompanyDto),
+    },
+  };
+}
+
+export async function fetchCompanyDetailApi(
+  companyId: string
+): Promise<ApiJsonResult<{ company: SocialCompanyDto }>> {
+  const res = await apiJsonRequest<{ company: any }>(
+    `/api/social/companies/${encodeURIComponent(companyId)}`,
+    { method: 'GET' },
+    'Failed to fetch company details'
+  );
+  if (!res.ok || !res.data) return res as ApiJsonResult<{ company: SocialCompanyDto }>;
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: { company: normalizeCompanyDto(res.data.company) },
+  };
+}
+
+export async function createCompanyApi(payload: {
+  characterId: string;
+  name: string;
+  tag: string;
+  motto?: string;
+  description?: string;
+}): Promise<ApiJsonResult<{ company: SocialCompanyDto }>> {
+  const res = await apiJsonRequest<{ company: any }>(
+    '/api/social/companies',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    'Failed to create adventurer company'
+  );
+  if (!res.ok || !res.data) return res as ApiJsonResult<{ company: SocialCompanyDto }>;
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: { company: normalizeCompanyDto(res.data.company) },
+  };
+}
+
+export async function joinCompanyApi(
+  companyId: string,
+  characterId: string
+): Promise<ApiJsonResult<{ company: SocialCompanyDto }>> {
+  const res = await apiJsonRequest<any>(
+    `/api/social/companies/${encodeURIComponent(companyId)}/join`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ characterId }),
+    },
+    'Failed to join adventurer company'
+  );
+  if (!res.ok || !res.data) return res;
+  if (res.data.company) {
+    return {
+      ok: true,
+      statusCode: res.statusCode,
+      data: { company: normalizeCompanyDto(res.data.company) },
+    };
+  }
+  return fetchCompanyDetailApi(companyId);
+}
+
+export function leaveCompanyApi(
+  companyId: string,
+  characterId: string
+): Promise<ApiJsonResult<{ left: boolean }>> {
+  return apiJsonRequest<{ left: boolean }>(
+    `/api/social/companies/${encodeURIComponent(companyId)}/leave`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ characterId }),
+    },
+    'Failed to leave adventurer company'
+  );
+}
+
+export async function updateCompanySquadApi(
+  companyId: string,
+  payload: {
+    actorCharacterId: string;
+    assignments: Array<{ characterId: string; squadSlot: number }>;
+  }
+): Promise<ApiJsonResult<{ company: SocialCompanyDto }>> {
+  const res = await apiJsonRequest<any>(
+    `/api/social/companies/${encodeURIComponent(companyId)}/squad`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+    'Failed to update active squad'
+  );
+  if (!res.ok || !res.data) return res;
+  if (res.data.company) {
+    return {
+      ok: true,
+      statusCode: res.statusCode,
+      data: { company: normalizeCompanyDto(res.data.company) },
+    };
+  }
+  return fetchCompanyDetailApi(companyId);
+}
+
+export async function fetchFriendsApi(
+  currentUserId?: string
+): Promise<ApiJsonResult<SocialFriendsOverviewDto>> {
+  const res = await apiJsonRequest<any>(
+    '/api/social/friends',
+    { method: 'GET' },
+    'Failed to load friends'
+  );
+  if (!res.ok || !res.data) return res;
+  const raw = res.data;
+  if (Array.isArray(raw.accepted) && Array.isArray(raw.incoming)) {
+    return res as ApiJsonResult<SocialFriendsOverviewDto>;
+  }
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: {
+      accepted: (raw.friends ?? []).map((r: any) => normalizeFriendRow(r, currentUserId)),
+      incoming: (raw.incomingRequests ?? []).map((r: any) =>
+        normalizeFriendRow(r, currentUserId, 'INCOMING')
+      ),
+      outgoing: (raw.outgoingRequests ?? []).map((r: any) =>
+        normalizeFriendRow(r, currentUserId, 'OUTGOING')
+      ),
+    },
+  };
+}
+
+export async function sendFriendRequestApi(payload: {
+  targetUsername?: string;
+  targetCharacterName?: string;
+}): Promise<ApiJsonResult<{ friendship: SocialFriendItemDto }>> {
+  const res = await apiJsonRequest<{ friendship: any }>(
+    '/api/social/friends/request',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    'Failed to send friend request'
+  );
+  if (!res.ok || !res.data) {
+    return res as ApiJsonResult<{ friendship: SocialFriendItemDto }>;
+  }
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: {
+      friendship: normalizeFriendRow(res.data.friendship, undefined, 'OUTGOING'),
+    },
+  };
+}
+
+export function respondFriendRequestApi(
+  friendshipId: string,
+  action: 'ACCEPT' | 'DECLINE'
+): Promise<ApiJsonResult<{ friendship: SocialFriendItemDto }>> {
+  return apiJsonRequest<{ friendship: SocialFriendItemDto }>(
+    `/api/social/friends/${encodeURIComponent(friendshipId)}/respond`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    },
+    'Failed to respond to friend request'
+  );
+}
+
+export function removeFriendApi(
+  friendshipId: string
+): Promise<ApiJsonResult<{ removed: boolean }>> {
+  return apiJsonRequest<{ removed: boolean }>(
+    `/api/social/friends/${encodeURIComponent(friendshipId)}`,
+    { method: 'DELETE' },
+    'Failed to remove friend'
+  );
+}
+
+export async function fetchSocialLeaderboardsApi(
+  category: SocialLeaderboardCategory,
+  seasonKey?: string
+): Promise<
+  ApiJsonResult<{
+    category: SocialLeaderboardCategory;
+    seasonKey: string;
+    entries: SocialLeaderboardEntryDto[];
+  }>
+> {
+  const qs = new URLSearchParams({ category });
+  if (seasonKey && seasonKey.trim().length > 0) {
+    qs.set('seasonKey', seasonKey.trim());
+  }
+  const res = await apiJsonRequest<{
+    category: SocialLeaderboardCategory;
+    seasonKey: string;
+    entries: any[];
+  }>(
+    `/api/social/leaderboards?${qs.toString()}`,
+    { method: 'GET' },
+    'Failed to fetch social leaderboards'
+  );
+  if (!res.ok || !res.data) return res as any;
+
+  const entries: SocialLeaderboardEntryDto[] = (res.data.entries ?? []).map((row: any, idx: number) => {
+    if (typeof row.totalPoints === 'number' && typeof row.rank === 'number') {
+      return row as SocialLeaderboardEntryDto;
+    }
+    if (category === 'GYM_CLANS') {
+      const clan = row.gymClan ?? row;
+      return {
+        rank: idx + 1,
+        id: clan.id ?? row.gymClanId ?? row.id,
+        name: clan.name ?? 'Gym Clan',
+        tag: clan.tag ?? null,
+        subtitle: clan.city ? `${clan.city} • ${clan._count?.members ?? 0} members` : `${clan._count?.members ?? 0} members`,
+        workoutPoints: row.workoutPoints ?? 0,
+        raidPoints: row.raidPoints ?? 0,
+        arenaPoints: row.arenaPoints ?? 0,
+        totalPoints: row.totalSeasonPoints ?? 0,
+      };
+    }
+    if (category === 'COMPANIES') {
+      return {
+        rank: idx + 1,
+        id: row.id,
+        name: row.name ?? 'Company',
+        tag: row.tag ?? null,
+        subtitle: `${row._count?.members ?? 0}/30 Roster • Lv.${row.companyLevel ?? 1}`,
+        workoutPoints: Math.round((row.companyReputation ?? 0) * 0.5),
+        raidPoints: Math.round((row.companyReputation ?? 0) * 0.35),
+        arenaPoints: Math.round((row.companyReputation ?? 0) * 0.15),
+        totalPoints: row.companyReputation ?? 0,
+      };
+    }
+    if (category === 'ARENA') {
+      const wins = row.arenaWins ?? 0;
+      const losses = row.arenaLosses ?? 0;
+      return {
+        rank: idx + 1,
+        id: row.id,
+        name: row.name ?? 'Hero',
+        tag: `Lv.${row.overallLevel ?? 1}`,
+        subtitle: `${wins}W - ${losses}L`,
+        workoutPoints: 0,
+        raidPoints: 0,
+        arenaPoints: row.arenaRating ?? 1000,
+        totalPoints: row.arenaRating ?? 1000,
+        wins,
+        losses,
+      };
+    }
+    return {
+      rank: idx + 1,
+      id: row.id,
+      name: row.name ?? 'Hero',
+      tag: row.adventurerRank ?? null,
+      subtitle: `Lv.${row.overallLevel ?? 1} Adventurer`,
+      workoutPoints: (row.overallLevel ?? 1) * 50,
+      raidPoints: row.adventurerReputation ?? 0,
+      arenaPoints: row.arenaRating ?? 1000,
+      totalPoints: (row.overallLevel ?? 1) * 50 + (row.adventurerReputation ?? 0),
+    };
+  });
+
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: {
+      category: res.data.category,
+      seasonKey: res.data.seasonKey,
+      entries,
+    },
+  };
+}
+
+export async function fetchArenaOpponentsApi(
+  characterId?: string
+): Promise<ApiJsonResult<{ opponents: ArenaOpponentDto[] }>> {
+  const qs = characterId ? `?characterId=${encodeURIComponent(characterId)}` : '';
+  const res = await apiJsonRequest<{ opponents: any[]; rivalPresets?: any[] }>(
+    `/api/social/arena/opponents${qs}`,
+    { method: 'GET' },
+    'Failed to fetch arena opponents'
+  );
+  if (!res.ok || !res.data) return res as ApiJsonResult<{ opponents: ArenaOpponentDto[] }>;
+
+  const realOpponents: ArenaOpponentDto[] = (res.data.opponents ?? []).map((o: any) => ({
+    characterId: o.characterId ?? o.id,
+    name: o.name,
+    title: o.adventurerRank ? `${o.adventurerRank} Rank` : undefined,
+    overallLevel: o.overallLevel ?? 1,
+    race: o.race,
+    gymClanName: o.gymClanName ?? null,
+    arenaRating: o.arenaRating ?? 1000,
+    isNpcRival: Boolean(o.isNpcRival),
+    isFriend: Boolean(o.isFriend),
+  }));
+
+  const rivalOpponents: ArenaOpponentDto[] = (res.data.rivalPresets ?? []).map((r: any) => ({
+    characterId: r.characterId ?? r.slug,
+    name: r.name,
+    title: r.title,
+    overallLevel: r.overallLevel ?? 1,
+    race: r.race,
+    gymClanName: r.gymClanName ?? null,
+    arenaRating: r.arenaRating ?? 1000,
+    isNpcRival: true,
+  }));
+
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: {
+      opponents: [...realOpponents, ...rivalOpponents],
+    },
+  };
+}
+
+export async function sparArenaApi(payload: {
+  challengerCharacterId: string;
+  defenderCharacterId: string;
+  includeSquad?: boolean;
+}): Promise<ApiJsonResult<{ match: ArenaMatchSummaryDto }>> {
+  const res = await apiJsonRequest<{
+    match: any;
+    simulation?: any;
+    combatLog?: TurnBasedCombatEvent[];
+  }>(
+    '/api/social/arena/spar',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    'Failed to run arena spar'
+  );
+  if (!res.ok || !res.data) return res as ApiJsonResult<{ match: ArenaMatchSummaryDto }>;
+
+  const rawMatch = res.data.match;
+  const sim = res.data.simulation;
+  if (rawMatch?.nextChallengerRating !== undefined && rawMatch?.matchId) {
+    return { ok: true, statusCode: res.statusCode, data: { match: rawMatch } };
+  }
+
+  const normalized: ArenaMatchSummaryDto = {
+    matchId: rawMatch?.id ?? sim?.matchId ?? `arena_${Date.now()}`,
+    outcome: sim?.outcome ?? rawMatch?.outcome ?? 'CHALLENGER_VICTORY',
+    winnerCharacterId:
+      sim?.winnerCharacterId ?? rawMatch?.winnerCharacterId ?? payload.challengerCharacterId,
+    loserCharacterId:
+      sim?.loserCharacterId ?? payload.defenderCharacterId,
+    defenderName: rawMatch?.defenderName ?? 'Opponent',
+    totalTurns: sim?.totalTurns ?? rawMatch?.totalTurns ?? 1,
+    challengerRemainingHp:
+      sim?.challengerRemainingHp ?? rawMatch?.combatSummary?.challengerRemainingHp ?? 0,
+    defenderRemainingHp:
+      sim?.defenderRemainingHp ?? rawMatch?.combatSummary?.defenderRemainingHp ?? 0,
+    challengerDamageDealt:
+      sim?.challengerDamageDealt ?? rawMatch?.challengerDamageDealt ?? 0,
+    defenderDamageDealt:
+      sim?.defenderDamageDealt ?? rawMatch?.defenderDamageDealt ?? 0,
+    challengerRatingDelta:
+      sim?.challengerRatingDelta ??
+      ((rawMatch?.challengerRatingAfter ?? 1000) - (rawMatch?.challengerRatingBefore ?? 1000)),
+    nextChallengerRating:
+      sim?.nextChallengerRating ?? rawMatch?.challengerRatingAfter ?? 1000,
+    goldAwarded: sim?.goldAwarded ?? rawMatch?.goldAwarded ?? 0,
+    seasonPointsAwarded:
+      sim?.seasonPointsAwarded ?? rawMatch?.seasonPointsAwarded ?? 0,
+    combatLog:
+      sim?.combatLog ?? res.data.combatLog ?? rawMatch?.combatSummary?.combatLog ?? [],
+    createdAt: rawMatch?.createdAt,
+  };
+
+  return {
+    ok: true,
+    statusCode: res.statusCode,
+    data: { match: normalized },
+  };
 }

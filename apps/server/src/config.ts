@@ -21,6 +21,9 @@ const envSchema = z.object({
   APP_RELEASE_NOTES: z
     .string()
     .default('Performance improvements, bug fixes, and new RPG content.'),
+  OSM_OVERPASS_URL: z.string().default('https://overpass-api.de/api/interpreter'),
+  GOOGLE_PLACES_API_KEY: z.string().optional(),
+  MAPBOX_ACCESS_TOKEN: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;
