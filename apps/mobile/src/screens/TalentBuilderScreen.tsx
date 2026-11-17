@@ -24,6 +24,7 @@ import {
   STAT_GLYPH_SVGS,
 } from '../assets/v0Vault';
 import { RpgIcon } from '../components/icons/RpgIcon';
+import { CombatLoadoutSelector } from '../components/character';
 import { COLORS, CRIMSON_ONI, SURFACES } from '../theme';
 
 export interface TalentBuilderScreenProps {
@@ -361,6 +362,8 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
           </Pressable>
         </View>
       )}
+
+      <CombatLoadoutSelector compact />
 
       {/* 2. Archetype Sub-Tabs & Active Tree Header */}
       <View style={styles.treeSectionHeader}>

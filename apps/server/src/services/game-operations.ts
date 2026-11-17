@@ -1,5 +1,7 @@
 import { PrismaClient } from '@goki/database';
 import {
+  CharacterCustomizationConfig,
+  CharacterRace,
   CombatantCharacterInput,
   DungeonDefinition,
   DungeonRoomDefinition,
@@ -512,10 +514,16 @@ export async function completeGatheringTaskOperation(
  * Builds a `CombatantCharacterInput` snapshot from a Character's live DB core stats, equipped gear,
  * unlocked talent nodes, and current Systemic Fatigue state.
  */
+export interface CharacterCombatSnapshot extends CombatantCharacterInput {
+  race: CharacterRace;
+  appearanceId: string;
+  customizationConfig?: CharacterCustomizationConfig;
+}
+
 export async function buildCharacterCombatSnapshot(
   db: PrismaClient,
   characterId: string
-): Promise<CombatantCharacterInput> {
+): Promise<CharacterCombatSnapshot> {
   const character = await db.character.findUnique({
     where: { id: characterId },
     include: {
@@ -603,7 +611,16 @@ export async function buildCharacterCombatSnapshot(
       strengthLevel: character.stats.strengthLevel,
       enduranceLevel: character.stats.enduranceLevel,
       agilityLevel: character.stats.agilityLevel,
+      dexLevel: (character as any).dexLevel ?? 1,
+      conLevel: (character as any).conLevel ?? 1,
+      wisLevel: (character as any).wisLevel ?? 1,
+      sprLevel: (character as any).sprLevel ?? 1,
     },
+    race: ((character as any).race as CharacterRace | undefined) ?? 'HUMAN',
+    appearanceId: character.appearanceId,
+    customizationConfig:
+      ((character as any).customizationConfig as CharacterCustomizationConfig | undefined) ??
+      undefined,
     equipmentBonuses,
     unlockedTalentRanks,
     systemicFatigueStacks,

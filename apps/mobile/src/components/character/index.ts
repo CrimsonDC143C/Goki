@@ -51,3 +51,8 @@ export {
   type ResolvedEquippedProfiles,
   type MaterialPalette,
 } from './EquipmentPartSvg';
+
+export {
+  CombatLoadoutSelector,
+  type CombatLoadoutSelectorProps,
+} from './CombatLoadoutSelector';

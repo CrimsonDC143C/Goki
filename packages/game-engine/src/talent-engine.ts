@@ -57,6 +57,9 @@ export interface ActiveTalentSkillDefinition {
   name: string;
   cooldownSeconds: number;
   staminaCost: number;
+  resourceType?: 'STAMINA' | 'MANA';
+  manaCost?: number;
+  cooldownTurns?: number;
   targetType: 'SINGLE_ENEMY' | 'CLEAVE_ENEMIES' | 'PARTY_HEAL';
   damageMultiplier: number;
   hitCount?: number;
@@ -1273,6 +1276,9 @@ export const DEFAULT_TALENT_TREES: readonly TalentTreeDefinition[] = [
           name: 'Divine Light',
           cooldownSeconds: 12,
           staminaCost: 20,
+          resourceType: 'MANA',
+          manaCost: 20,
+          cooldownTurns: 4,
           targetType: 'PARTY_HEAL',
           damageMultiplier: 0,
           healMaxHpPct: 0.25,
@@ -1460,6 +1466,9 @@ export const DEFAULT_TALENT_TREES: readonly TalentTreeDefinition[] = [
           name: 'Arcane Nova',
           cooldownSeconds: 10,
           staminaCost: 25,
+          resourceType: 'MANA',
+          manaCost: 25,
+          cooldownTurns: 3,
           targetType: 'CLEAVE_ENEMIES',
           damageMultiplier: 2.2,
           maxTargets: 5,

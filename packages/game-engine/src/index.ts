@@ -18,3 +18,4 @@ export * from './intra-workout-ergonomics';
 export * from './strengthlog-exercise-catalog';
 export * from './item-affix-engine';
 export * from './character-customization';
+export * from './turn-based-combat';

@@ -31,7 +31,7 @@ These core decisions guide every milestone below:
 | :--- | :--- | :--- |
 | **M1** | Design System, 5-Tab Shell, & Workout Canvas Cleanup | `[x]` Complete |
 | **M2** | Modular 2D Bone-Rigged Character & Morphable Gear Engine | `[x]` Complete |
-| **M3** | Live Turn-Based Combat & Adventurer's Guild Hub | `[ ]` Planned |
+| **M3** | Live Turn-Based Combat & Adventurer's Guild Hub | `[x]` Complete |
 | **M4** | Artisan Economy, NPC Cast, & Fitness Coaching | `[ ]` Planned |
 | **M5** | Social Hub, Real-World Gym Clans, & Adventurer Companies | `[ ]` Planned |
 | **M6** | Full RPG Illustration Polish & Real-Time Co-op Readiness | `[ ]` Planned |
@@ -79,24 +79,24 @@ These core decisions guide every milestone below:
 ---
 
 ## Milestone 3: Live Turn-Based Combat & Adventurer's Guild Hub
-**Status:** `[ ]` Planned  
+**Status:** `[x]` Complete  
 **Goal:** Introduce interactive turn-based dungeons and rank-gated quests hosted at the **Adventurer's Guild** so players actively fight with their built heroes and equipped Talent Skills.
 
 ### Actionable Steps
-- [ ] **Pure Deterministic Turn-Based Engine (`@goki/game-engine`):**
-  - [ ] Implement `createTurnBasedEncounter` and `stepTurnBasedCombat(state, action, rng)` as a pure deterministic FSM (explicitly structured to support future server-authoritative WebSocket co-op).
-  - [ ] Implement `AGI`-based turn-order timeline, Stamina (`END`) & Mana/Resolve (`WIS`/`SPR`) resource pools, `Basic Attack`, `Guard/Parry`, `Belt Consumable`, and `3–4` equipped Active Skills from `talent-engine.ts`.
-  - [ ] Implement enemy intent telegraphs, status effects, wave progression, and AI companion behavior for Adventurer Company allies.
-- [ ] **Active Skill & Belt Loadout (`@goki/game-engine`, `schema.prisma`, `Hero` tab):**
-  - [ ] Persist up to 4 equipped Talent Active Skills and belt potion slots per character.
-  - [ ] Add Loadout Bar selector UI under `Hero` / pre-quest staging.
-- [ ] **Adventurer's Guild & Live Quest Routes (`packages/database`, `apps/server`):**
-  - [ ] Separate rank-gated Live Quests and Rank-Up Trials into the Adventurer's Guild catalog (`Adventure` tab), keeping 24-hour Expeditions in a dedicated Passive Expeditions sub-view.
-  - [ ] Add server endpoints to start, checkpoint, and verify/claim rewards for live turn-based runs (with offline local play + deferred sync support).
-- [ ] **Interactive Turn-Based Arena UI (`apps/mobile`):**
-  - [ ] Render bone-rigged hero (+ optional AI squad) vs. enemy waves with turn-order bar, target selection, enemy intent icons, skill hotbar, and animated floating damage/status popups.
-  - [ ] Integrate **Guild Receptionist NPC** pop-up dialogue for quest briefing, rank trials, and victory debriefs.
-- [ ] **Verification:** Comprehensive `@goki/game-engine` combat state-machine tests, server quest completion tests, and E2E live encounter run.
+- [x] **Pure Deterministic Turn-Based Engine (`@goki/game-engine`):**
+  - [x] Implement `createTurnBasedEncounter` and `stepTurnBasedCombat(state, action, rng)` as a pure deterministic FSM (explicitly structured to support future server-authoritative WebSocket co-op).
+  - [x] Implement `AGI`-based turn-order timeline, Stamina (`END`) & Mana/Resolve (`WIS`/`SPR`) resource pools, `Basic Attack`, `Guard/Parry`, `Belt Consumable`, and `3–4` equipped Active Skills from `talent-engine.ts`.
+  - [x] Implement enemy intent telegraphs, status effects, wave progression, and AI companion behavior for Adventurer Company allies.
+- [x] **Active Skill & Belt Loadout (`@goki/game-engine`, `schema.prisma`, `Hero` tab):**
+  - [x] Persist up to 4 equipped Talent Active Skills and belt potion slots per character.
+  - [x] Add Loadout Bar selector UI under `Hero` / pre-quest staging.
+- [x] **Adventurer's Guild & Live Quest Routes (`packages/database`, `apps/server`):**
+  - [x] Separate rank-gated Live Quests and Rank-Up Trials into the Adventurer's Guild catalog (`Adventure` tab), keeping 24-hour Expeditions in a dedicated Passive Expeditions sub-view.
+  - [x] Add server endpoints to start, checkpoint, and verify/claim rewards for live turn-based runs (with offline local play + deferred sync support).
+- [x] **Interactive Turn-Based Arena UI (`apps/mobile`):**
+  - [x] Render bone-rigged hero (+ optional AI squad) vs. enemy waves with turn-order bar, target selection, enemy intent icons, skill hotbar, and animated floating damage/status popups.
+  - [x] Integrate **Guild Receptionist NPC** pop-up dialogue for quest briefing, rank trials, and victory debriefs.
+- [x] **Verification:** Comprehensive `@goki/game-engine` combat state-machine tests, server quest completion tests, and E2E live encounter run.
 
 ---
 

@@ -15,7 +15,19 @@ import {
   ExerciseGymPreferenceMap,
   WarmupPresetCount,
   WeightUnit,
+  TurnBasedCombatAction,
 } from '@goki/game-engine';
+
+export interface QueuedOfflineGuildQuestRun {
+  clientRunId: string;
+  characterId?: string | null;
+  questSlug: string;
+  randomSeed: string;
+  companionIds: string[];
+  actions: TurnBasedCombatAction[];
+  beltSnapshot: Array<{ itemSlug: string | null; charges: number }>;
+  completedAt: string;
+}
 
 export interface OfflineDraftSetRow {
   id: string;
@@ -91,6 +103,9 @@ export interface PersistedCharacterProfile {
   equipmentLoadout?: Record<string, any>;
   workoutsLoggedCount?: number;
   completedBountySlugs?: string[];
+  activeSkillLoadout?: string[];
+  beltLoadout?: Array<string | null>;
+  completedGuildQuestSlugs?: string[];
   consistencyStreak?: number;
   historicalPRs?: Record<string, any>;
   lastSyncedAtMs?: number;
@@ -101,6 +116,7 @@ export interface PersistedOfflineBundle {
   queuedOfflineWorkouts: QueuedOfflineWorkoutPayload[];
   unsyncedServerPayloads: QueuedOfflineWorkoutPayload[];
   pendingWorkoutReceipts: WorkoutSpoilsReceipt[];
+  queuedOfflineGuildRuns?: QueuedOfflineGuildQuestRun[];
   customPresets: WorkoutPresetDefinition[];
   characterProfile?: PersistedCharacterProfile | null;
   availableCharacters?: PersistedCharacterProfile[];
@@ -130,6 +146,7 @@ let memoryFallbackBundle: PersistedOfflineBundle = {
   queuedOfflineWorkouts: [],
   unsyncedServerPayloads: [],
   pendingWorkoutReceipts: [],
+  queuedOfflineGuildRuns: [],
   customPresets: [],
   characterProfile: null,
   availableCharacters: [],
@@ -201,6 +218,7 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
       queuedOfflineWorkouts: [],
       unsyncedServerPayloads: [],
       pendingWorkoutReceipts: [],
+      queuedOfflineGuildRuns: [],
       customPresets: [],
       characterProfile: null,
       availableCharacters: [],
@@ -230,6 +248,9 @@ function sanitizeBundle(raw: unknown): PersistedOfflineBundle {
       : [],
     pendingWorkoutReceipts: Array.isArray(obj.pendingWorkoutReceipts)
       ? obj.pendingWorkoutReceipts
+      : [],
+    queuedOfflineGuildRuns: Array.isArray(obj.queuedOfflineGuildRuns)
+      ? obj.queuedOfflineGuildRuns
       : [],
     customPresets: Array.isArray(obj.customPresets) ? obj.customPresets : [],
     characterProfile:

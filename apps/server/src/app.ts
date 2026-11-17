@@ -8,6 +8,7 @@ import { env, serializeBigInts } from './config';
 import { requireAuth } from './middleware/auth';
 import { GameTimerScheduler, createNoopTimerScheduler } from './queues/bullmq-workers';
 import { registerAuthRoutes } from './routes/auth';
+import { registerAdventurersGuildRoutes } from './routes/adventurers-guild';
 import { registerCharacterRoutes } from './routes/characters';
 import { registerDiagnosticsRoutes, forwardWebhookAlert } from './routes/diagnostics';
 import { registerDungeonRoutes } from './routes/dungeons';
@@ -123,6 +124,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
   registerTalentRoutes(app, options.db);
   registerGatheringRoutes(app, options.db, timers);
   registerDungeonRoutes(app, options.db, timers, wsManager);
+  registerAdventurersGuildRoutes(app, options.db);
   registerGuildAndRaidRoutes(app, options.db, timers, wsManager);
 
   return app;

@@ -122,6 +122,19 @@ import {
   deriveCustomizationFromLegacyAppearance,
   normalizeCustomizationConfig,
   validateCustomizationConfig,
+  ADVENTURER_COMPANY_AI_PRESETS,
+  COMBAT_CONSUMABLE_BY_SLUG,
+  COMBAT_CONSUMABLE_CATALOG,
+  DEFAULT_GUILD_QUEST_CATALOG,
+  GuildQuestDefinition,
+  TurnBasedCombatAction,
+  TurnBasedCombatState,
+  TurnBasedPartyMemberInput,
+  createTurnBasedEncounter,
+  isGuildQuestUnlockedForRank,
+  sanitizeActiveSkillLoadout,
+  sanitizeBeltLoadout,
+  validateCombatLoadout,
 } from '@goki/game-engine';
 import {
   OfflineDraftCardioItem,
@@ -129,6 +142,7 @@ import {
   OfflineWorkoutDraft,
   PersistedCharacterProfile,
   PersistedOfflineBundle,
+  QueuedOfflineGuildQuestRun,
   createDefaultOfflineDraft,
   getMergedPresets,
   loadPersistedOfflineBundle,
@@ -168,6 +182,13 @@ import {
   resolveApiBaseUrl,
   gokiWebSocket,
 } from '../api';
+import {
+  completeGuildQuestRunApi,
+  fetchAdventurersGuildQuestsApi,
+  saveCharacterCombatLoadoutApi,
+  startGuildQuestRunApi,
+  syncOfflineGuildQuestRunsApi,
+} from '../api/apiClient';
 import { WearableTelemetrySource } from '../services/wearableTelemetry';
 
 export type GameLocation =
@@ -565,6 +586,47 @@ interface GameContextValue {
   setDefaultWeightUnit: (unit: WeightUnit) => void;
   warmupPresetCount: WarmupPresetCount;
   setWarmupPresetCount: (count: WarmupPresetCount) => void;
+
+  // Milestone 3: Combat Loadout, Adventurer's Guild Quests & Turn-Based Arena
+  activeSkillLoadout: string[];
+  beltLoadout: Array<string | null>;
+  equipActiveSkillSlot: (
+    slotIndex: number,
+    skillId: string | null
+  ) => Promise<{ ok: boolean; error?: string }>;
+  equipBeltConsumableSlot: (
+    slotIndex: number,
+    itemSlug: string | null
+  ) => Promise<{ ok: boolean; error?: string }>;
+  guildQuests: readonly GuildQuestDefinition[];
+  completedGuildQuestSlugs: string[];
+  queuedOfflineGuildRuns: QueuedOfflineGuildQuestRun[];
+  claimGuildFieldRations: () => { granted: number; message: string };
+  startGuildQuestEncounter: (
+    questSlug: string,
+    companionIds?: string[]
+  ) => {
+    ok: boolean;
+    error?: string;
+    state?: TurnBasedCombatState;
+    quest?: GuildQuestDefinition;
+    serverRunId?: string | null;
+  };
+  completeGuildQuestEncounter: (params: {
+    finalState: TurnBasedCombatState;
+    companionIds: string[];
+    serverRunId?: string | null;
+  }) => Promise<{
+    ok: boolean;
+    syncedOnline: boolean;
+    queuedOffline: boolean;
+    goldAwarded: number;
+    reputationAwarded: number;
+    drops: LootDrop[];
+    promotedToRank: AdventurerRank | null;
+    error?: string;
+  }>;
+  syncOfflineGuildRuns: () => Promise<void>;
 }
 
 const STARTER_EXERCISES: ExerciseCatalogItem[] = [
@@ -623,9 +685,17 @@ const KNOWN_ITEM_METADATA: Record<
     | 'statBonuses'
   >
 > = {
+  sunleaf_healing_draught: {
+    itemType: 'CONSUMABLE',
+    description: 'Restores 35% of Max HP in tactical combat.',
+  },
+  astral_mana_tonic: {
+    itemType: 'CONSUMABLE',
+    description: 'Restores 40 Mana to fuel spellcraft and healing skills.',
+  },
   vitality_elixir: {
     itemType: 'CONSUMABLE',
-    description: 'Restorative alchemical draught brewed from Sunleaf herbs (+25 Stamina).',
+    description: 'Restorative alchemical draught brewed from Sunleaf herbs (+40 Stamina, +15% HP).',
     statBonuses: { maxStamina: 25 },
   },
   tempered_whetstone: {
@@ -1294,6 +1364,29 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   equipmentLoadoutRef.current = equipmentLoadout;
   const unlockedTalentRanksRef = useRef(unlockedTalentRanks);
   unlockedTalentRanksRef.current = unlockedTalentRanks;
+
+  const [activeSkillLoadout, setActiveSkillLoadout] = useState<string[]>([]);
+  const activeSkillLoadoutRef = useRef<string[]>(activeSkillLoadout);
+  activeSkillLoadoutRef.current = activeSkillLoadout;
+  const [beltLoadout, setBeltLoadout] = useState<Array<string | null>>([null, null, null, null]);
+  const beltLoadoutRef = useRef<Array<string | null>>(beltLoadout);
+  beltLoadoutRef.current = beltLoadout;
+  const [guildQuests, setGuildQuests] = useState<readonly GuildQuestDefinition[]>(
+    DEFAULT_GUILD_QUEST_CATALOG
+  );
+  const guildQuestsRef = useRef<readonly GuildQuestDefinition[]>(guildQuests);
+  guildQuestsRef.current = guildQuests;
+  const [completedGuildQuestSlugs, setCompletedGuildQuestSlugs] = useState<string[]>([]);
+  const completedGuildQuestSlugsRef = useRef<string[]>(completedGuildQuestSlugs);
+  completedGuildQuestSlugsRef.current = completedGuildQuestSlugs;
+  const [queuedOfflineGuildRuns, setQueuedOfflineGuildRuns] = useState<
+    QueuedOfflineGuildQuestRun[]
+  >([]);
+  const queuedOfflineGuildRunsRef = useRef<QueuedOfflineGuildQuestRun[]>(queuedOfflineGuildRuns);
+  queuedOfflineGuildRunsRef.current = queuedOfflineGuildRuns;
+  const isSyncingGuildRunsRef = useRef(false);
+  const pendingServerRunIdsRef = useRef<Record<string, string>>({});
+
   const hasExplicitlyLoggedOutRef = useRef(false);
 
   const offlineDraftRef = useRef<OfflineWorkoutDraft>(offlineDraft);
@@ -1330,6 +1423,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         partial.unsyncedServerPayloads ?? unsyncedServerRef.current,
       pendingWorkoutReceipts:
         partial.pendingWorkoutReceipts ?? pendingReceiptsRef.current,
+      queuedOfflineGuildRuns:
+        partial.queuedOfflineGuildRuns ?? queuedOfflineGuildRunsRef.current,
       customPresets:
         partial.customPresets ?? customPresetsRef.current,
       customExercises:
@@ -1531,6 +1626,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         pendingReceiptsRef.current = loaded.pendingWorkoutReceipts;
         setPendingWorkoutReceipts(loaded.pendingWorkoutReceipts);
       }
+      if (Array.isArray(loaded.queuedOfflineGuildRuns) && loaded.queuedOfflineGuildRuns.length > 0) {
+        queuedOfflineGuildRunsRef.current = loaded.queuedOfflineGuildRuns;
+        setQueuedOfflineGuildRuns(loaded.queuedOfflineGuildRuns);
+      }
       if (loaded.customPresets && loaded.customPresets.length > 0) {
         customPresetsRef.current = loaded.customPresets;
         setCustomPresets(loaded.customPresets);
@@ -1628,6 +1727,20 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const hydratedTalents = cp.unlockedTalentRanks && typeof cp.unlockedTalentRanks === 'object' ? cp.unlockedTalentRanks : {};
         unlockedTalentRanksRef.current = hydratedTalents;
         setUnlockedTalentRanks(hydratedTalents);
+        const hydratedActiveSkills = sanitizeActiveSkillLoadout(
+          cp.activeSkillLoadout,
+          hydratedTalents
+        );
+        activeSkillLoadoutRef.current = hydratedActiveSkills;
+        setActiveSkillLoadout(hydratedActiveSkills);
+        const hydratedBelt = sanitizeBeltLoadout(cp.beltLoadout);
+        beltLoadoutRef.current = hydratedBelt;
+        setBeltLoadout(hydratedBelt);
+        const hydratedCompletedQuests = Array.isArray(cp.completedGuildQuestSlugs)
+          ? cp.completedGuildQuestSlugs
+          : [];
+        completedGuildQuestSlugsRef.current = hydratedCompletedQuests;
+        setCompletedGuildQuestSlugs(hydratedCompletedQuests);
         const hydratedLoadout = sanitizeEquipmentLoadout(cp.equipmentLoadout) ?? { ...EMPTY_EQUIPMENT_LOADOUT };
         const validInvSlugs = new Set(hydratedInv.map((i) => i.slug));
         for (const slot of EQUIPMENT_SLOT_KEYS) {
@@ -2088,6 +2201,48 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       unlockedTalentRanksRef.current = resolvedUnlockedTalents;
       setUnlockedTalentRanks(resolvedUnlockedTalents);
 
+      const rawServerSkills =
+        fullSheet?.character?.activeSkillLoadout ??
+        fullSheet?.character?.combatLoadout?.activeSkillIds ??
+        char.activeSkillLoadout ??
+        char.combatLoadout?.activeSkillIds;
+      const resolvedActiveSkills = sanitizeActiveSkillLoadout(
+        Array.isArray(rawServerSkills) && rawServerSkills.length > 0
+          ? rawServerSkills
+          : (existingLocal?.activeSkillLoadout ?? rawServerSkills),
+        resolvedUnlockedTalents
+      );
+      activeSkillLoadoutRef.current = resolvedActiveSkills;
+      setActiveSkillLoadout(resolvedActiveSkills);
+
+      const rawServerBelt =
+        fullSheet?.character?.beltLoadout ??
+        fullSheet?.character?.combatLoadout?.beltConsumables ??
+        char.beltLoadout ??
+        char.combatLoadout?.beltConsumables;
+      const hasServerBeltItem =
+        Array.isArray(rawServerBelt) && rawServerBelt.some((v) => typeof v === 'string' && v.length > 0);
+      const resolvedBeltLoadout = sanitizeBeltLoadout(
+        hasServerBeltItem
+          ? rawServerBelt
+          : (existingLocal?.beltLoadout ?? rawServerBelt)
+      );
+      beltLoadoutRef.current = resolvedBeltLoadout;
+      setBeltLoadout(resolvedBeltLoadout);
+
+      const completedQuestSet = new Set<string>([
+        ...(Array.isArray(existingLocal?.completedGuildQuestSlugs)
+          ? existingLocal.completedGuildQuestSlugs
+          : []),
+        ...(Array.isArray(char.completedGuildQuestSlugs) ? char.completedGuildQuestSlugs : []),
+        ...(Array.isArray(fullSheet?.character?.completedGuildQuestSlugs)
+          ? fullSheet.character.completedGuildQuestSlugs
+          : []),
+      ]);
+      const resolvedCompletedQuests = Array.from(completedQuestSet);
+      completedGuildQuestSlugsRef.current = resolvedCompletedQuests;
+      setCompletedGuildQuestSlugs(resolvedCompletedQuests);
+
       const serverLoadout = sanitizeEquipmentLoadout(fullSheet?.character?.equipmentLoadout);
       const incomingLoadout = sanitizeEquipmentLoadout(char.equipmentLoadout);
       const localLoadout = sanitizeEquipmentLoadout(existingLocal?.equipmentLoadout);
@@ -2179,6 +2334,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         stats: nextStats,
         inventory: resolvedInventory,
         unlockedTalentRanks: resolvedUnlockedTalents,
+        activeSkillLoadout: resolvedActiveSkills,
+        beltLoadout: resolvedBeltLoadout,
+        completedGuildQuestSlugs: resolvedCompletedQuests,
         equipmentLoadout: resolvedEquipmentLoadout,
         workoutsLoggedCount: effectiveWorkoutsCount,
         completedBountySlugs: resolvedCompletedBounties,
@@ -2217,6 +2375,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setEquipmentLoadout(emptyLoadout);
     unlockedTalentRanksRef.current = {};
     setUnlockedTalentRanks({});
+    activeSkillLoadoutRef.current = [];
+    setActiveSkillLoadout([]);
+    const emptyBelt: Array<string | null> = [null, null, null, null];
+    beltLoadoutRef.current = emptyBelt;
+    setBeltLoadout(emptyBelt);
+    completedGuildQuestSlugsRef.current = [];
+    setCompletedGuildQuestSlugs([]);
     const freshStats = createLevelOneStats();
     statsRef.current = freshStats;
     setStats(freshStats);
@@ -2361,6 +2526,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           stats: resolvedCharStats,
           inventory: resolvedCharInventory,
           unlockedTalentRanks: localChar?.unlockedTalentRanks ?? c.unlockedTalentRanks ?? {},
+          activeSkillLoadout: sanitizeActiveSkillLoadout(
+            localChar?.activeSkillLoadout ?? c.activeSkillLoadout ?? c.combatLoadout?.activeSkillIds,
+            localChar?.unlockedTalentRanks ?? c.unlockedTalentRanks ?? {}
+          ),
+          beltLoadout: sanitizeBeltLoadout(
+            localChar?.beltLoadout ?? c.beltLoadout ?? c.combatLoadout?.beltConsumables
+          ),
+          completedGuildQuestSlugs: Array.from(
+            new Set([
+              ...(Array.isArray(localChar?.completedGuildQuestSlugs)
+                ? localChar.completedGuildQuestSlugs
+                : []),
+              ...(Array.isArray(c.completedGuildQuestSlugs) ? c.completedGuildQuestSlugs : []),
+            ])
+          ),
           equipmentLoadout: resolvedCharLoadout,
           workoutsLoggedCount: resolvedWorkoutCount,
           completedBountySlugs: Array.from(completedBountySet),
@@ -2580,6 +2760,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
               consistencyStreak: 0,
               historicalPRs: {},
               unlockedTalentRanks: {},
+              activeSkillLoadout: [],
+              beltLoadout: [null, null, null, null],
+              completedGuildQuestSlugs: [],
             };
             activeCharacterIdRef.current = newChar.id;
             const nextList = [...availableCharactersRef.current, newChar];
@@ -2615,6 +2798,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         inventory: [],
         equipmentLoadout: { ...EMPTY_EQUIPMENT_LOADOUT },
         unlockedTalentRanks: {},
+        activeSkillLoadout: [],
+        beltLoadout: [null, null, null, null],
+        completedGuildQuestSlugs: [],
         workoutsLoggedCount: 0,
         completedBountySlugs: [],
         consistencyStreak: 0,
@@ -3287,7 +3473,15 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const prev = rawInventoryRef.current;
       const next = [...prev];
       for (const d of drops) {
-        const meta = KNOWN_ITEM_METADATA[d.itemSlug];
+        const consumableMeta = COMBAT_CONSUMABLE_BY_SLUG[d.itemSlug];
+        const meta = KNOWN_ITEM_METADATA[d.itemSlug] ?? (
+          consumableMeta
+            ? {
+                itemType: 'CONSUMABLE' as const,
+                description: consumableMeta.description,
+              }
+            : undefined
+        );
         const isEquippable =
           BASE_EQUIPPABLE_ITEM_BY_SLUG[d.itemSlug] !== undefined ||
           (meta?.itemType && isEquippableItemType(meta.itemType));
@@ -4159,20 +4353,88 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [addDropsToInventory, ensureRemoteCharacterBootstrapped, persistBundleSnapshot]
   );
 
+  const syncOfflineGuildRuns = useCallback(async () => {
+    if (isSyncingGuildRunsRef.current) return;
+    if (!authTokenRef.current) return;
+    const queue = queuedOfflineGuildRunsRef.current;
+    if (queue.length === 0) return;
+
+    isSyncingGuildRunsRef.current = true;
+    try {
+      const grouped = new Map<string, QueuedOfflineGuildQuestRun[]>();
+      const fallbackCharId = activeCharacterIdRef.current ?? remoteCharacterIdRef.current;
+      for (const run of queue) {
+        const targetCharId = run.characterId ?? fallbackCharId;
+        if (!targetCharId || targetCharId.startsWith('local_')) continue;
+        const list = grouped.get(targetCharId) ?? [];
+        list.push(run);
+        grouped.set(targetCharId, list);
+      }
+
+      const syncedIds = new Set<string>();
+      for (const [charId, runs] of grouped.entries()) {
+        const res = await syncOfflineGuildQuestRunsApi({
+          characterId: charId,
+          completedRuns: runs,
+        });
+        if (res.ok) {
+          setServerOnline(true);
+          for (const r of runs) {
+            syncedIds.add(r.clientRunId);
+          }
+        }
+      }
+
+      if (syncedIds.size > 0) {
+        const remaining = queuedOfflineGuildRunsRef.current.filter(
+          (r) => !syncedIds.has(r.clientRunId)
+        );
+        queuedOfflineGuildRunsRef.current = remaining;
+        setQueuedOfflineGuildRuns(remaining);
+        persistBundleSnapshot({ queuedOfflineGuildRuns: remaining });
+      }
+    } catch {
+      // Retain queued runs for next connectivity cycle
+    } finally {
+      isSyncingGuildRunsRef.current = false;
+    }
+  }, [persistBundleSnapshot]);
+
+  useEffect(() => {
+    if (!serverOnline) return;
+    void fetchAdventurersGuildQuestsApi().then((res) => {
+      if (res.ok && Array.isArray(res.data?.quests) && res.data.quests.length > 0) {
+        guildQuestsRef.current = res.data.quests;
+        setGuildQuests(res.data.quests);
+      }
+    });
+  }, [serverOnline]);
+
   // Trigger silent background sync after hydration & whenever connectivity / foreground resumes
   useEffect(() => {
     if (!offlineHydrated) return;
     if (queuedOfflineWorkouts.length > 0 || unsyncedServerPayloads.length > 0) {
       void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
     }
+    if (queuedOfflineGuildRuns.length > 0) {
+      void syncOfflineGuildRuns();
+    }
     void diagnosticLogger.flushBugReportOutbox();
-  }, [offlineHydrated, queuedOfflineWorkouts.length, unsyncedServerPayloads.length, syncOfflineWorkouts]);
+  }, [
+    offlineHydrated,
+    queuedOfflineWorkouts.length,
+    unsyncedServerPayloads.length,
+    queuedOfflineGuildRuns.length,
+    syncOfflineWorkouts,
+    syncOfflineGuildRuns,
+  ]);
 
   useEffect(() => {
     const appSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         void ensureRemoteCharacterBootstrapped();
         void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
+        void syncOfflineGuildRuns();
         void diagnosticLogger.flushBugReportOutbox();
       }
     });
@@ -4186,6 +4448,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const onOnline = () => {
         void ensureRemoteCharacterBootstrapped();
         void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
+        void syncOfflineGuildRuns();
         void diagnosticLogger.flushBugReportOutbox();
       };
       win.addEventListener?.('online', onOnline);
@@ -4196,7 +4459,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       appSub.remove();
       removeWebOnline?.();
     };
-  }, [ensureRemoteCharacterBootstrapped, syncOfflineWorkouts]);
+  }, [ensureRemoteCharacterBootstrapped, syncOfflineWorkouts, syncOfflineGuildRuns]);
 
   // Periodic background heartbeat (25s) — recovers serverOnline status, drains diagnostic outbox & syncs workouts
   useEffect(() => {
@@ -4208,9 +4471,20 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (queuedOfflineWorkouts.length > 0 || unsyncedServerPayloads.length > 0) {
         void syncOfflineWorkouts({ evaluateLocallyIfOffline: false });
       }
+      if (queuedOfflineGuildRuns.length > 0) {
+        void syncOfflineGuildRuns();
+      }
     }, 25_000);
     return () => clearInterval(timer);
-  }, [serverOnline, ensureRemoteCharacterBootstrapped, queuedOfflineWorkouts.length, unsyncedServerPayloads.length, syncOfflineWorkouts]);
+  }, [
+    serverOnline,
+    ensureRemoteCharacterBootstrapped,
+    queuedOfflineWorkouts.length,
+    unsyncedServerPayloads.length,
+    queuedOfflineGuildRuns.length,
+    syncOfflineWorkouts,
+    syncOfflineGuildRuns,
+  ]);
 
   const completeOfflineWorkout = useCallback(() => {
     const draft = offlineDraftRef.current;
@@ -4982,6 +5256,26 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unlockedTalentRanksRef.current = nextUnlocked;
         setUnlockedTalentRanks(nextUnlocked);
 
+        // Auto-add newly unlocked active skill if < 4 skills are currently equipped
+        let nextActiveSkills = activeSkillLoadoutRef.current;
+        let didAutoAddSkill = false;
+        for (const tree of DEFAULT_TALENT_TREES) {
+          const unlockedNode = tree.nodes.find((n) => n.id === nodeId);
+          if (unlockedNode?.activeSkill?.skillId) {
+            const newSkillId = unlockedNode.activeSkill.skillId;
+            if (nextActiveSkills.length < 4 && !nextActiveSkills.includes(newSkillId)) {
+              nextActiveSkills = sanitizeActiveSkillLoadout(
+                [...nextActiveSkills, newSkillId],
+                nextUnlocked
+              );
+              activeSkillLoadoutRef.current = nextActiveSkills;
+              setActiveSkillLoadout(nextActiveSkills);
+              didAutoAddSkill = true;
+            }
+            break;
+          }
+        }
+
         const nextStats = {
           ...currentStats,
           [res.governingStat]: {
@@ -4997,6 +5291,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ...currentProfileRef.current,
             stats: nextStats,
             unlockedTalentRanks: nextUnlocked,
+            activeSkillLoadout: nextActiveSkills,
             lastSyncedAtMs: Date.now(),
           };
           currentProfileRef.current = updatedProfile;
@@ -5016,6 +5311,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             method: 'POST',
             body: JSON.stringify({ nodeSlug: nodeId }),
           }).catch(() => {});
+          if (didAutoAddSkill && isAuthenticated) {
+            saveCharacterCombatLoadoutApi(remoteCharacterIdRef.current, {
+              activeSkillIds: nextActiveSkills,
+              beltConsumables: beltLoadoutRef.current,
+            }).catch(() => {});
+          }
         }
 
         return { ok: true };
@@ -5023,7 +5324,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         inFlightTalentUnlockRef.current = false;
       }
     },
-    [persistBundleSnapshot, serverOnline]
+    [isAuthenticated, persistBundleSnapshot, serverOnline]
   );
 
   const equipItemToSlot = useCallback(
@@ -5726,6 +6027,525 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     },
     [persistBundleSnapshot, serverOnline, workoutsLoggedCount]
+  );
+
+  const persistCombatLoadoutProfile = useCallback(
+    async (nextSkills: string[], nextBelt: Array<string | null>) => {
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          activeSkillLoadout: nextSkills,
+          beltLoadout: nextBelt,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+        persistBundleSnapshot({
+          characterProfile: updatedProfile,
+          availableCharacters: nextAvail,
+        });
+      } else {
+        persistBundleSnapshot({});
+      }
+
+      const charId = activeCharacterIdRef.current ?? remoteCharacterIdRef.current;
+      if (isAuthenticated && serverOnline && charId && !charId.startsWith('local_')) {
+        await saveCharacterCombatLoadoutApi(charId, {
+          activeSkillIds: nextSkills,
+          beltConsumables: nextBelt,
+        }).catch(() => {});
+      }
+    },
+    [isAuthenticated, persistBundleSnapshot, serverOnline]
+  );
+
+  const equipActiveSkillSlot = useCallback(
+    async (slotIndex: number, skillId: string | null): Promise<{ ok: boolean; error?: string }> => {
+      if (slotIndex < 0 || slotIndex >= 4) {
+        return { ok: false, error: 'Invalid active skill slot.' };
+      }
+      const nextSkills = [...activeSkillLoadoutRef.current];
+      if (skillId === null) {
+        if (slotIndex < nextSkills.length) {
+          nextSkills.splice(slotIndex, 1);
+        }
+      } else {
+        const existingIdx = nextSkills.indexOf(skillId);
+        if (existingIdx >= 0 && existingIdx !== slotIndex) {
+          nextSkills.splice(existingIdx, 1);
+        }
+        if (slotIndex < nextSkills.length) {
+          nextSkills[slotIndex] = skillId;
+        } else {
+          nextSkills.push(skillId);
+        }
+      }
+
+      const validation = validateCombatLoadout({
+        activeSkillIds: nextSkills,
+        beltConsumables: beltLoadoutRef.current,
+        unlockedTalentRanks: unlockedTalentRanksRef.current,
+      });
+      if (!validation.valid) {
+        return { ok: false, error: validation.errors[0] ?? 'Invalid active skill selection.' };
+      }
+
+      activeSkillLoadoutRef.current = validation.sanitizedSkillIds;
+      setActiveSkillLoadout(validation.sanitizedSkillIds);
+      await persistCombatLoadoutProfile(validation.sanitizedSkillIds, beltLoadoutRef.current);
+      return { ok: true };
+    },
+    [persistCombatLoadoutProfile]
+  );
+
+  const equipBeltConsumableSlot = useCallback(
+    async (slotIndex: number, itemSlug: string | null): Promise<{ ok: boolean; error?: string }> => {
+      if (slotIndex < 0 || slotIndex >= 4) {
+        return { ok: false, error: 'Invalid belt slot.' };
+      }
+      const nextBelt = [...beltLoadoutRef.current];
+      while (nextBelt.length < 4) nextBelt.push(null);
+      nextBelt[slotIndex] = itemSlug;
+
+      const validation = validateCombatLoadout({
+        activeSkillIds: activeSkillLoadoutRef.current,
+        beltConsumables: nextBelt,
+        unlockedTalentRanks: unlockedTalentRanksRef.current,
+      });
+      if (!validation.valid) {
+        return { ok: false, error: validation.errors[0] ?? 'Invalid belt consumable.' };
+      }
+
+      beltLoadoutRef.current = validation.sanitizedBeltSlugs;
+      setBeltLoadout(validation.sanitizedBeltSlugs);
+      await persistCombatLoadoutProfile(activeSkillLoadoutRef.current, validation.sanitizedBeltSlugs);
+      return { ok: true };
+    },
+    [persistCombatLoadoutProfile]
+  );
+
+  const claimGuildFieldRations = useCallback((): { granted: number; message: string } => {
+    const inv = rawInventoryRef.current;
+    const sunleafQty = inv.find((i) => i.slug === 'sunleaf_healing_draught')?.quantity ?? 0;
+    const vitalityQty = inv.find((i) => i.slug === 'vitality_elixir')?.quantity ?? 0;
+
+    const dropsToGrant: LootDrop[] = [];
+    let granted = 0;
+    if (sunleafQty < 2) {
+      const delta = 2 - sunleafQty;
+      dropsToGrant.push({
+        itemSlug: 'sunleaf_healing_draught',
+        itemName: 'Sunleaf Healing Draught',
+        rarity: 'COMMON',
+        quantity: delta,
+      });
+      granted += delta;
+    }
+    if (vitalityQty < 1) {
+      const delta = 1 - vitalityQty;
+      dropsToGrant.push({
+        itemSlug: 'vitality_elixir',
+        itemName: 'Elixir of Peak Output',
+        rarity: 'RARE',
+        quantity: delta,
+      });
+      granted += delta;
+    }
+
+    if (dropsToGrant.length > 0) {
+      addDropsToInventory(dropsToGrant);
+    }
+
+    const nextBelt = [...beltLoadoutRef.current];
+    while (nextBelt.length < 4) nextBelt.push(null);
+    let beltChanged = false;
+    for (const slug of ['sunleaf_healing_draught', 'vitality_elixir']) {
+      if (!nextBelt.includes(slug)) {
+        const emptyIdx = nextBelt.findIndex((s) => s === null);
+        if (emptyIdx >= 0) {
+          nextBelt[emptyIdx] = slug;
+          beltChanged = true;
+        }
+      }
+    }
+
+    if (beltChanged) {
+      const sanitizedBelt = sanitizeBeltLoadout(nextBelt);
+      beltLoadoutRef.current = sanitizedBelt;
+      setBeltLoadout(sanitizedBelt);
+      void persistCombatLoadoutProfile(activeSkillLoadoutRef.current, sanitizedBelt);
+    }
+
+    if (granted === 0) {
+      return {
+        granted: 0,
+        message: 'Field rations already topped up (2x Sunleaf Draught, 1x Vitality Elixir).',
+      };
+    }
+    return {
+      granted,
+      message: `Issued ${granted} Field Ration${granted === 1 ? '' : 's'} and auto-slotted onto your belt.`,
+    };
+  }, [addDropsToInventory, persistCombatLoadoutProfile]);
+
+  const startGuildQuestEncounter = useCallback(
+    (
+      questSlug: string,
+      companionIds: string[] = []
+    ): {
+      ok: boolean;
+      error?: string;
+      state?: TurnBasedCombatState;
+      quest?: GuildQuestDefinition;
+      serverRunId?: string | null;
+    } => {
+      const quest =
+        guildQuestsRef.current.find((q) => q.questSlug === questSlug) ??
+        DEFAULT_GUILD_QUEST_CATALOG.find((q) => q.questSlug === questSlug);
+      if (!quest) {
+        return { ok: false, error: `Unknown quest '${questSlug}'.` };
+      }
+
+      if (!isAdventurerRankSufficient(adventurerRankRef.current, quest.requiredRank)) {
+        return {
+          ok: false,
+          error: `Requires ${quest.requiredRank} Adventurer Rank (currently ${adventurerRankRef.current}).`,
+        };
+      }
+
+      if (quest.trialRequirements) {
+        const reqWorkouts = quest.trialRequirements.workoutsLogged;
+        if (typeof reqWorkouts === 'number' && workoutsLoggedCount < reqWorkouts) {
+          return {
+            ok: false,
+            error: `Requires ${reqWorkouts} logged workout${reqWorkouts === 1 ? '' : 's'} (${workoutsLoggedCount}/${reqWorkouts}).`,
+          };
+        }
+        const reqStatLvl = quest.trialRequirements.totalStatLevel;
+        if (typeof reqStatLvl === 'number') {
+          const s = statsRef.current;
+          const totalStatLevel =
+            (s.STRENGTH?.level ?? 1) +
+            (s.ENDURANCE?.level ?? 1) +
+            (s.AGILITY?.level ?? 1) +
+            (s.DEXTERITY?.level ?? 1) +
+            (s.CONSTITUTION?.level ?? 1) +
+            (s.WISDOM?.level ?? 1) +
+            (s.SPIRIT?.level ?? 1);
+          if (totalStatLevel < reqStatLvl) {
+            return {
+              ok: false,
+              error: `Requires Combined Stat Level ${reqStatLvl} (currently ${totalStatLevel}/${reqStatLvl}).`,
+            };
+          }
+        }
+      }
+
+      const inv = rawInventoryRef.current;
+      const beltSlots = beltLoadoutRef.current.slice(0, 4).map((itemSlug) => {
+        if (!itemSlug) return { itemSlug: null, charges: 0 };
+        const ownedQty = inv.find((i) => i.slug === itemSlug)?.quantity ?? 0;
+        return { itemSlug, charges: Math.min(3, Math.max(0, ownedQty)) };
+      });
+
+      const heroCharId = activeCharacterIdRef.current ?? 'player_hero';
+      const heroInput: TurnBasedPartyMemberInput = {
+        characterId: heroCharId,
+        name: characterName,
+        controller: 'PLAYER',
+        race: raceRef.current,
+        appearanceId,
+        customizationConfig: customizationConfigRef.current,
+        equippedLoadout: equipmentLoadoutRef.current,
+        coreStats: toCoreStatBlock(statsRef.current),
+        equipmentBonuses,
+        equipmentPrimaryStatBonuses: aggregatedEquipment.primaryStatBonuses,
+        unlockedTalentRanks: unlockedTalentRanksRef.current,
+        activeSkillIds: activeSkillLoadoutRef.current,
+        beltSlots,
+        systemicFatigueStacks: projectedFatigue.systemicFatigueStacks,
+      };
+
+      const selectedCompanions = ADVENTURER_COMPANY_AI_PRESETS.filter((ally) =>
+        companionIds.includes(ally.characterId)
+      ).slice(0, 3);
+
+      const encounterId = `guild_run_${Date.now()}`;
+      const seed = `${quest.questSlug}:${encounterId}`;
+      const state = createTurnBasedEncounter({
+        encounterId,
+        questSlug: quest.questSlug,
+        questTitle: quest.title,
+        party: [heroInput, ...selectedCompanions],
+        waves: quest.waves,
+        seed,
+      });
+
+      if (
+        isAuthenticated &&
+        serverOnline &&
+        activeCharacterIdRef.current &&
+        !activeCharacterIdRef.current.startsWith('local_')
+      ) {
+        void startGuildQuestRunApi(quest.questSlug, {
+          characterId: activeCharacterIdRef.current,
+          companionIds: selectedCompanions.map((c) => c.characterId),
+          clientRunId: encounterId,
+          clientSeed: seed,
+        })
+          .then((res) => {
+            const srvId = res.data?.run?.id ?? res.data?.runId;
+            if (res.ok && typeof srvId === 'string' && srvId) {
+              pendingServerRunIdsRef.current[encounterId] = srvId;
+            }
+          })
+          .catch(() => {});
+      }
+
+      return { ok: true, state, quest, serverRunId: null };
+    },
+    [
+      aggregatedEquipment.primaryStatBonuses,
+      appearanceId,
+      characterName,
+      equipmentBonuses,
+      isAuthenticated,
+      projectedFatigue.systemicFatigueStacks,
+      serverOnline,
+      workoutsLoggedCount,
+    ]
+  );
+
+  const completeGuildQuestEncounter = useCallback(
+    async (params: {
+      finalState: TurnBasedCombatState;
+      companionIds: string[];
+      serverRunId?: string | null;
+    }): Promise<{
+      ok: boolean;
+      syncedOnline: boolean;
+      queuedOffline: boolean;
+      goldAwarded: number;
+      reputationAwarded: number;
+      drops: LootDrop[];
+      promotedToRank: AdventurerRank | null;
+      error?: string;
+    }> => {
+      const { finalState, companionIds, serverRunId } = params;
+      const quest =
+        guildQuestsRef.current.find((q) => q.questSlug === finalState.questSlug) ??
+        DEFAULT_GUILD_QUEST_CATALOG.find((q) => q.questSlug === finalState.questSlug);
+
+      // Deduct consumables used during the encounter
+      const usedMap = finalState.consumablesUsed ?? {};
+      let nextInv = [...rawInventoryRef.current];
+      let invModified = false;
+      for (const [slug, usedQty] of Object.entries(usedMap)) {
+        if (!usedQty || usedQty <= 0) continue;
+        const idx = nextInv.findIndex((i) => i.slug === slug);
+        if (idx >= 0) {
+          invModified = true;
+          const remaining = nextInv[idx]!.quantity - usedQty;
+          if (remaining > 0) {
+            nextInv[idx] = { ...nextInv[idx]!, quantity: remaining };
+          } else {
+            nextInv.splice(idx, 1);
+          }
+        }
+      }
+      if (invModified) {
+        rawInventoryRef.current = nextInv;
+        setRawInventory(nextInv);
+      }
+
+      if (finalState.status !== 'VICTORY' || !quest) {
+        if (currentProfileRef.current && invModified) {
+          const updatedProfile: PersistedCharacterProfile = {
+            ...currentProfileRef.current,
+            inventory: nextInv,
+            lastSyncedAtMs: Date.now(),
+          };
+          currentProfileRef.current = updatedProfile;
+          const nextAvail = availableCharactersRef.current.map((c) =>
+            c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+          );
+          availableCharactersRef.current = nextAvail;
+          setAvailableCharacters(nextAvail);
+          persistBundleSnapshot({
+            characterProfile: updatedProfile,
+            availableCharacters: nextAvail,
+          });
+        }
+        return {
+          ok: true,
+          syncedOnline: false,
+          queuedOffline: false,
+          goldAwarded: 0,
+          reputationAwarded: 0,
+          drops: [],
+          promotedToRank: null,
+        };
+      }
+
+      const goldAwarded = quest.goldReward;
+      const reputationAwarded = quest.reputationReward;
+      const nextGold = goldRef.current + goldAwarded;
+      goldRef.current = nextGold;
+      setGold(nextGold);
+
+      const nextRep = adventurerReputationRef.current + reputationAwarded;
+      adventurerReputationRef.current = nextRep;
+      setAdventurerReputation(nextRep);
+
+      // Roll deterministic loot drops from quest.lootTable
+      const drops: LootDrop[] = [];
+      const lootRolls = Math.max(1, quest.lootRolls ?? 1);
+      if (quest.lootTable.length > 0) {
+        const lootRng = createSeededRng(`${finalState.rngSeed}:loot`);
+        const totalWeight = quest.lootTable.reduce((sum, entry) => sum + Math.max(1, entry.weight), 0);
+        for (let r = 0; r < lootRolls; r++) {
+          let roll = lootRng.next() * totalWeight;
+          let chosen = quest.lootTable[0]!;
+          for (const entry of quest.lootTable) {
+            roll -= Math.max(1, entry.weight);
+            if (roll <= 0) {
+              chosen = entry;
+              break;
+            }
+          }
+          drops.push({
+            itemSlug: chosen.itemSlug,
+            itemName: chosen.itemName,
+            rarity: chosen.rarity,
+            quantity: chosen.quantity,
+          });
+        }
+        if (drops.length > 0) {
+          addDropsToInventory(drops);
+        }
+      }
+
+      // Mark quest completed
+      const completedSet = new Set(completedGuildQuestSlugsRef.current);
+      completedSet.add(quest.questSlug);
+      const nextCompletedSlugs = Array.from(completedSet);
+      completedGuildQuestSlugsRef.current = nextCompletedSlugs;
+      setCompletedGuildQuestSlugs(nextCompletedSlugs);
+
+      // Rank promotion on Rank-Up Trials
+      let promotedToRank: AdventurerRank | null = null;
+      let nextRank = adventurerRankRef.current;
+      if (
+        quest.category === 'RANK_UP_TRIAL' &&
+        quest.unlocksRank &&
+        !isAdventurerRankSufficient(nextRank, quest.unlocksRank)
+      ) {
+        nextRank = quest.unlocksRank as AdventurerRank;
+        promotedToRank = nextRank;
+        adventurerRankRef.current = nextRank;
+        setAdventurerRank(nextRank);
+        const completedBountySlugs = bountiesRef.current
+          .filter((b) => b.completed)
+          .map((b) => b.slug);
+        const refreshedBounties = buildBountiesForCharacter(nextRank, completedBountySlugs);
+        bountiesRef.current = refreshedBounties;
+        setBounties(refreshedBounties);
+      }
+
+      if (currentProfileRef.current) {
+        const updatedProfile: PersistedCharacterProfile = {
+          ...currentProfileRef.current,
+          gold: nextGold,
+          adventurerReputation: nextRep,
+          adventurerRank: nextRank,
+          inventory: rawInventoryRef.current,
+          completedGuildQuestSlugs: nextCompletedSlugs,
+          lastSyncedAtMs: Date.now(),
+        };
+        currentProfileRef.current = updatedProfile;
+        const nextAvail = availableCharactersRef.current.map((c) =>
+          c.id === updatedProfile.id ? { ...c, ...updatedProfile } : c
+        );
+        availableCharactersRef.current = nextAvail;
+        setAvailableCharacters(nextAvail);
+        persistBundleSnapshot({
+          characterProfile: updatedProfile,
+          availableCharacters: nextAvail,
+        });
+      }
+
+      const heroUnit = finalState.units.find((u) => u.controller === 'PLAYER');
+      const beltSnapshot = (heroUnit?.beltSlots ?? []).map((b) => ({
+        itemSlug: b.itemSlug,
+        charges: b.charges,
+      }));
+      const completedAt = new Date().toISOString();
+      const charId = activeCharacterIdRef.current ?? remoteCharacterIdRef.current;
+      const resolvedServerRunId =
+        serverRunId ?? pendingServerRunIdsRef.current[finalState.encounterId] ?? null;
+
+      let syncedOnline = false;
+      if (isAuthenticated && serverOnline && charId && !charId.startsWith('local_')) {
+        try {
+          if (resolvedServerRunId) {
+            const res = await completeGuildQuestRunApi(resolvedServerRunId, {
+              actions: finalState.actionLog,
+            });
+            syncedOnline = res.ok;
+          } else {
+            const res = await syncOfflineGuildQuestRunsApi({
+              characterId: charId,
+              completedRuns: [
+                {
+                  clientRunId: finalState.encounterId,
+                  questSlug: finalState.questSlug,
+                  randomSeed: finalState.rngSeed,
+                  companionIds,
+                  actions: finalState.actionLog,
+                  beltSnapshot,
+                  completedAt,
+                },
+              ],
+            });
+            syncedOnline = res.ok;
+          }
+        } catch {
+          syncedOnline = false;
+        }
+      }
+
+      if (!syncedOnline) {
+        const queuedRun: QueuedOfflineGuildQuestRun = {
+          clientRunId: finalState.encounterId,
+          characterId: charId,
+          questSlug: finalState.questSlug,
+          randomSeed: finalState.rngSeed,
+          companionIds,
+          actions: finalState.actionLog,
+          beltSnapshot,
+          completedAt,
+        };
+        const nextQueued = [...queuedOfflineGuildRunsRef.current, queuedRun];
+        queuedOfflineGuildRunsRef.current = nextQueued;
+        setQueuedOfflineGuildRuns(nextQueued);
+        persistBundleSnapshot({ queuedOfflineGuildRuns: nextQueued });
+      }
+
+      return {
+        ok: true,
+        syncedOnline,
+        queuedOffline: !syncedOnline,
+        goldAwarded,
+        reputationAwarded,
+        drops,
+        promotedToRank,
+      };
+    },
+    [addDropsToInventory, isAuthenticated, persistBundleSnapshot, serverOnline]
   );
 
   // Auto-dismiss Phase 1 Arrival Boon banner in < 2 seconds (1,600ms)
@@ -6507,6 +7327,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setDefaultWeightUnit,
     warmupPresetCount,
     setWarmupPresetCount,
+    activeSkillLoadout,
+    beltLoadout,
+    equipActiveSkillSlot,
+    equipBeltConsumableSlot,
+    guildQuests,
+    completedGuildQuestSlugs,
+    queuedOfflineGuildRuns,
+    claimGuildFieldRations,
+    startGuildQuestEncounter,
+    completeGuildQuestEncounter,
+    syncOfflineGuildRuns,
     historicalPRs,
     workoutsLoggedCount,
     consistencyStreak,

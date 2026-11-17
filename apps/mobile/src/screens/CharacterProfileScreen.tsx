@@ -24,6 +24,7 @@ import {
   ItemTier,
 } from '@goki/game-engine';
 import { CharacterPortraitFrame } from '../components/CharacterPortraitFrame';
+import { CombatLoadoutSelector } from '../components/character';
 import { AttributeRadarChart } from '../components/AttributeRadarChart';
 import { BugReportModal } from '../components/BugReportModal';
 import { CharacterManagerModal } from '../components/CharacterManagerModal';
@@ -1250,6 +1251,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           {RIGHT_PAPERDOLL_SLOTS.map((s) => renderPaperdollSlot(s.slot, s.label, s.icon))}
         </View>
       </View>
+
+      {/* 4B. Tactical Combat Loadout (4 Active Skills + 4 Belt Consumables) */}
+      <CombatLoadoutSelector onJumpToTalents={() => onJumpToTalents?.()} />
 
       {/* 5. Collapsible Satchel Drawer */}
       <Pressable

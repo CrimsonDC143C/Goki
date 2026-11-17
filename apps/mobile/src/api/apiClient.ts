@@ -379,6 +379,140 @@ export async function fetchCharacterSheet(characterId: string): Promise<{
 }
 
 /**
+ * Saves a character's equipped 4 active talent skills and 4 belt consumable slots
+ * (`PUT /api/characters/:characterId/combat-loadout`).
+ */
+export async function saveCharacterCombatLoadoutApi(
+  characterId: string,
+  payload: { activeSkillIds: string[]; beltConsumables: Array<string | null> }
+): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      `/api/characters/${characterId}/combat-loadout`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+      5000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to save combat loadout' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error saving combat loadout';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Fetches Adventurer's Guild quests and rank-up trials (`GET /api/adventurers-guild/quests`).
+ */
+export async function fetchAdventurersGuildQuestsApi(): Promise<{
+  ok: boolean;
+  statusCode?: number;
+  data?: any;
+  error?: string;
+}> {
+  try {
+    const res = await apiFetch('/api/adventurers-guild/quests', { method: 'GET' }, 5000);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to fetch guild quests' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error fetching guild quests';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Starts an interactive turn-based Adventurer's Guild quest run
+ * (`POST /api/adventurers-guild/quests/:questSlug/start`).
+ */
+export async function startGuildQuestRunApi(
+  questSlug: string,
+  payload: { characterId: string; companionIds: string[]; clientRunId?: string; clientSeed?: string }
+): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      `/api/adventurers-guild/quests/${questSlug}/start`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      5000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to start guild quest run' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error starting guild quest run';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Completes a turn-based Adventurer's Guild quest run with the action replay log
+ * (`POST /api/adventurers-guild/runs/:runId/complete`).
+ */
+export async function completeGuildQuestRunApi(
+  runId: string,
+  payload: { actions?: unknown[] }
+): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      `/api/adventurers-guild/runs/${runId}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to complete guild quest run' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error completing guild quest run';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Syncs queued offline turn-based Guild quest runs to the server
+ * (`POST /api/adventurers-guild/sync-offline`).
+ */
+export async function syncOfflineGuildQuestRunsApi(payload: {
+  characterId: string;
+  completedRuns: unknown[];
+}): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      '/api/adventurers-guild/sync-offline',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      6000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to sync offline guild runs' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error syncing offline guild runs';
+    return { ok: false, error: message };
+  }
+}
+
+/**
  * Clears the stored JWT authentication token.
  */
 export async function logoutAccount(): Promise<void> {

@@ -1,8 +1,10 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   BASE_EQUIPPABLE_ITEMS,
+  COMBAT_CONSUMABLE_CATALOG,
   DEFAULT_DUNGEON_CATALOG,
   DEFAULT_EXERCISE_CATALOG,
+  DEFAULT_GUILD_QUEST_CATALOG,
   DEFAULT_TALENT_TREES,
   STARTER_WORKOUT_PRESETS,
 } from '@goki/game-engine';
@@ -250,7 +252,31 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
     },
   }));
 
-  const allItems = [...consumableAndMaterialItems, ...equippableItems];
+  const combatConsumableItems = COMBAT_CONSUMABLE_CATALOG.filter(
+    (c) => c.itemSlug !== 'vitality_elixir'
+  ).map((c) => ({
+    slug: c.itemSlug,
+    name: c.name,
+    description: c.description,
+    itemType: 'CONSUMABLE' as const,
+    weaponHandedness: null,
+    rarity: c.rarity as any,
+    requiredStrength: 0,
+    requiredEndurance: 0,
+    requiredAgility: 0,
+    stackable: true,
+    maxStack: 99,
+    goldValue: c.goldValue,
+    statBonuses: {
+      ...(c.healMaxHpPct !== undefined ? { healMaxHpPct: c.healMaxHpPct } : {}),
+      ...(c.restoreStamina !== undefined ? { restoreStamina: c.restoreStamina } : {}),
+      ...(c.restoreMana !== undefined ? { restoreMana: c.restoreMana } : {}),
+      ...(c.attackBuffPct !== undefined ? { attackBuffPct: c.attackBuffPct } : {}),
+      ...(c.buffDurationTurns !== undefined ? { buffDurationTurns: c.buffDurationTurns } : {}),
+    },
+  }));
+
+  const allItems = [...consumableAndMaterialItems, ...combatConsumableItems, ...equippableItems];
 
   for (const item of allItems) {
     await db.item.upsert({
@@ -259,7 +285,9 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
       create: item,
     });
   }
-  console.log(`✅ Seeded ${allItems.length} items (${equippableItems.length} equippable weapons/armor/accessories + ${consumableAndMaterialItems.length} materials/consumables).`);
+  console.log(
+    `✅ Seeded ${allItems.length} items (${equippableItems.length} equippable weapons/armor/accessories + ${consumableAndMaterialItems.length + combatConsumableItems.length} materials/consumables).`
+  );
 
   // --------------------------------------------------------------------------
   // 4. Starter 2-Hour Idle Gathering & Crafting Nodes
@@ -497,8 +525,36 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
     });
   }
 
+  // --------------------------------------------------------------------------
+  // 8. Turn-Based Guild Quests & Rank-Up Trials
+  // --------------------------------------------------------------------------
+  for (const q of DEFAULT_GUILD_QUEST_CATALOG) {
+    const data = {
+      title: q.title,
+      description: q.description,
+      category: q.category as any,
+      requiredAdventurerRank: q.requiredRank as any,
+      unlocksRank: (q.unlocksRank ?? null) as any,
+      recommendedPower: q.recommendedPower,
+      wavesConfig: q.waves as any,
+      trialRequirements: q.trialRequirements ? (q.trialRequirements as any) : Prisma.DbNull,
+      goldReward: q.goldReward,
+      reputationReward: q.reputationReward,
+      lootTable: q.lootTable as any,
+    };
+
+    await db.guildQuest.upsert({
+      where: { slug: q.questSlug },
+      update: data,
+      create: {
+        slug: q.questSlug,
+        ...data,
+      },
+    });
+  }
+
   console.log(
-    '✅ Seed complete! Starter exercises, presets, 10 talent trees, items, gathering nodes, dungeons, bounties, and world raid ready.'
+    '✅ Seed complete! Starter exercises, presets, 10 talent trees, items, gathering nodes, dungeons, bounties, guild quests, and world raid ready.'
   );
 }
 

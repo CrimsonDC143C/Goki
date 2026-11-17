@@ -163,6 +163,18 @@ enum CombatOutcome {
   TIMEOUT
 }
 
+enum GuildQuestCategory {
+  LIVE_QUEST
+  RANK_UP_TRIAL
+}
+
+enum GuildQuestRunStatus {
+  IN_PROGRESS
+  VICTORY
+  DEFEAT
+  ABANDONED
+}
+
 enum GuildRole {
   LEADER
   OFFICER
@@ -275,6 +287,8 @@ model Character {
   sprXp                Int                    @default(0)
   currentLocation      GameLocation           @default(TAVERN)
   activityState        CharacterActivityState @default(IDLE)
+  activeSkillLoadout   Json                   @default("[]")
+  beltLoadout          Json                   @default("[]")
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
 
@@ -296,6 +310,7 @@ model Character {
   guildMembership       GuildMember?
   bountyCompletions     CharacterBountyCompletion[]
   raidContributions     RaidParticipantContribution[]
+  guildQuestRuns        GuildQuestRun[]               @relation("CharacterGuildQuestRuns")
 
   // Partial Unique Index enforced via SQL migration (20261110_active_character_mode_unique):
   // CREATE UNIQUE INDEX IF NOT EXISTS "Character_userId_gameMode_active_key" ON "Character"("userId", "gameMode") WHERE "deletedAt" IS NULL;
@@ -977,6 +992,56 @@ model CharacterBountyCompletion {
   bounty    GuildBounty @relation(fields: [bountyId], references: [id], onDelete: Cascade)
 
   @@unique([characterId, bountyId])
+}
+
+model GuildQuest {
+  id                     String             @id @default(cuid())
+  slug                   String             @unique
+  title                  String
+  description            String
+  category               GuildQuestCategory @default(LIVE_QUEST)
+  requiredAdventurerRank AdventurerRank     @default(COPPER)
+  unlocksRank            AdventurerRank?
+  recommendedPower       Int                @default(60)
+  wavesConfig            Json
+  trialRequirements      Json?
+  goldReward             Int                @default(100)
+  reputationReward       Int                @default(50)
+  lootTable              Json               @default("[]")
+  createdAt              DateTime           @default(now())
+
+  runs GuildQuestRun[]
+
+  @@index([category, requiredAdventurerRank])
+}
+
+model GuildQuestRun {
+  id                String              @id @default(cuid())
+  clientRunId       String?             @unique
+  questId           String
+  characterId       String
+  status            GuildQuestRunStatus @default(IN_PROGRESS)
+  randomSeed        String
+  companionIds      Json                @default("[]")
+  partySnapshot     Json                @default("[]")
+  checkpointState   Json?
+  actionLog         Json                @default("[]")
+  wavesCleared      Int                 @default(0)
+  totalTurns        Int                 @default(0)
+  consumablesUsed   Json                @default("[]")
+  rewardsGranted    Json?
+  rankPromotedTo    AdventurerRank?
+  startedAt         DateTime            @default(now())
+  completedAt       DateTime?
+  syncedFromOffline Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  quest     GuildQuest @relation(fields: [questId], references: [id], onDelete: Restrict)
+  character Character  @relation("CharacterGuildQuestRuns", fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, status])
+  @@index([questId])
 }
 
 model RaidBossInstance {

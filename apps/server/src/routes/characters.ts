@@ -14,6 +14,9 @@ import {
   getAvailableStrenuousXpMultiplier,
   getSystemicFatigueCombatPenalties,
   normalizeCustomizationConfig,
+  sanitizeActiveSkillLoadout,
+  sanitizeBeltLoadout,
+  validateCombatLoadout,
   validateCustomizationConfig,
   validateEquipmentRequirements,
 } from '@goki/game-engine';
@@ -122,6 +125,8 @@ const patchCharacterSchema = z.object({
   avatarSpriteId: z.string().min(1).optional(),
   race: z.enum(['HUMAN', 'ONI', 'KITSUNE']).optional(),
   customizationConfig: z.unknown().optional(),
+  activeSkillLoadout: z.array(z.string()).max(4).optional(),
+  beltLoadout: z.array(z.string().nullable()).max(4).optional(),
 });
 
 export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient): void {
@@ -486,6 +491,66 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
       dataToUpdate.avatarSpriteId = nextAppearance;
     }
 
+    if (body.activeSkillLoadout !== undefined || body.beltLoadout !== undefined) {
+      const unlockedTalentRanks: Record<string, number> = {};
+      if (body.activeSkillLoadout !== undefined) {
+        let unlocks: any[] = Array.isArray((character as any).talentUnlocks)
+          ? (character as any).talentUnlocks
+          : [];
+        if (unlocks.length === 0) {
+          if (typeof (db as any).characterTalentUnlock?.findMany === 'function') {
+            unlocks = await (db as any).characterTalentUnlock.findMany({
+              where: { characterId },
+              include: { talentNode: true },
+            });
+          } else {
+            const withUnlocks = await db.character.findUnique({
+              where: { id: characterId },
+              include: { talentUnlocks: { include: { talentNode: true } } },
+            });
+            unlocks = (withUnlocks as any)?.talentUnlocks ?? [];
+          }
+        }
+        for (const unlock of unlocks) {
+          const slug = unlock?.talentNode?.slug;
+          if (slug) {
+            unlockedTalentRanks[slug] = unlock.currentRank ?? 1;
+          }
+        }
+      }
+
+      const skillsToValidate =
+        body.activeSkillLoadout !== undefined
+          ? body.activeSkillLoadout
+          : [];
+      const beltToValidate =
+        body.beltLoadout !== undefined
+          ? body.beltLoadout
+          : sanitizeBeltLoadout((character as any).beltLoadout);
+
+      const loadoutValidation = validateCombatLoadout({
+        activeSkillIds: skillsToValidate,
+        beltConsumables: beltToValidate,
+        unlockedTalentRanks,
+      });
+      if (!loadoutValidation.valid) {
+        return reply.status(400).send({
+          error: loadoutValidation.errors.join(' '),
+          errors: loadoutValidation.errors,
+        });
+      }
+
+      if (body.activeSkillLoadout !== undefined) {
+        dataToUpdate.activeSkillLoadout = sanitizeActiveSkillLoadout(
+          loadoutValidation.sanitizedSkillIds,
+          unlockedTalentRanks
+        ) as any;
+      }
+      if (body.beltLoadout !== undefined) {
+        dataToUpdate.beltLoadout = loadoutValidation.sanitizedBeltSlugs as any;
+      }
+    }
+
     const updated = await db.character.update({
       where: { id: characterId },
       data: dataToUpdate,
@@ -811,6 +876,8 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
 
       const rawItemType = String(itemObj.itemType ?? baseCatalogItem?.itemType ?? '').toUpperCase();
       const nonEquippableSlugs = new Set([
+        'sunleaf_healing_draught',
+        'astral_mana_tonic',
         'vitality_elixir',
         'tempered_whetstone',
         'iron_ore_cluster',
@@ -942,5 +1009,69 @@ export function registerCharacterRoutes(app: FastifyInstance, db: PrismaClient):
     });
 
     return reply.send({ loadout: updatedLoadout });
+  });
+
+  const combatLoadoutSchema = z.object({
+    activeSkillIds: z.array(z.string()).max(4).default([]),
+    beltConsumables: z.array(z.string().nullable()).max(4).default([]),
+  });
+
+  /**
+   * PUT /api/characters/:characterId/combat-loadout
+   * Validates and persists active combat skill bar (max 4 unlocked skills) and 4-slot belt consumables.
+   */
+  app.put('/api/characters/:characterId/combat-loadout', { preHandler: [requireAuth] }, async (request, reply) => {
+    const { characterId } = z.object({ characterId: z.string() }).parse(request.params);
+    const body = combatLoadoutSchema.parse(request.body ?? {});
+
+    await assertCharacterActiveAndOwned(db, characterId, request.user.userId);
+
+    const character = await db.character.findUnique({
+      where: { id: characterId },
+      include: { talentUnlocks: { include: { talentNode: true } } },
+    });
+    if (!character) {
+      return reply.status(404).send({ error: 'Character not found.' });
+    }
+
+    const unlockedTalentRanks: Record<string, number> = {};
+    for (const unlock of (character as any).talentUnlocks ?? []) {
+      const slug = unlock?.talentNode?.slug;
+      if (slug) {
+        unlockedTalentRanks[slug] = unlock.currentRank ?? 1;
+      }
+    }
+
+    const validation = validateCombatLoadout({
+      activeSkillIds: body.activeSkillIds,
+      beltConsumables: body.beltConsumables,
+      unlockedTalentRanks,
+    });
+
+    if (!validation.valid) {
+      return reply.status(400).send({
+        error: validation.errors.join(' '),
+        errors: validation.errors,
+      });
+    }
+
+    const updated = await db.character.update({
+      where: { id: characterId },
+      data: {
+        activeSkillLoadout: validation.sanitizedSkillIds as any,
+        beltLoadout: validation.sanitizedBeltSlugs as any,
+      },
+      include: {
+        stats: true,
+        fatigueState: true,
+        equipmentLoadout: true,
+      },
+    });
+
+    return reply.send({
+      character: updated,
+      activeSkillLoadout: validation.sanitizedSkillIds,
+      beltLoadout: validation.sanitizedBeltSlugs,
+    });
   });
 }
