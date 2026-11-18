@@ -15,3 +15,5 @@ export type {
   DisclosureBottomSheetProps,
   DisclosureActionRowProps,
 } from './SurfacePrimitives';
+export { HubSceneBackdrop, HubSceneHeaderSlot } from './HubSceneShell';
+export type { HubSceneBackdropProps, HubSceneHeaderSlotProps } from './HubSceneShell';

@@ -19,6 +19,8 @@ import { RpgIcon } from '../components/icons/RpgIcon';
 import { TraderShopModal } from '../components/npc';
 import {
   HairlineDivider,
+  HubSceneBackdrop,
+  HubSceneHeaderSlot,
   SegmentedControl,
   SegmentedOption,
   SlateSection,
@@ -152,9 +154,13 @@ export const ArtisanHubScreen: React.FC = () => {
     }
   };
 
+  const artisanSlotId =
+    subView === 'CRAFT' ? 'artisan_forge_apothecary' : 'artisan_gathering_wilds';
+
   return (
     <View style={styles.root}>
-      <View style={styles.topBar}>
+      <HubSceneBackdrop slotId={artisanSlotId} />
+      <HubSceneHeaderSlot slotId={artisanSlotId} style={styles.topBar}>
         <View style={styles.segmentedWrap}>
           <SegmentedControl
             options={SUB_OPTIONS}
@@ -171,7 +177,7 @@ export const ArtisanHubScreen: React.FC = () => {
           <RpgIcon name="coin" size={14} color="#F59E0B" />
           <Text style={styles.npcBtnText}>Trader</Text>
         </TouchableOpacity>
-      </View>
+      </HubSceneHeaderSlot>
 
       <View style={styles.body}>
         {subView === 'GATHER' ? (

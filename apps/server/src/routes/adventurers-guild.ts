@@ -32,6 +32,7 @@ import {
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { assertCharacterActiveAndOwned, requireAuth } from '../middleware/auth';
+import type { CompanyQuestCoopManager } from '../services/company-quest-coop';
 import { depositLootToInventory, withDbTransaction } from '../services/game-operations';
 
 export interface NormalizedGuildQuest {
@@ -177,31 +178,38 @@ function normalizeQuestRecord(raw: any): NormalizedGuildQuest {
   };
 }
 
-async function resolveQuestDefinition(
+export async function resolveQuestDefinition(
   db: PrismaClient,
   questIdOrSlug: string
 ): Promise<NormalizedGuildQuest | null> {
-  if (typeof (db as any).guildQuest?.findFirst === 'function') {
-    const dbQuest = await (db as any).guildQuest.findFirst({
-      where: { OR: [{ id: questIdOrSlug }, { slug: questIdOrSlug }] },
-    });
-    if (dbQuest) {
-      return normalizeQuestRecord(dbQuest);
+  try {
+    if (typeof (db as any).guildQuest?.findFirst === 'function') {
+      const dbQuest = await (db as any).guildQuest.findFirst({
+        where: { OR: [{ id: questIdOrSlug }, { slug: questIdOrSlug }] },
+      });
+      if (dbQuest) {
+        return normalizeQuestRecord(dbQuest);
+      }
+    } else if (typeof (db as any).guildQuest?.findUnique === 'function') {
+      const dbQuest = await (db as any).guildQuest.findUnique({
+        where: { slug: questIdOrSlug },
+      });
+      if (dbQuest) {
+        return normalizeQuestRecord(dbQuest);
+      }
     }
-  } else if (typeof (db as any).guildQuest?.findUnique === 'function') {
-    const dbQuest = await (db as any).guildQuest.findUnique({
-      where: { slug: questIdOrSlug },
-    });
-    if (dbQuest) {
-      return normalizeQuestRecord(dbQuest);
-    }
+  } catch {
+    // Fall back to canonical catalog when database is unavailable
   }
 
   const catalogQuest = DEFAULT_GUILD_QUEST_CATALOG.find((q) => q.questSlug === questIdOrSlug);
   return catalogQuest ? normalizeQuestRecord(catalogQuest) : null;
 }
 
-async function upsertQuestIfSupported(db: PrismaClient, quest: NormalizedGuildQuest): Promise<string> {
+export async function upsertQuestIfSupported(
+  db: PrismaClient,
+  quest: NormalizedGuildQuest
+): Promise<string> {
   if (typeof (db as any).guildQuest?.upsert === 'function') {
     const upserted = await (db as any).guildQuest.upsert({
       where: { slug: quest.questSlug },
@@ -238,7 +246,7 @@ async function upsertQuestIfSupported(db: PrismaClient, quest: NormalizedGuildQu
   return quest.id;
 }
 
-async function loadCharacterForGuildEncounter(db: PrismaClient, characterId: string) {
+export async function loadCharacterForGuildEncounter(db: PrismaClient, characterId: string) {
   return db.character.findUnique({
     where: { id: characterId },
     include: {
@@ -343,7 +351,7 @@ function buildOwnedConsumableMap(character: any): Map<string, number> {
   return owned;
 }
 
-function buildHeroPartyMember(
+export function buildHeroPartyMember(
   character: any,
   options?: {
     ownedOverrides?: Map<string, number>;
@@ -616,7 +624,83 @@ async function findGuildQuestRunByIdOrClientId(db: PrismaClient, runId: string) 
   return null;
 }
 
-export function registerAdventurersGuildRoutes(app: FastifyInstance, db: PrismaClient): void {
+export function registerAdventurersGuildRoutes(
+  app: FastifyInstance,
+  db: PrismaClient,
+  coopManager?: CompanyQuestCoopManager
+): void {
+  /**
+   * GET /api/adventurers-guild/company-quests/active
+   * Lists active Adventurer Company WebSocket co-op lobbies/runs.
+   */
+  app.get('/api/adventurers-guild/company-quests/active', async (_request, reply) => {
+    const rooms = coopManager ? coopManager.listActiveSessions() : [];
+    return reply.send({ rooms });
+  });
+
+  /**
+   * POST /api/adventurers-guild/company-quests/lobbies
+   * Prepares or fetches an authoritative `company-quest:{runId}` co-op lobby.
+   */
+  app.post(
+    '/api/adventurers-guild/company-quests/lobbies',
+    { preHandler: [requireAuth] },
+    async (request, reply) => {
+      if (!coopManager) {
+        return reply.status(503).send({ error: 'Co-op WebSocket coordinator unavailable.' });
+      }
+      const body = z
+        .object({
+          characterId: z.string().min(1),
+          questSlug: z.string().min(1).optional(),
+          runId: z.string().min(1).optional(),
+          turnTimeoutMs: z.number().int().optional(),
+        })
+        .parse(request.body);
+
+      if (typeof (db as any)?.character?.findUnique === 'function') {
+        try {
+          await assertCharacterActiveAndOwned(db, body.characterId, request.user.userId);
+        } catch (err: any) {
+          if (err?.statusCode === 403 || err?.statusCode === 400) {
+            return reply.status(err.statusCode).send({ error: err.message });
+          }
+        }
+      }
+
+      const runId = body.runId?.trim() || `coop_${Date.now()}_${body.characterId.slice(-6)}`;
+      const prepared = await coopManager.createOrPrepareLobby({
+        runId,
+        questSlug: body.questSlug,
+        hostUserId: request.user.userId,
+        hostCharacterId: body.characterId,
+        hostUsername: request.user.username,
+        turnTimeoutMs: body.turnTimeoutMs,
+      });
+
+      if (!prepared.ok) {
+        return reply.status(400).send({ error: prepared.error });
+      }
+
+      const session = prepared.session;
+      return reply.status(201).send({
+        runId: session.runId,
+        room: session.room,
+        questSlug: session.questSlug,
+        questTitle: session.questTitle,
+        turnTimeoutMs: session.turnTimeoutMs,
+        participants: session.participants.map((p) => ({
+          squadSlot: p.squadSlot,
+          characterId: p.characterId,
+          characterName: p.characterName,
+          userId: p.userId,
+          connected: p.connected,
+          ready: p.ready,
+          controlMode: p.controlMode,
+        })),
+      });
+    }
+  );
   /**
    * GET /api/adventurers-guild/quests
    * Lists Live Quests & Rank-Up Trials separately from 24h passive expeditions (/api/dungeons).

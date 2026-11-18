@@ -6,6 +6,21 @@ export type WebSocketStatus = 'disconnected' | 'connecting' | 'connected' | 'rec
 export type WebSocketEventListener = (payload: any) => void;
 export type WebSocketStatusListener = (status: WebSocketStatus) => void;
 
+export type CoopControlMode = 'PLAYER' | 'AI_TAKEOVER';
+export type CoopRoomPhase = 'LOBBY' | 'IN_COMBAT' | 'COMPLETED';
+
+export interface CoopParticipantView {
+  squadSlot: number;
+  characterId: string;
+  characterName: string;
+  userId: string;
+  race?: string;
+  appearanceId?: string;
+  connected: boolean;
+  ready: boolean;
+  controlMode: CoopControlMode;
+}
+
 export interface InboundWebSocketEvent {
   type: string;
   room?: string;
@@ -25,6 +40,7 @@ export class GokiWebSocketClient {
   private explicitDisconnect = false;
   private authToken: string | null = null;
   private isConnecting = false;
+  private pendingOutboundQueue: Record<string, unknown>[] = [];
 
   constructor() {
     this.status = 'disconnected';
@@ -105,6 +121,14 @@ export class GokiWebSocketClient {
         for (const room of this.subscribedRooms) {
           this.send({ type: 'SUBSCRIBE', room });
         }
+
+        // Flush queued outbound messages once socket opens
+        if (this.pendingOutboundQueue.length > 0) {
+          const queued = this.pendingOutboundQueue.splice(0, this.pendingOutboundQueue.length);
+          for (const msg of queued) {
+            this.send(msg);
+          }
+        }
       };
 
       ws.onmessage = (event: MessageEvent) => {
@@ -144,6 +168,7 @@ export class GokiWebSocketClient {
   public disconnect(): void {
     this.explicitDisconnect = true;
     this.isConnecting = false;
+    this.pendingOutboundQueue = [];
     this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -185,16 +210,32 @@ export class GokiWebSocketClient {
   }
 
   /**
-   * Sends a JSON message over the active socket.
+   * Sends a JSON message over the active socket, queuing briefly while connecting.
    */
   public send(payload: Record<string, unknown>): boolean {
-    if (!this.isConnected() || !this.socket) return false;
-    try {
-      this.socket.send(JSON.stringify(payload));
-      return true;
-    } catch {
-      return false;
+    if (this.isConnected() && this.socket) {
+      try {
+        this.socket.send(JSON.stringify(payload));
+        return true;
+      } catch {
+        return false;
+      }
     }
+
+    if (
+      !this.explicitDisconnect &&
+      (this.isConnecting ||
+        this.status === 'connecting' ||
+        this.status === 'reconnecting' ||
+        this.socket?.readyState === 0)
+    ) {
+      if (this.pendingOutboundQueue.length < 32) {
+        this.pendingOutboundQueue.push(payload);
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**

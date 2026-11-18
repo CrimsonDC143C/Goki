@@ -48,6 +48,7 @@ import {
 } from '../api/apiClient';
 import { RpgIcon, RpgIconName } from '../components/icons/RpgIcon';
 import { NpcDialogueOverlay } from '../components/npc';
+import { HubSceneBackdrop, HubSceneHeaderSlot } from '../components/ui';
 import { AdventurerCompanyView } from '../components/social/AdventurerCompanyView';
 import { AsyncArenaView } from '../components/social/AsyncArenaView';
 import { ClanAndRaidView } from '../components/social/ClanAndRaidView';
@@ -1292,11 +1293,16 @@ export const SocialHubScreen: React.FC = () => {
   const hasActiveSquad = Boolean(
     activeCompany?.members?.some((m) => m.activeSquadSlot !== null && m.activeSquadSlot !== undefined)
   );
+  const socialSlotId =
+    subView === 'CLAN_RAID' || subView === 'LEADERBOARDS'
+      ? 'social_clan_hall'
+      : 'social_company_tavern';
 
   return (
     <View style={styles.root}>
+      <HubSceneBackdrop slotId={socialSlotId} />
       {/* Compact Social Header with NPC Guides */}
-      <View style={styles.npcHeaderBar}>
+      <HubSceneHeaderSlot slotId={socialSlotId} style={styles.npcHeaderBar}>
         <View style={styles.affiliationSummary}>
           <RpgIcon name="shield" size={14} color={COLORS.gold} />
           <Text style={styles.affiliationText} numberOfLines={1}>
@@ -1323,7 +1329,7 @@ export const SocialHubScreen: React.FC = () => {
             <Text style={styles.quartermasterBtnText}>Commander Veyra</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </HubSceneHeaderSlot>
 
       {/* Scrollable 5-Subtab Bar (fits 480px portrait cleanly) */}
       <View style={styles.subTabBarWrap}>
@@ -1432,6 +1438,8 @@ export const SocialHubScreen: React.FC = () => {
         visible={wardenOpen}
         onClose={() => setWardenOpen(false)}
         npcId="CLAN_WARDEN"
+        sceneSlotId="social_clan_hall"
+        pageExpressions={['focused', 'happy']}
         testID="clan-warden-dialogue"
         dialoguePages={[
           `Every hero belongs to ${homeClanLabel} plus 1 coordinate-deduped Real-World Gym Clan. Submitting a venue within 150m merges cleanly into the existing clan.`,
@@ -1466,6 +1474,8 @@ export const SocialHubScreen: React.FC = () => {
         visible={quartermasterOpen}
         onClose={() => setQuartermasterOpen(false)}
         npcId="QUARTERMASTER"
+        sceneSlotId="social_company_tavern"
+        pageExpressions={['focused', 'alert']}
         testID="company-quartermaster-dialogue"
         dialoguePages={[
           'Adventurer Companies unite up to 30 cross-gym roster members. Designate a 4-Player Active Squad to join your expeditions and Arena matches.',

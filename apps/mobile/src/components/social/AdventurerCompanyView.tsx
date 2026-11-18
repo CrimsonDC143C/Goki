@@ -294,6 +294,16 @@ export const AdventurerCompanyView: React.FC<AdventurerCompanyViewProps> = ({
                 <RpgIcon name="check" size={14} color={SURFACES.canvas} />
                 <Text style={styles.saveSquadBtnText}>Save Active Squad</Text>
               </TouchableOpacity>
+
+              <View
+                style={styles.coopReadyStrip}
+                testID="company-coop-ready-strip"
+              >
+                <RpgIcon name="sparkles" size={13} color="#38BDF8" />
+                <Text style={styles.coopReadyStripText}>
+                  4-player Active Squad slots sync into live company-quest:runId WebSocket rooms in Adventure → Guild Quests.
+                </Text>
+              </View>
             </View>
 
             <HairlineDivider spacing={SPACING.md} />
@@ -596,6 +606,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: SURFACES.canvas,
+  },
+  coopReadyStrip: {
+    marginTop: SPACING.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 8,
+    borderRadius: RADII.sm,
+    backgroundColor: SURFACES.layer2,
+  },
+  coopReadyStripText: {
+    flex: 1,
+    ...TYPOGRAPHY.caption,
+    color: COLORS.textSecondary,
+    lineHeight: 16,
   },
   rosterList: {
     gap: SPACING.sm,

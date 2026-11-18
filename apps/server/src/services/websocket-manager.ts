@@ -21,7 +21,21 @@ export type WebSocketEventType =
   | 'PARTY_MEMBER_JOINED'
   | 'DUNGEON_RUN_STARTED'
   | 'DUNGEON_BUFF_INJECTED'
+  | 'COMPANY_QUEST_LOBBY_STATE'
+  | 'COMPANY_QUEST_STARTED'
+  | 'COMPANY_QUEST_STATE_UPDATE'
+  | 'COMPANY_QUEST_TURN_TIMEOUT'
+  | 'COMPANY_QUEST_AI_TAKEOVER'
+  | 'COMPANY_QUEST_COMPLETED'
   | 'ERROR';
+
+export type WebSocketLeaveReason = 'unsubscribe' | 'disconnect';
+export type WebSocketLeaveRoomListener = (
+  client: WebSocketClient,
+  room: string,
+  reason: WebSocketLeaveReason
+) => void;
+export type WebSocketShutdownListener = () => void;
 
 export interface WebSocketEvent<T = Record<string, unknown>> {
   type: WebSocketEventType;
@@ -47,6 +61,8 @@ export function safeSerializeWsPayload(data: unknown): string {
 export class WebSocketManager {
   private clients = new Map<WebSocket, WebSocketClient>();
   private rooms = new Map<string, Set<WebSocket>>();
+  private leaveRoomListeners = new Set<WebSocketLeaveRoomListener>();
+  private shutdownListeners = new Set<WebSocketShutdownListener>();
   private idCounter = 0;
   private livenessInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -130,12 +146,57 @@ export class WebSocketManager {
   }
 
   /**
+   * Registers a listener notified whenever a client leaves a room or disconnects.
+   */
+  public onLeaveRoom(listener: WebSocketLeaveRoomListener): () => void {
+    this.leaveRoomListeners.add(listener);
+    return () => {
+      this.leaveRoomListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Registers a listener notified when the WebSocketManager clears or shuts down.
+   */
+  public onShutdown(listener: WebSocketShutdownListener): () => void {
+    this.shutdownListeners.add(listener);
+    return () => {
+      this.shutdownListeners.delete(listener);
+    };
+  }
+
+  private emitLeaveRoom(
+    client: WebSocketClient,
+    room: string,
+    reason: WebSocketLeaveReason
+  ): void {
+    for (const listener of this.leaveRoomListeners) {
+      try {
+        listener(client, room, reason);
+      } catch {
+        // Isolate lifecycle observer errors
+      }
+    }
+  }
+
+  private emitShutdown(): void {
+    for (const listener of this.shutdownListeners) {
+      try {
+        listener();
+      } catch {
+        // Isolate lifecycle observer errors
+      }
+    }
+  }
+
+  /**
    * Removes a socket connection from all rooms and active registry.
    */
   public removeClient(socket: WebSocket): void {
     const client = this.clients.get(socket);
     if (client) {
-      for (const room of client.rooms) {
+      const leftRooms = Array.from(client.rooms);
+      for (const room of leftRooms) {
         const roomSet = this.rooms.get(room);
         if (roomSet) {
           roomSet.delete(socket);
@@ -144,7 +205,11 @@ export class WebSocketManager {
           }
         }
       }
+      client.rooms.clear();
       this.clients.delete(socket);
+      for (const room of leftRooms) {
+        this.emitLeaveRoom(client, room, 'disconnect');
+      }
     }
   }
 
@@ -177,6 +242,7 @@ export class WebSocketManager {
     const client = this.clients.get(socket);
     const normalizedRoom = room.trim();
 
+    const wasMember = Boolean(client?.rooms.has(normalizedRoom));
     if (client) {
       client.rooms.delete(normalizedRoom);
     }
@@ -187,7 +253,14 @@ export class WebSocketManager {
       if (roomSet.size === 0) {
         this.rooms.delete(normalizedRoom);
       }
+      if (client && wasMember) {
+        this.emitLeaveRoom(client, normalizedRoom, 'unsubscribe');
+      }
       return true;
+    }
+
+    if (client && wasMember) {
+      this.emitLeaveRoom(client, normalizedRoom, 'unsubscribe');
     }
 
     return false;
@@ -314,6 +387,7 @@ export class WebSocketManager {
    * Clears all client and room registrations (useful for test resets).
    */
   public clear(): void {
+    this.emitShutdown();
     this.clients.clear();
     this.rooms.clear();
   }

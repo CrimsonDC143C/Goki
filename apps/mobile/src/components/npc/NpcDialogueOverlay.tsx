@@ -7,13 +7,19 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  HubEnvironmentSlotId,
+  getHubEnvironmentArt,
+} from '../../assets/rpgArtRegistry';
 import { COLORS, RADII, SPACING, SURFACES, TYPOGRAPHY } from '../../theme';
 import { RpgIcon, RpgIconName } from '../icons/RpgIcon';
 import { HairlineDivider } from '../ui/SurfacePrimitives';
 import {
   NPC_ARCHETYPE_META,
   NpcArchetypeId,
+  NpcExpression,
   NpcPortraitSvg,
 } from './NpcPortraitSvg';
 
@@ -32,6 +38,9 @@ export interface NpcDialogueOverlayProps {
   npcId?: NpcArchetypeId;
   npcName?: string;
   npcTitle?: string;
+  expression?: NpcExpression;
+  pageExpressions?: ReadonlyArray<NpcExpression>;
+  sceneSlotId?: HubEnvironmentSlotId;
   portraitSlot?: React.ReactNode;
   dialoguePages?: ReadonlyArray<string>;
   dialogueText?: string;
@@ -46,6 +55,9 @@ export const NpcDialogueOverlay: React.FC<NpcDialogueOverlayProps> = ({
   npcId = 'GUIDE',
   npcName,
   npcTitle,
+  expression = 'neutral',
+  pageExpressions,
+  sceneSlotId,
   portraitSlot,
   dialoguePages,
   dialogueText,
@@ -72,6 +84,8 @@ export const NpcDialogueOverlay: React.FC<NpcDialogueOverlayProps> = ({
 
   const safeIndex = Math.min(pageIndex, Math.max(0, pages.length - 1));
   const currentText = pages[safeIndex] ?? '';
+  const activeExpression: NpcExpression = pageExpressions?.[safeIndex] ?? expression;
+  const sceneArt = sceneSlotId ? getHubEnvironmentArt(sceneSlotId) : null;
   const hasMultiplePages = pages.length > 1;
   const isLastPage = safeIndex >= pages.length - 1;
 
@@ -109,10 +123,44 @@ export const NpcDialogueOverlay: React.FC<NpcDialogueOverlayProps> = ({
             },
           ]}
         >
+          {sceneArt ? (
+            <View
+              pointerEvents="none"
+              style={styles.sceneBackdropSlot}
+              testID="npc-dialogue-scene-slot"
+            >
+              {sceneArt.headerBannerSource ? (
+                <>
+                  <ExpoImage
+                    source={sceneArt.headerBannerSource as any}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    contentPosition="center"
+                  />
+                  <View
+                    style={[
+                      StyleSheet.absoluteFill,
+                      { backgroundColor: sceneArt.scrimColors[1], opacity: 0.82 },
+                    ]}
+                  />
+                </>
+              ) : (
+                <View
+                  style={[
+                    StyleSheet.absoluteFill,
+                    { backgroundColor: sceneArt.ambientTint },
+                  ]}
+                />
+              )}
+            </View>
+          ) : null}
+
           {/* Portrait + Identity Header */}
           <View style={styles.headerRow}>
             <View style={styles.portraitWrap}>
-              {portraitSlot ?? <NpcPortraitSvg npcId={npcId} size={72} />}
+              {portraitSlot ?? (
+                <NpcPortraitSvg npcId={npcId} size={72} expression={activeExpression} />
+              )}
             </View>
 
             <View style={styles.identityCol}>
@@ -246,6 +294,16 @@ const styles = StyleSheet.create({
     maxWidth: 520,
     width: '100%',
     alignSelf: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  sceneBackdropSlot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 0,
   },
   headerRow: {
     flexDirection: 'row',

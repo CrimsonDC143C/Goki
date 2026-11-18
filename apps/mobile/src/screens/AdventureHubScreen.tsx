@@ -1,23 +1,35 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import {
   ADVENTURER_COMPANY_AI_PRESETS,
+  DEFAULT_GUILD_QUEST_CATALOG,
   GuildQuestDefinition,
   LootDrop,
+  MAX_COMPANY_ACTIVE_SQUAD_SIZE,
+  TurnBasedCombatAction,
   TurnBasedCombatState,
   isGuildQuestUnlockedForRank,
 } from '@goki/game-engine';
+import {
+  type CoopParticipantView,
+  type CoopRoomPhase,
+  type WebSocketStatus,
+  gokiWebSocket,
+} from '../api/websocketClient';
 import { CombatLoadoutSelector } from '../components/character';
 import { RpgIcon } from '../components/icons/RpgIcon';
 import { NpcActionChip, NpcDialogueOverlay } from '../components/npc';
 import {
   HairlineDivider,
+  HubSceneBackdrop,
+  HubSceneHeaderSlot,
   SegmentedControl,
   SegmentedOption,
   SlateSection,
@@ -62,11 +74,35 @@ interface DebriefSummary {
   queuedOffline: boolean;
 }
 
+interface CoopQuestRoomState {
+  runId: string;
+  room: string;
+  questSlug: string;
+  questTitle: string;
+  phase: CoopRoomPhase;
+  turnTimeoutMs: number;
+  turnDeadlineAt: number | null;
+  allConnectedReady: boolean;
+  participants: CoopParticipantView[];
+  combatState: TurnBasedCombatState | null;
+}
+
 export const AdventureHubScreen: React.FC = () => {
   const {
+    activeCharacterId,
     adventurerRank,
+    appearanceId,
+    activeSkillLoadout,
+    authToken,
+    beltLoadout,
     characterName,
+    customizationConfig,
+    equipmentBonuses,
+    equipmentLoadout,
+    inventory,
+    race,
     stats,
+    unlockedTalentRanks,
     workoutsLoggedCount,
     guildQuests,
     completedGuildQuestSlugs,
@@ -85,6 +121,15 @@ export const AdventureHubScreen: React.FC = () => {
   const [activeEncounter, setActiveEncounter] =
     useState<ActiveEncounterSession | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
+
+  // Real-Time WebSocket Co-op Lobby & Encounter State
+  const [coopRunIdInput, setCoopRunIdInput] = useState('squad_alpha');
+  const [coopRoomState, setCoopRoomState] = useState<CoopQuestRoomState | null>(null);
+  const [coopError, setCoopError] = useState<string | null>(null);
+  const [coopArenaError, setCoopArenaError] = useState<string | null>(null);
+  const [wsStatus, setWsStatus] = useState<WebSocketStatus>(() => gokiWebSocket.getStatus());
+
+  const localCharacterId = activeCharacterId ?? 'player_hero';
 
   // NPC Dialogue state
   const [receptionistOpen, setReceptionistOpen] = useState(false);
@@ -189,6 +234,225 @@ export const AdventureHubScreen: React.FC = () => {
     } finally {
       setIsSyncingNow(false);
     }
+  };
+
+  const activeCoopRunId = coopRoomState?.runId ?? null;
+  const activeCoopRoom = coopRoomState?.room ?? null;
+  const activeCoopRunIdRef = useRef<string | null>(null);
+  activeCoopRunIdRef.current = activeCoopRunId;
+
+  useEffect(() => {
+    return gokiWebSocket.onStatusChange(setWsStatus);
+  }, []);
+
+  useEffect(() => {
+    const unbind = gokiWebSocket.on('*', (evt: Record<string, unknown>) => {
+      const targetRunId = activeCoopRunIdRef.current;
+      const evtType = String(evt.type ?? '');
+      if (evtType === 'ERROR') {
+        if (!targetRunId) return;
+        const msg = String(evt.error ?? evt.message ?? 'Co-op WebSocket request failed.');
+        setCoopError(msg);
+        setCoopArenaError(msg);
+        return;
+      }
+
+      if (!targetRunId || evt.runId !== targetRunId) return;
+
+      if (evtType === 'COMPANY_QUEST_LOBBY_STATE') {
+        setCoopError(null);
+        setCoopRoomState((prev) => ({
+          runId: String(evt.runId),
+          room: String(evt.room ?? `company-quest:${targetRunId}`),
+          questSlug: String(evt.questSlug ?? prev?.questSlug ?? 'guild_contract_crypt_patrol'),
+          questTitle: String(evt.questTitle ?? prev?.questTitle ?? 'Crypt Gate Patrol'),
+          phase: (evt.phase as CoopRoomPhase) ?? 'LOBBY',
+          turnTimeoutMs: Number(evt.turnTimeoutMs ?? 30000),
+          turnDeadlineAt:
+            typeof evt.turnDeadlineAt === 'number' ? evt.turnDeadlineAt : null,
+          allConnectedReady: Boolean(evt.allConnectedReady),
+          participants: Array.isArray(evt.participants)
+            ? (evt.participants as CoopParticipantView[])
+            : [],
+          combatState: prev?.combatState ?? null,
+        }));
+      } else if (
+        evtType === 'COMPANY_QUEST_STARTED' ||
+        evtType === 'COMPANY_QUEST_STATE_UPDATE'
+      ) {
+        setCoopError(null);
+        setCoopArenaError(null);
+        setCoopRoomState((prev) => ({
+          runId: String(evt.runId),
+          room: String(evt.room ?? `company-quest:${targetRunId}`),
+          questSlug: String(evt.questSlug ?? prev?.questSlug ?? 'guild_contract_crypt_patrol'),
+          questTitle: String(evt.questTitle ?? prev?.questTitle ?? 'Crypt Gate Patrol'),
+          phase: (evt.phase as CoopRoomPhase) ?? 'IN_COMBAT',
+          turnTimeoutMs: Number(evt.turnTimeoutMs ?? prev?.turnTimeoutMs ?? 30000),
+          turnDeadlineAt:
+            typeof evt.turnDeadlineAt === 'number' ? evt.turnDeadlineAt : null,
+          allConnectedReady: prev?.allConnectedReady ?? true,
+          participants: Array.isArray(evt.participants)
+            ? (evt.participants as CoopParticipantView[])
+            : prev?.participants ?? [],
+          combatState: (evt.combatState as TurnBasedCombatState) ?? prev?.combatState ?? null,
+        }));
+      } else if (evtType === 'COMPANY_QUEST_AI_TAKEOVER') {
+        setCoopRoomState((prev) =>
+          prev
+            ? {
+                ...prev,
+                participants: Array.isArray(evt.participants)
+                  ? (evt.participants as CoopParticipantView[])
+                  : prev.participants,
+              }
+            : prev
+        );
+      } else if (evtType === 'COMPANY_QUEST_TURN_TIMEOUT') {
+        setCoopRoomState((prev) =>
+          prev
+            ? {
+                ...prev,
+                turnDeadlineAt:
+                  typeof evt.turnDeadlineAt === 'number' ? evt.turnDeadlineAt : null,
+              }
+            : prev
+        );
+      } else if (evtType === 'COMPANY_QUEST_COMPLETED') {
+        setCoopRoomState((prev) =>
+          prev
+            ? {
+                ...prev,
+                phase: 'COMPLETED',
+                turnDeadlineAt: null,
+                participants: Array.isArray(evt.participants)
+                  ? (evt.participants as CoopParticipantView[])
+                  : prev.participants,
+                combatState:
+                  (evt.combatState as TurnBasedCombatState) ?? prev.combatState,
+              }
+            : prev
+        );
+      }
+    });
+
+    return () => {
+      unbind();
+    };
+  }, []);
+
+  const handleJoinCoopRoom = () => {
+    const cleanRunId =
+      coopRunIdInput.trim().replace(/[^A-Za-z0-9_.:-]/g, '') || 'squad_alpha';
+    const room = `company-quest:${cleanRunId}`;
+    const targetQuest =
+      guildQuests.find((q) => q.questSlug === 'guild_contract_crypt_patrol') ??
+      guildQuests[0] ??
+      DEFAULT_GUILD_QUEST_CATALOG[0]!;
+
+    activeCoopRunIdRef.current = cleanRunId;
+    setCoopError(null);
+    setCoopArenaError(null);
+    setCoopRoomState({
+      runId: cleanRunId,
+      room,
+      questSlug: targetQuest.questSlug,
+      questTitle: targetQuest.title,
+      phase: 'LOBBY',
+      turnTimeoutMs: 30000,
+      turnDeadlineAt: null,
+      allConnectedReady: false,
+      participants: [],
+      combatState: null,
+    });
+
+    const beltSlots = beltLoadout.slice(0, 4).map((itemSlug) => {
+      if (!itemSlug) return { itemSlug: null, charges: 0 };
+      const ownedQty = inventory.find((i) => i.slug === itemSlug)?.quantity ?? 0;
+      return { itemSlug, charges: Math.min(3, Math.max(0, ownedQty)) };
+    });
+
+    const partyMember = {
+      characterId: localCharacterId,
+      name: characterName || 'Adventurer',
+      race,
+      appearanceId,
+      customizationConfig,
+      equippedLoadout: equipmentLoadout,
+      coreStats: {
+        strengthLevel: stats.STRENGTH?.level ?? 1,
+        enduranceLevel: stats.ENDURANCE?.level ?? 1,
+        agilityLevel: stats.AGILITY?.level ?? 1,
+        dexLevel: stats.DEXTERITY?.level ?? 1,
+        conLevel: stats.CONSTITUTION?.level ?? 1,
+        wisLevel: stats.WISDOM?.level ?? 1,
+        sprLevel: stats.SPIRIT?.level ?? 1,
+      },
+      equipmentBonuses,
+      unlockedTalentRanks,
+      activeSkillIds: activeSkillLoadout,
+      beltSlots,
+    };
+
+    if (authToken) {
+      void gokiWebSocket.setAuthToken(authToken);
+    }
+    if (!gokiWebSocket.isConnected()) {
+      void gokiWebSocket.connect();
+    }
+    gokiWebSocket.subscribe(room);
+    gokiWebSocket.send({
+      type: 'COMPANY_QUEST_JOIN',
+      room,
+      runId: cleanRunId,
+      characterId: localCharacterId,
+      characterName: characterName || 'Adventurer',
+      questSlug: targetQuest.questSlug,
+      partyMember,
+    });
+  };
+
+  const handleToggleCoopReady = () => {
+    if (!coopRoomState) return;
+    const localMember = coopRoomState.participants.find(
+      (p) => p.characterId === localCharacterId
+    );
+    gokiWebSocket.send({
+      type: 'COMPANY_QUEST_READY',
+      room: coopRoomState.room,
+      runId: coopRoomState.runId,
+      characterId: localCharacterId,
+      ready: !(localMember?.ready ?? false),
+    });
+  };
+
+  const handleStartCoopQuest = () => {
+    if (!coopRoomState) return;
+    gokiWebSocket.send({
+      type: 'COMPANY_QUEST_START',
+      room: coopRoomState.room,
+      runId: coopRoomState.runId,
+    });
+  };
+
+  const handleLeaveCoopRoom = () => {
+    activeCoopRunIdRef.current = null;
+    if (activeCoopRoom) {
+      gokiWebSocket.unsubscribe(activeCoopRoom);
+    }
+    setCoopRoomState(null);
+    setCoopError(null);
+    setCoopArenaError(null);
+  };
+
+  const handleSendCoopAction = (action: TurnBasedCombatAction) => {
+    if (!coopRoomState) return;
+    gokiWebSocket.send({
+      type: 'COMPANY_QUEST_ACTION',
+      room: coopRoomState.room,
+      runId: coopRoomState.runId,
+      action,
+    });
   };
 
   const resolvedBriefingQuest =
@@ -436,10 +700,23 @@ export const AdventureHubScreen: React.FC = () => {
     );
   };
 
+  const adventureSlotId =
+    subView === 'GUILD_QUESTS' ? 'adventure_guild_hall' : 'adventure_expedition_map';
+  const activeCoopQuest = coopRoomState
+    ? guildQuests.find((q) => q.questSlug === coopRoomState.questSlug) ??
+      DEFAULT_GUILD_QUEST_CATALOG.find((q) => q.questSlug === coopRoomState.questSlug) ??
+      guildQuests[0] ??
+      DEFAULT_GUILD_QUEST_CATALOG[0]!
+    : null;
+  const localCoopParticipant = coopRoomState?.participants.find(
+    (p) => p.characterId === localCharacterId
+  );
+
   return (
     <View style={styles.root}>
+      <HubSceneBackdrop slotId={adventureSlotId} />
       {/* Sub-View Bar + Guild Receptionist NPC */}
-      <View style={styles.topBar}>
+      <HubSceneHeaderSlot slotId={adventureSlotId} style={styles.topBar}>
         <View style={styles.segmentedWrap}>
           <SegmentedControl
             options={SUB_OPTIONS}
@@ -461,11 +738,37 @@ export const AdventureHubScreen: React.FC = () => {
           <RpgIcon name="chat" size={14} color="#38BDF8" />
           <Text style={styles.npcBtnText}>Guild Desk</Text>
         </TouchableOpacity>
-      </View>
+      </HubSceneHeaderSlot>
 
       <View style={styles.body}>
         {subView === 'EXPEDITIONS' ? (
           <DungeonScreen />
+        ) : coopRoomState &&
+          (coopRoomState.phase === 'IN_COMBAT' || coopRoomState.phase === 'COMPLETED') &&
+          coopRoomState.combatState &&
+          activeCoopQuest ? (
+          <TurnBasedArenaScreen
+            initialState={coopRoomState.combatState}
+            quest={activeCoopQuest}
+            companionIds={[]}
+            serverRunId={coopRoomState.runId}
+            coopSession={{
+              room: coopRoomState.room,
+              runId: coopRoomState.runId,
+              localCharacterId,
+              serverState: coopRoomState.combatState,
+              turnDeadlineAt: coopRoomState.turnDeadlineAt,
+              turnTimeoutMs: coopRoomState.turnTimeoutMs,
+              participants: coopRoomState.participants,
+              error: coopArenaError,
+              onSendAction: handleSendCoopAction,
+            }}
+            onComplete={(res) => {
+              handleLeaveCoopRoom();
+              void handleEncounterComplete(res);
+            }}
+            onRetreat={handleLeaveCoopRoom}
+          />
         ) : activeEncounter ? (
           <TurnBasedArenaScreen
             initialState={activeEncounter.state}
@@ -567,6 +870,150 @@ export const AdventureHubScreen: React.FC = () => {
             {/* Compact Combat Loadout Pre-Quest Staging */}
             <CombatLoadoutSelector compact />
 
+            {/* Real-Time Company Co-op Quest Room */}
+            <SlateSection
+              level={1}
+              eyebrow={`LIVE WEBSOCKET CO-OP • ${wsStatus.toUpperCase()}`}
+              title="Adventurer Company Co-op Room"
+              subtitle="Host or join a company-quest room for up to 4 active squadmates with turn timers and AI takeover."
+            >
+              <View style={styles.coopCard} testID="coop-quest-panel">
+                {coopError ? (
+                  <View style={styles.launchErrorBanner} testID="coop-error-banner">
+                    <Text style={styles.launchErrorText}>{coopError}</Text>
+                  </View>
+                ) : null}
+
+                {!coopRoomState ? (
+                  <View style={styles.coopJoinRow}>
+                    <TextInput
+                      value={coopRunIdInput}
+                      onChangeText={setCoopRunIdInput}
+                      placeholder="Co-op Run ID (e.g. squad_alpha)"
+                      placeholderTextColor={COLORS.textMuted}
+                      style={styles.coopInput}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      testID="coop-run-id-input"
+                    />
+                    <TouchableOpacity
+                      style={styles.coopJoinBtn}
+                      onPress={handleJoinCoopRoom}
+                      activeOpacity={0.82}
+                      testID="coop-join-room-btn"
+                    >
+                      <RpgIcon name="social" size={14} color={SURFACES.canvas} />
+                      <Text style={styles.coopJoinBtnText}>Join Co-op</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.coopLobbyWrap} testID="coop-lobby-card">
+                    <View style={styles.coopLobbyHeader}>
+                      <Text style={styles.coopRoomBadge} numberOfLines={1}>
+                        {coopRoomState.room}
+                      </Text>
+                      <Text style={styles.coopQuestBadge} numberOfLines={1}>
+                        {coopRoomState.questTitle}
+                      </Text>
+                    </View>
+
+                    <View style={styles.coopSlotsGrid}>
+                      {[1, 2, 3, 4].map((slotNum) => {
+                        const member = coopRoomState.participants.find(
+                          (p) => p.squadSlot === slotNum
+                        );
+                        return (
+                          <View
+                            key={slotNum}
+                            style={styles.coopSlotCard}
+                            testID={`coop-slot-${slotNum}`}
+                          >
+                            <Text style={styles.coopSlotEyebrow}>SLOT {slotNum}</Text>
+                            {member ? (
+                              <>
+                                <Text style={styles.coopSlotName} numberOfLines={1}>
+                                  {member.characterName}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.coopSlotStatus,
+                                    member.controlMode === 'AI_TAKEOVER'
+                                      ? { color: COLORS.warning }
+                                      : member.ready
+                                        ? { color: COLORS.success }
+                                        : { color: COLORS.textSecondary },
+                                  ]}
+                                >
+                                  {member.controlMode === 'AI_TAKEOVER'
+                                    ? 'AI Takeover'
+                                    : member.ready
+                                      ? 'Ready'
+                                      : 'Waiting'}
+                                </Text>
+                              </>
+                            ) : (
+                              <Text style={styles.coopSlotEmpty}>Open Slot</Text>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </View>
+
+                    <View style={styles.coopLobbyActions}>
+                      <TouchableOpacity
+                        style={[
+                          styles.coopReadyBtn,
+                          localCoopParticipant?.ready && styles.coopReadyBtnActive,
+                        ]}
+                        onPress={handleToggleCoopReady}
+                        activeOpacity={0.8}
+                        testID="coop-ready-btn"
+                      >
+                        <Text
+                          style={[
+                            styles.coopReadyBtnText,
+                            localCoopParticipant?.ready && styles.coopReadyBtnTextActive,
+                          ]}
+                        >
+                          {localCoopParticipant?.ready ? 'Ready ✓' : 'Ready Up'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.coopStartBtn,
+                          !coopRoomState.allConnectedReady && styles.coopStartBtnDisabled,
+                        ]}
+                        onPress={handleStartCoopQuest}
+                        disabled={!coopRoomState.allConnectedReady}
+                        activeOpacity={0.82}
+                        testID="coop-start-btn"
+                      >
+                        <Text
+                          style={[
+                            styles.coopStartBtnText,
+                            !coopRoomState.allConnectedReady && styles.coopStartBtnTextDisabled,
+                          ]}
+                        >
+                          Start ({coopRoomState.participants.filter((p) => p.connected).length}/
+                          {MAX_COMPANY_ACTIVE_SQUAD_SIZE})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.coopLeaveBtn}
+                        onPress={handleLeaveCoopRoom}
+                        activeOpacity={0.75}
+                        testID="coop-leave-btn"
+                      >
+                        <Text style={styles.coopLeaveBtnText}>Leave</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              </View>
+            </SlateSection>
+
             {/* Live Quests & Rank-Up Trials Board */}
             <SlateSection
               level={1}
@@ -600,6 +1047,16 @@ export const AdventureHubScreen: React.FC = () => {
         visible={receptionistOpen}
         onClose={() => setReceptionistOpen(false)}
         npcId="GUILD_RECEPTIONIST"
+        sceneSlotId="adventure_guild_hall"
+        expression={
+          npcMode === 'DEBRIEF'
+            ? 'happy'
+            : npcMode === 'BRIEFING'
+              ? 'focused'
+              : deskFeedback
+                ? 'happy'
+                : 'neutral'
+        }
         dialoguePages={npcDialoguePages}
         actionChips={npcActionChips}
       />
@@ -894,5 +1351,156 @@ const styles = StyleSheet.create({
   },
   embarkBtnTextDisabled: {
     color: COLORS.textMuted,
+  },
+  coopCard: {
+    gap: SPACING.sm,
+  },
+  coopJoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  coopInput: {
+    flex: 1,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: RADII.md,
+    borderWidth: 1,
+    borderColor: SURFACES.hairlineStrong,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 9,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  coopJoinBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#38BDF8',
+    borderRadius: RADII.md,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  coopJoinBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: SURFACES.canvas,
+  },
+  coopLobbyWrap: {
+    gap: SPACING.sm,
+    backgroundColor: SURFACES.layer2,
+    borderRadius: RADII.md,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: SURFACES.hairlineStrong,
+  },
+  coopLobbyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.sm,
+  },
+  coopRoomBadge: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#38BDF8',
+    flex: 1,
+  },
+  coopQuestBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.gold,
+  },
+  coopSlotsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.xs,
+  },
+  coopSlotCard: {
+    width: '48.5%',
+    backgroundColor: SURFACES.layer1,
+    borderRadius: RADII.sm,
+    padding: SPACING.sm,
+    borderWidth: 1,
+    borderColor: SURFACES.hairline,
+    gap: 2,
+  },
+  coopSlotEyebrow: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+  },
+  coopSlotName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  coopSlotStatus: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  coopSlotEmpty: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: COLORS.textMuted,
+  },
+  coopLobbyActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  coopReadyBtn: {
+    flex: 1,
+    backgroundColor: SURFACES.layer3,
+    borderRadius: RADII.md,
+    paddingVertical: 9,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: SURFACES.hairlineStrong,
+  },
+  coopReadyBtnActive: {
+    backgroundColor: 'rgba(76, 175, 80, 0.18)',
+    borderColor: COLORS.success,
+  },
+  coopReadyBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  coopReadyBtnTextActive: {
+    color: COLORS.success,
+  },
+  coopStartBtn: {
+    flex: 1,
+    backgroundColor: COLORS.gold,
+    borderRadius: RADII.md,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  coopStartBtnDisabled: {
+    backgroundColor: SURFACES.layer1,
+    borderWidth: 1,
+    borderColor: SURFACES.hairline,
+  },
+  coopStartBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: SURFACES.canvas,
+  },
+  coopStartBtnTextDisabled: {
+    color: COLORS.textMuted,
+  },
+  coopLeaveBtn: {
+    backgroundColor: 'rgba(239, 83, 80, 0.15)',
+    borderRadius: RADII.md,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 83, 80, 0.35)',
+  },
+  coopLeaveBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.danger,
   },
 });

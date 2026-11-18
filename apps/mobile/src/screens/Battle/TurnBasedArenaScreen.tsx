@@ -18,9 +18,10 @@ import {
   TurnBasedCombatant,
   stepTurnBasedCombat,
 } from '@goki/game-engine';
+import type { CoopParticipantView } from '../../api/websocketClient';
 import {
   ParallaxBackground,
-  WHITEWOOD_ARENA_PRESET,
+  resolveBattleArenaPreset,
 } from '../../components/battle/background/ParallaxBackground';
 import { SpriteAnimator } from '../../components/battle/sprites/SpriteAnimator';
 import type { AnimationState } from '../../components/battle/sprites/sprite.types';
@@ -32,11 +33,24 @@ import {
 import { RpgIcon } from '../../components/icons/RpgIcon';
 import { COLORS, RADII, SPACING, SURFACES, TYPOGRAPHY } from '../../theme';
 
+export interface TurnBasedArenaCoopSession {
+  room: string;
+  runId: string;
+  localCharacterId: string;
+  serverState: TurnBasedCombatState;
+  turnDeadlineAt: number | null;
+  turnTimeoutMs: number;
+  participants: CoopParticipantView[];
+  error?: string | null;
+  onSendAction: (action: TurnBasedCombatAction) => void;
+}
+
 export interface TurnBasedArenaScreenProps {
   initialState: TurnBasedCombatState;
   quest: GuildQuestDefinition;
   companionIds: string[];
   serverRunId?: string | null;
+  coopSession?: TurnBasedArenaCoopSession | null;
   onComplete: (result: {
     finalState: TurnBasedCombatState;
     companionIds: string[];
@@ -148,18 +162,54 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
   quest,
   companionIds,
   serverRunId = null,
+  coopSession = null,
   onComplete,
   onRetreat,
 }) => {
-  const [state, setState] = useState<TurnBasedCombatState>(initialState);
+  const [state, setState] = useState<TurnBasedCombatState>(
+    coopSession?.serverState ?? initialState
+  );
   const [playbackSpeed, setPlaybackSpeed] = useState<1 | 2>(1);
   const [stageWidth, setStageWidth] = useState(360);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(() => {
-    const firstEnemy = initialState.units.find((u) => u.side === 'ENEMY' && u.alive);
+    const firstEnemy = (coopSession?.serverState ?? initialState).units.find(
+      (u) => u.side === 'ENEMY' && u.alive
+    );
     return firstEnemy?.unitId ?? null;
   });
   const [actionError, setActionError] = useState<string | null>(null);
   const stepSeqRef = useRef(0);
+
+  // Sync authoritative server state in co-op mode
+  useEffect(() => {
+    if (!coopSession) return;
+    setState(coopSession.serverState);
+    setActionError(null);
+  }, [coopSession, coopSession?.serverState]);
+
+  // Live co-op turn countdown ticker
+  useEffect(() => {
+    if (!coopSession?.turnDeadlineAt || state.status !== 'IN_PROGRESS') return;
+    setNowMs(Date.now());
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 250);
+    return () => clearInterval(interval);
+  }, [coopSession?.turnDeadlineAt, state.status, state.stepSeq]);
+
+  const remainingTurnSec = useMemo(() => {
+    if (!coopSession || state.status !== 'IN_PROGRESS') return null;
+    if (!coopSession.turnDeadlineAt) {
+      return Math.max(0, Math.ceil(coopSession.turnTimeoutMs / 1000));
+    }
+    return Math.max(0, Math.ceil((coopSession.turnDeadlineAt - nowMs) / 1000));
+  }, [coopSession, nowMs, state.status]);
+
+  const arenaPreset = useMemo(
+    () => resolveBattleArenaPreset(quest.questSlug),
+    [quest.questSlug]
+  );
 
   const partyUnits = useMemo(
     () => state.units.filter((u) => u.side === 'PARTY'),
@@ -182,10 +232,17 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
     return livingEnemies[0]?.unitId ?? null;
   }, [livingEnemies, selectedTargetId]);
 
-  const heroUnit = useMemo(
-    () => partyUnits.find((u) => u.controller === 'PLAYER') ?? partyUnits[0] ?? null,
-    [partyUnits]
-  );
+  const heroUnit = useMemo(() => {
+    if (coopSession) {
+      return (
+        partyUnits.find((u) => u.unitId === coopSession.localCharacterId) ??
+        partyUnits.find((u) => u.controller === 'PLAYER') ??
+        partyUnits[0] ??
+        null
+      );
+    }
+    return partyUnits.find((u) => u.controller === 'PLAYER') ?? partyUnits[0] ?? null;
+  }, [coopSession, partyUnits]);
   const activeUnit = useMemo(
     () => state.units.find((u) => u.unitId === state.activeUnitId) ?? null,
     [state.units, state.activeUnitId]
@@ -204,21 +261,30 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
     return events[events.length - 1]!.message;
   }, [state.lastStepEvents, state.currentWaveIndex, state.totalWaves]);
 
-  const dispatchCombatAction = useCallback((action: TurnBasedCombatAction) => {
-    setState((prev) => {
-      const result = stepTurnBasedCombat(prev, action);
-      if (!result.valid) {
-        setActionError(result.error ?? 'Action not permitted.');
-        return prev;
+  const dispatchCombatAction = useCallback(
+    (action: TurnBasedCombatAction) => {
+      if (coopSession) {
+        setActionError(null);
+        coopSession.onSendAction(action);
+        return;
       }
-      setActionError(null);
-      stepSeqRef.current += 1;
-      return result.state;
-    });
-  }, []);
+      setState((prev) => {
+        const result = stepTurnBasedCombat(prev, action);
+        if (!result.valid) {
+          setActionError(result.error ?? 'Action not permitted.');
+          return prev;
+        }
+        setActionError(null);
+        stepSeqRef.current += 1;
+        return result.state;
+      });
+    },
+    [coopSession]
+  );
 
-  // AI Turn Stepper
+  // Local AI Turn Stepper (disabled in server-authoritative WebSocket co-op mode)
   useEffect(() => {
+    if (coopSession) return;
     if (state.status !== 'IN_PROGRESS' || state.phase !== 'AWAITING_AI_TURN') {
       return;
     }
@@ -227,15 +293,19 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
       dispatchCombatAction({ type: 'AUTO_AI_TURN' });
     }, delayMs);
     return () => clearTimeout(timer);
-  }, [state.status, state.phase, state.stepSeq, playbackSpeed, dispatchCombatAction]);
+  }, [coopSession, state.status, state.phase, state.stepSeq, playbackSpeed, dispatchCombatAction]);
 
   const handleStageLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
     if (w > 0) setStageWidth(Math.round(w));
   };
 
-  const isPlayerTurn =
-    state.status === 'IN_PROGRESS' && state.phase === 'AWAITING_PLAYER_ACTION';
+  const isPlayerTurn = coopSession
+    ? state.status === 'IN_PROGRESS' &&
+      state.phase === 'AWAITING_PLAYER_ACTION' &&
+      Boolean(heroUnit && state.activeUnitId === heroUnit.unitId)
+    : state.status === 'IN_PROGRESS' && state.phase === 'AWAITING_PLAYER_ACTION';
+  const displayedError = coopSession?.error ?? actionError;
 
   return (
     <View style={styles.root} testID="turn-based-arena-screen">
@@ -252,6 +322,24 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
           </View>
 
           <View style={styles.headerControls}>
+            {coopSession && remainingTurnSec !== null ? (
+              <View
+                style={[
+                  styles.turnTimerPill,
+                  remainingTurnSec <= 5 && styles.turnTimerPillUrgent,
+                ]}
+                testID="arena-turn-timer-pill"
+              >
+                <Text
+                  style={[
+                    styles.turnTimerText,
+                    remainingTurnSec <= 5 && styles.turnTimerTextUrgent,
+                  ]}
+                >
+                  {remainingTurnSec}s
+                </Text>
+              </View>
+            ) : null}
             <TouchableOpacity
               style={[styles.speedBtn, playbackSpeed === 2 && styles.speedBtnActive]}
               onPress={() => setPlaybackSpeed((p) => (p === 1 ? 2 : 1))}
@@ -309,7 +397,7 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
       {/* 2. Parallax Battle Stage */}
       <View style={styles.stageContainer} onLayout={handleStageLayout}>
         <ParallaxBackground
-          arenaConfig={WHITEWOOD_ARENA_PRESET}
+          arenaConfig={arenaPreset}
           viewportWidth={stageWidth}
           scrollMode="combat"
           playbackRate={playbackSpeed}
@@ -323,7 +411,13 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
               const popup = popupsByUnit[unit.unitId];
               const isTurnActive = unit.unitId === state.activeUnitId;
               const hpPct = Math.max(0, Math.min(100, (unit.hp / Math.max(1, unit.maxHp)) * 100));
-              const isHero = unit.controller === 'PLAYER';
+              const isHero = coopSession
+                ? unit.unitId === coopSession.localCharacterId
+                : unit.controller === 'PLAYER';
+              const coopParticipant = coopSession?.participants.find(
+                (p) => p.characterId === unit.unitId
+              );
+              const isAiTakeover = coopParticipant?.controlMode === 'AI_TAKEOVER';
 
               return (
                 <View
@@ -358,9 +452,19 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
                   </View>
 
                   <View style={styles.unitHud}>
-                    <Text style={styles.unitName} numberOfLines={1}>
-                      {unit.name}
-                    </Text>
+                    <View style={styles.unitNameRow}>
+                      <Text style={styles.unitName} numberOfLines={1}>
+                        {unit.name}
+                      </Text>
+                      {isAiTakeover ? (
+                        <View
+                          style={styles.aiTakeoverBadge}
+                          testID={`arena-unit-ai-badge-${unit.unitId}`}
+                        >
+                          <Text style={styles.aiTakeoverBadgeText}>AI</Text>
+                        </View>
+                      ) : null}
+                    </View>
                     <View style={styles.hpBarTrack}>
                       <View style={[styles.hpBarFillParty, { width: `${hpPct}%` }]} />
                     </View>
@@ -510,9 +614,9 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
         style={styles.deckScroll}
         contentContainerStyle={styles.deckContent}
       >
-        {actionError ? (
+        {displayedError ? (
           <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{actionError}</Text>
+            <Text style={styles.errorBannerText}>{displayedError}</Text>
           </View>
         ) : null}
 
@@ -685,11 +789,13 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
               </View>
             </View>
           ) : (
-            <View style={styles.aiTurnBanner}>
+            <View style={styles.aiTurnBanner} testID="arena-waiting-turn-banner">
               <RpgIcon name="sparkles" size={16} color={COLORS.gold} />
               <Text style={styles.aiTurnText}>
                 {activeUnit
-                  ? `${activeUnit.name} is acting...`
+                  ? coopSession && state.phase === 'AWAITING_PLAYER_ACTION'
+                    ? `Awaiting ${activeUnit.name}'s command...`
+                    : `${activeUnit.name} is acting...`
                   : 'Resolving turn order...'}
               </Text>
             </View>
@@ -773,6 +879,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.xs,
+  },
+  turnTimerPill: {
+    backgroundColor: 'rgba(56, 189, 248, 0.14)',
+    borderRadius: RADII.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.45)',
+  },
+  turnTimerPillUrgent: {
+    backgroundColor: 'rgba(239, 83, 80, 0.18)',
+    borderColor: COLORS.danger,
+  },
+  turnTimerText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#38BDF8',
+    ...TYPOGRAPHY.tabular,
+  },
+  turnTimerTextUrgent: {
+    color: COLORS.danger,
   },
   speedBtn: {
     backgroundColor: SURFACES.layer2,
@@ -903,6 +1030,24 @@ const styles = StyleSheet.create({
   unitHud: {
     flex: 1,
     gap: 2,
+  },
+  unitNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  aiTakeoverBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.22)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderColor: COLORS.warning,
+  },
+  aiTakeoverBadgeText: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: COLORS.warning,
   },
   unitName: {
     fontSize: 11,

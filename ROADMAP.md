@@ -34,7 +34,7 @@ These core decisions guide every milestone below:
 | **M3** | Live Turn-Based Combat & Adventurer's Guild Hub | `[x]` Complete |
 | **M4** | Artisan Economy, NPC Cast, & Fitness Coaching | `[x]` Complete |
 | **M5** | Social Hub, Real-World Gym Clans, & Adventurer Companies | `[x]` Complete |
-| **M6** | Full RPG Illustration Polish & Real-Time Co-op Readiness | `[ ]` Planned |
+| **M6** | Full RPG Illustration Polish & Real-Time Co-op Readiness | `[/]` In Progress |
 
 ---
 
@@ -144,18 +144,19 @@ These core decisions guide every milestone below:
 ---
 
 ## Milestone 6: Full RPG Illustration Polish & Real-Time Co-op Readiness
-**Status:** `[ ]` Planned  
+**Status:** `[/]` In Progress  
 **Goal:** Deliver the high-impact visual art pass across all RPG screens and unlock live real-time multiplayer Adventurer Company co-op over WebSockets.
 
 ### Actionable Steps
 - [ ] **Bespoke RPG Environment & NPC Art Pass (`apps/mobile`):**
+  - [x] Wire drop-in asset-registry slots (`rpgArtRegistry.ts`) and zero-reflow scene layout hooks (`HubSceneShell.tsx`) across `Hero`, `Adventure`, `Artisan`, `Social`, `NpcDialogueOverlay`, `CharacterRigRenderer`, and `ParallaxBackground`.
   - [ ] Commission/generate cohesive layered backgrounds and illustrated headers for `Hero`, `Adventure` (Adventurer's Guild), `Artisan` (Forge & Apothecary), and `Social` (Clan Hall & Tavern).
   - [ ] Upgrade all hub NPC portraits (**Guide**, **Guild Receptionist**, **Trader**, **Trainer**, **Quartermaster**, **Clan Warden**) with expression variants.
   - [ ] Polish combat VFX, skill animations, and parallax battle backdrops while keeping screen density clean and scannable.
-- [ ] **Real-Time Co-op Turn-Based Combat (`apps/server/src/routes/websocket.ts`, `@goki/game-engine`):**
-  - [ ] Host `stepTurnBasedCombat` authoritatively in Fastify WebSocket rooms (`company-quest:{runId}`) for up to 4 active Adventurer Company squadmates.
-  - [ ] Add live lobby readiness, turn countdown timers, and automatic AI takeover if a teammate disconnects.
-- [ ] **Final Release QA:** Full monorepo typecheck, Vitest suite, Playwright E2E verification, and mobile performance profiling across iOS, Android, and Web.
+- [x] **Real-Time Co-op Turn-Based Combat (`apps/server/src/routes/websocket.ts`, `@goki/game-engine`):**
+  - [x] Host `stepTurnBasedCombat` authoritatively in Fastify WebSocket rooms (`company-quest:{runId}`) for up to 4 active Adventurer Company squadmates.
+  - [x] Add live lobby readiness, turn countdown timers, and automatic AI takeover if a teammate disconnects.
+- [x] **Final Release QA:** Full monorepo typecheck, Vitest suite, Playwright E2E verification, and mobile performance profiling across iOS, Android, and Web.
 
 ---
 

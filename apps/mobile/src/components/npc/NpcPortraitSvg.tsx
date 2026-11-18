@@ -1,4 +1,6 @@
 import React from 'react';
+import { View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import Svg, {
   Circle,
   Defs,
@@ -10,6 +12,7 @@ import Svg, {
   Rect,
   Stop,
 } from 'react-native-svg';
+import { getNpcPortraitArtSource } from '../../assets/rpgArtRegistry';
 import { COLORS } from '../../theme';
 
 export type NpcArchetypeId =
@@ -72,6 +75,7 @@ export interface NpcPortraitSvgProps {
   npcId?: NpcArchetypeId;
   size?: number;
   expression?: NpcExpression;
+  testID?: string;
 }
 
 function renderExpressiveEyes(
@@ -231,11 +235,36 @@ export const NpcPortraitSvg: React.FC<NpcPortraitSvgProps> = ({
   npcId = 'GUIDE',
   size = 72,
   expression = 'neutral',
+  testID,
 }) => {
   const meta = NPC_ARCHETYPE_META[npcId];
   const accent = meta.accentColor;
+  const resolvedTestId = testID ?? `npc-portrait-${npcId.toLowerCase()}-${expression}`;
+  const artSource = getNpcPortraitArtSource(npcId, expression);
+
+  if (artSource) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: Math.round(size * 0.175),
+          overflow: 'hidden',
+        }}
+        testID={resolvedTestId}
+      >
+        <ExpoImage
+          source={artSource as any}
+          style={{ width: size, height: size }}
+          contentFit="cover"
+          contentPosition="top center"
+        />
+      </View>
+    );
+  }
 
   return (
+    <View style={{ width: size, height: size }} testID={resolvedTestId}>
     <Svg width={size} height={size} viewBox="0 0 80 80">
       <Defs>
         <LinearGradient id={`npcBg_${npcId}`} x1="0" y1="0" x2="0" y2="1">
@@ -479,5 +508,6 @@ export const NpcPortraitSvg: React.FC<NpcPortraitSvgProps> = ({
         strokeWidth="1.4"
       />
     </Svg>
+    </View>
   );
 };

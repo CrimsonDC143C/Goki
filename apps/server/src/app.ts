@@ -124,7 +124,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
     timestamp: new Date().toISOString(),
   }));
 
-  registerWebSocketRoutes(app, wsManager);
+  const coopManager = registerWebSocketRoutes(app, wsManager, options.db);
   registerVersionRoutes(app);
   registerAuthRoutes(app, options.db);
   registerDiagnosticsRoutes(app, options.db);
@@ -134,7 +134,7 @@ export async function buildServerApp(options: BuildServerOptions): Promise<Fasti
   registerTalentRoutes(app, options.db);
   registerGatheringRoutes(app, options.db, timers);
   registerDungeonRoutes(app, options.db, timers, wsManager);
-  registerAdventurersGuildRoutes(app, options.db);
+  registerAdventurersGuildRoutes(app, options.db, coopManager);
   registerCraftingRoutes(app, options.db);
   registerNpcHubRoutes(app, options.db);
   registerGuildAndRaidRoutes(app, options.db, timers, wsManager);

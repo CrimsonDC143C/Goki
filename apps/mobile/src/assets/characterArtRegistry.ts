@@ -1,4 +1,24 @@
 import { ImageSourcePropType } from 'react-native';
+import type { BaseSilhouetteId, CharacterRace } from '@goki/game-engine';
+import {
+  MORPH_EVOLUTION_OVERLAY_SLOTS,
+  RACE_ILLUSTRATION_SLOTS,
+  RIG_BODY_PART_ILLUSTRATION_SLOTS,
+  getMorphEvolutionOverlay,
+  getRaceBustIllustration,
+  getRaceStandingIllustration,
+  getRigBodyPartIllustration,
+} from './rpgArtRegistry';
+
+export {
+  MORPH_EVOLUTION_OVERLAY_SLOTS,
+  RACE_ILLUSTRATION_SLOTS,
+  RIG_BODY_PART_ILLUSTRATION_SLOTS,
+  getMorphEvolutionOverlay,
+  getRaceBustIllustration,
+  getRaceStandingIllustration,
+  getRigBodyPartIllustration,
+};
 
 export interface CharacterAppearancePreset {
   id: string;
@@ -156,4 +176,28 @@ export function getCharacterBustSource(idOrLegacyKey?: string | null): ImageSour
  */
 export function getCharacterStandingSource(idOrLegacyKey?: string | null): ImageSourcePropType {
   return getCharacterAppearance(idOrLegacyKey).standingSource;
+}
+
+/**
+ * Resolves a drop-in Milestone 6 race/silhouette bust illustration when populated,
+ * falling back to the legacy appearance bust preset.
+ */
+export function getRaceAwareBustSource(
+  race: CharacterRace = 'HUMAN',
+  silhouette: BaseSilhouetteId = 'balanced',
+  idOrLegacyKey?: string | null
+): ImageSourcePropType {
+  return getRaceBustIllustration(race, silhouette) ?? getCharacterBustSource(idOrLegacyKey);
+}
+
+/**
+ * Resolves a drop-in Milestone 6 race/silhouette standing illustration when populated,
+ * falling back to the legacy appearance standing preset.
+ */
+export function getRaceAwareStandingSource(
+  race: CharacterRace = 'HUMAN',
+  silhouette: BaseSilhouetteId = 'balanced',
+  idOrLegacyKey?: string | null
+): ImageSourcePropType {
+  return getRaceStandingIllustration(race, silhouette) ?? getCharacterStandingSource(idOrLegacyKey);
 }

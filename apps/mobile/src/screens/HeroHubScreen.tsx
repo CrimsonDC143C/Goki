@@ -49,6 +49,8 @@ import {
 } from '../components/npc';
 import {
   HairlineDivider,
+  HubSceneBackdrop,
+  HubSceneHeaderSlot,
   SegmentedControl,
   SegmentedOption,
   SlateSection,
@@ -364,8 +366,9 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
 
   return (
     <View style={styles.root}>
+      <HubSceneBackdrop slotId="hero_sanctum" />
       {/* Top Sub-View Bar + Guide NPC */}
-      <View style={styles.topControlBar}>
+      <HubSceneHeaderSlot slotId="hero_sanctum" style={styles.topControlBar}>
         <View style={styles.segmentedWrap}>
           <SegmentedControl
             options={subViewOptions}
@@ -382,7 +385,7 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
           <RpgIcon name="chat" size={14} color={COLORS.gold} />
           <Text style={styles.npcTriggerText}>Guide</Text>
         </TouchableOpacity>
-      </View>
+      </HubSceneHeaderSlot>
 
       {/* Active Sub-View */}
       <View style={styles.body}>
@@ -1049,6 +1052,8 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
         visible={guideOpen}
         onClose={() => setGuideOpen(false)}
         npcId="GUIDE"
+        sceneSlotId="hero_sanctum"
+        pageExpressions={['happy', 'focused']}
         dialoguePages={[
           `Welcome back, ${characterName || 'Adventurer'}. Your Hero hub unites gear loadouts, cosmetic appearances, and all 10 stat-bound talent trees in one place.`,
           'Every real-world workout grants holistic stat XP and talent points. Allocate points under Talents or head to Train whenever you are ready to log sets.',

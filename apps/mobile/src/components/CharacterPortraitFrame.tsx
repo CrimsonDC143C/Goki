@@ -7,7 +7,12 @@ import type {
   CharacterRace,
   EquipmentLoadoutMap,
 } from '@goki/game-engine';
-import { getCharacterBustSource, getCharacterStandingSource } from '../assets/characterArtRegistry';
+import {
+  getCharacterBustSource,
+  getCharacterStandingSource,
+  getRaceBustIllustration,
+  getRaceStandingIllustration,
+} from '../assets/characterArtRegistry';
 import { HUD_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
 import { CharacterRigRenderer, RigAnimationState } from './character';
@@ -64,7 +69,15 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
       imageSource.startsWith('https://') ||
       imageSource.startsWith('file://'));
   const isCustomImageProp = Boolean(imageSource && typeof imageSource !== 'string');
-  const useRigRenderer = !isSilhouette && !isExternalUri && !isCustomImageProp;
+  const resolvedRace: CharacterRace = race ?? 'HUMAN';
+  const resolvedSilhouette = customizationConfig?.identity?.baseSilhouette ?? 'balanced';
+  const racePortraitOverride = !isSilhouette
+    ? effectivePose === 'bust'
+      ? getRaceBustIllustration(resolvedRace, resolvedSilhouette)
+      : getRaceStandingIllustration(resolvedRace, resolvedSilhouette)
+    : null;
+  const useRigRenderer =
+    !isSilhouette && !isExternalUri && !isCustomImageProp && !racePortraitOverride;
   const rigAppearanceId =
     appearanceId ?? (typeof imageSource === 'string' && imageSource.trim().length > 0 ? imageSource : undefined);
 
@@ -72,6 +85,8 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
 
   if (isSilhouette) {
     resolvedSource = null;
+  } else if (racePortraitOverride) {
+    resolvedSource = racePortraitOverride;
   } else if (appearanceId) {
     resolvedSource =
       effectivePose === 'bust'

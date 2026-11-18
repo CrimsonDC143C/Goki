@@ -1,4 +1,8 @@
 import React from 'react';
+import {
+  BATTLE_ARENA_ART_REGISTRY,
+  inferBattleArenaThemeId,
+} from '../../../assets/rpgArtRegistry';
 import type { ParallaxArenaConfig, ParallaxLayerConfig, ScrollMode } from './parallax.types';
 import { ParallaxLayer } from './ParallaxLayer';
 
@@ -91,6 +95,45 @@ export const WHITEWOOD_ARENA_PRESET: ParallaxArenaConfig = {
     },
   ],
 };
+
+/**
+ * Resolves a quest/biome arena preset from BATTLE_ARENA_ART_REGISTRY when all 6 layers
+ * are populated; falls back to WHITEWOOD_ARENA_PRESET while slots are null.
+ */
+export function resolveBattleArenaPreset(questOrThemeSlug?: string | null): ParallaxArenaConfig {
+  const themeId = inferBattleArenaThemeId(questOrThemeSlug);
+  const slot = BATTLE_ARENA_ART_REGISTRY[themeId];
+  if (
+    !slot ||
+    !slot.sky ||
+    !slot.cloudsOrMist ||
+    !slot.mountainsOrWalls ||
+    !slot.hillBackground ||
+    !slot.hillMidground ||
+    !slot.groundForeground
+  ) {
+    return WHITEWOOD_ARENA_PRESET;
+  }
+
+  const slotSources = [
+    slot.sky,
+    slot.cloudsOrMist,
+    slot.mountainsOrWalls,
+    slot.hillBackground,
+    slot.hillMidground,
+    slot.groundForeground,
+  ];
+
+  return {
+    ...WHITEWOOD_ARENA_PRESET,
+    id: slot.themeId,
+    name: slot.name,
+    layers: WHITEWOOD_ARENA_PRESET.layers.map((layer, index) => ({
+      ...layer,
+      source: slotSources[index] ?? layer.source,
+    })),
+  };
+}
 
 export interface ParallaxBackgroundProps {
   arenaConfig?: ParallaxArenaConfig;

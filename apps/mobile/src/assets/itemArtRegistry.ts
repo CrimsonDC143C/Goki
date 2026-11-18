@@ -1,4 +1,44 @@
 import { ImageSourcePropType } from 'react-native';
+import {
+  EQUIPMENT_RIG_OVERLAY_SLOTS,
+  getEquipmentRigOverlaySource,
+} from './rpgArtRegistry';
+
+export { EQUIPMENT_RIG_OVERLAY_SLOTS, getEquipmentRigOverlaySource };
+
+/**
+ * Dedicated 512x512 drop-in slots for currently aliased consumables, materials, and gear slugs.
+ * Checked before ITEM_ICON_ALIASES so final illustrations drop in without changing any screen.
+ */
+export const DEDICATED_ITEM_ICON_SLOTS: Readonly<Record<string, ImageSourcePropType | null>> = {
+  sunleaf_healing_draught: null,
+  astral_mana_tonic: null,
+  astral_dew_vial: null,
+  arcane_reforge_dust: null,
+  titanite_ember: null,
+  iron_greatsword: null,
+  crimson_oni_kanabo: null,
+  executioners_greataxe: null,
+  warden_halberd: null,
+  astral_archstaff: null,
+  dusk_shinobi_wakizashi: null,
+  sunforged_warhammer: null,
+  reaver_cleaver: null,
+  oath_sentinel_longsword: null,
+  bastion_tower_shield: null,
+  solar_censer_relic: null,
+  void_grimoire_codex: null,
+  shadowveil_hood: null,
+  horned_oni_mempo: null,
+  dread_knight_cuirass: null,
+  wayfarer_brigandine: null,
+  solar_mystic_vestments: null,
+  colossus_plate_cuisses: null,
+  acrobat_silk_leggings: null,
+  phantom_step_treads: null,
+  glacial_reaver_stompers: null,
+  astral_teardrop_amulet: null,
+};
 
 /**
  * 40 High-Res (512x512 LANCZOS PNG) RPG Item Icons.
@@ -212,6 +252,11 @@ export function getItemIconSource(
   for (const raw of candidates) {
     if (!raw) continue;
     const cleaned = cleanKey(raw);
+
+    // 0. Milestone 6 dedicated drop-in slot hit (checked before alias fallback)
+    if (DEDICATED_ITEM_ICON_SLOTS[cleaned]) {
+      return DEDICATED_ITEM_ICON_SLOTS[cleaned]!;
+    }
 
     // 1. Direct registry hit
     if (ITEM_ICON_REGISTRY[cleaned]) {

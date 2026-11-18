@@ -398,3 +398,417 @@ describe('Fastify WebSocket Server & Integration Protocol', () => {
     expect((liveEvent.attacker as Record<string, unknown>).damage).toBe(attackBody.combatDamage);
   });
 });
+
+describe('Company Quest Real-Time Co-op Rooms (company-quest:{runId})', () => {
+  let app: Awaited<ReturnType<typeof buildServerApp>> | null = null;
+  const openSockets: WebSocket[] = [];
+
+  function createMatcherClient() {
+    const buffer: Record<string, unknown>[] = [];
+    const waiters: Array<{
+      predicate: (msg: Record<string, unknown>) => boolean;
+      resolve: (msg: Record<string, unknown>) => void;
+      reject: (err: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }> = [];
+
+    const onInit = (ws: WebSocket) => {
+      ws.on('message', (raw) => {
+        try {
+          const msg = JSON.parse(raw.toString('utf-8')) as Record<string, unknown>;
+          const idx = waiters.findIndex((w) => w.predicate(msg));
+          if (idx >= 0) {
+            const matched = waiters.splice(idx, 1)[0]!;
+            clearTimeout(matched.timer);
+            matched.resolve(msg);
+          } else {
+            buffer.push(msg);
+          }
+        } catch {
+          // Ignore non-JSON frames
+        }
+      });
+    };
+
+    const waitFor = (
+      predicate: (msg: Record<string, unknown>) => boolean,
+      timeoutMs = 3000,
+      label = 'matching WebSocket event'
+    ): Promise<Record<string, unknown>> => {
+      const bufIdx = buffer.findIndex(predicate);
+      if (bufIdx >= 0) {
+        return Promise.resolve(buffer.splice(bufIdx, 1)[0]!);
+      }
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const i = waiters.findIndex((w) => w.resolve === resolve);
+          if (i >= 0) waiters.splice(i, 1);
+          reject(new Error(`Timeout waiting for ${label}; buffered=${JSON.stringify(buffer.map((b) => b.type))}`));
+        }, timeoutMs);
+        waiters.push({ predicate, resolve, reject, timer });
+      });
+    };
+
+    return { onInit, waitFor };
+  }
+
+  afterEach(async () => {
+    for (const ws of openSockets) {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    }
+    openSockets.length = 0;
+    if (app) {
+      await app.close();
+      app = null;
+    }
+  });
+
+  async function connectAuthed(
+    serverApp: NonNullable<typeof app>,
+    user: { userId: string; email: string; username: string }
+  ) {
+    const token = serverApp.jwt.sign(user);
+    const helper = createMatcherClient();
+    const ws = await serverApp.injectWS(
+      `/api/ws/connect?token=${encodeURIComponent(token)}`,
+      {},
+      { onInit: helper.onInit }
+    );
+    openSockets.push(ws);
+    await helper.waitFor((m) => m.type === 'CONNECTED');
+    return { ws, helper };
+  }
+
+  it('supports up to 4 Adventurer Company squadmates, rejects a 5th player, enforces lobby readiness, and starts combat', async () => {
+    const mockDb = {} as unknown as PrismaClient;
+    const testWsManager = new WebSocketManager(0);
+    app = await buildServerApp({ db: mockDb, wsManager: testWsManager });
+    await app.ready();
+
+    const runId = 'coop_cap_run_1';
+    const room = `company-quest:${runId}`;
+
+    const c1 = await connectAuthed(app, { userId: 'u1', email: 'u1@goki.gg', username: 'Hero1' });
+    const c2 = await connectAuthed(app, { userId: 'u2', email: 'u2@goki.gg', username: 'Hero2' });
+    const c3 = await connectAuthed(app, { userId: 'u3', email: 'u3@goki.gg', username: 'Hero3' });
+    const c4 = await connectAuthed(app, { userId: 'u4', email: 'u4@goki.gg', username: 'Hero4' });
+    const c5 = await connectAuthed(app, { userId: 'u5', email: 'u5@goki.gg', username: 'Hero5' });
+
+    for (const [idx, c] of [c1, c2, c3, c4].entries()) {
+      const joinedPromise = c.helper.waitFor(
+        (m) =>
+          m.type === 'COMPANY_QUEST_LOBBY_STATE' &&
+          Array.isArray(m.participants) &&
+          m.participants.length === idx + 1
+      );
+      c.ws.send(
+        JSON.stringify({
+          type: 'COMPANY_QUEST_JOIN',
+          room,
+          runId,
+          characterId: `char_${idx + 1}`,
+          characterName: `Vanguard${idx + 1}`,
+          questSlug: 'guild_contract_crypt_patrol',
+        })
+      );
+      await joinedPromise;
+    }
+
+    // 5th player cannot join full 4-player squad
+    const fullErrPromise = c5.helper.waitFor((m) => m.type === 'ERROR');
+    c5.ws.send(
+      JSON.stringify({
+        type: 'COMPANY_QUEST_JOIN',
+        room,
+        runId,
+        characterId: 'char_5',
+        characterName: 'ExtraPlayer',
+      })
+    );
+    const fullErr = await fullErrPromise;
+    expect(String(fullErr.message)).toContain('full');
+
+    // Cannot start while squadmates are unready
+    const notReadyErrPromise = c1.helper.waitFor((m) => m.type === 'ERROR');
+    c1.ws.send(JSON.stringify({ type: 'COMPANY_QUEST_START', room, runId }));
+    const notReadyErr = await notReadyErrPromise;
+    expect(String(notReadyErr.message)).toContain('ready');
+
+    // Ready up all 4 connected squadmates
+    for (const [idx, c] of [c1, c2, c3, c4].entries()) {
+      const readyPromise = c1.helper.waitFor(
+        (m) =>
+          m.type === 'COMPANY_QUEST_LOBBY_STATE' &&
+          Number(m.readyCount) === idx + 1
+      );
+      c.ws.send(
+        JSON.stringify({
+          type: 'COMPANY_QUEST_READY',
+          room,
+          runId,
+          characterId: `char_${idx + 1}`,
+          ready: true,
+        })
+      );
+      await readyPromise;
+    }
+
+    const startP1 = c1.helper.waitFor((m) => m.type === 'COMPANY_QUEST_STARTED');
+    const startP4 = c4.helper.waitFor((m) => m.type === 'COMPANY_QUEST_STARTED');
+    c1.ws.send(JSON.stringify({ type: 'COMPANY_QUEST_START', room, runId }));
+
+    const [started1, started4] = await Promise.all([startP1, startP4]);
+    const combatState1 = started1.combatState as { units: Array<{ side: string; unitId: string }> };
+    const combatState4 = started4.combatState as { units: Array<{ side: string; unitId: string }> };
+    expect(combatState1.units.filter((u) => u.side === 'PARTY')).toHaveLength(4);
+    expect(combatState4.units.filter((u) => u.side === 'PARTY')).toHaveLength(4);
+  });
+
+  it('hosts authoritative stepTurnBasedCombat actions, rejects out-of-turn inputs, and enforces turn countdown timers', async () => {
+    const mockDb = {} as unknown as PrismaClient;
+    const testWsManager = new WebSocketManager(0);
+    app = await buildServerApp({ db: mockDb, wsManager: testWsManager });
+    await app.ready();
+
+    const runId = 'coop_timer_run_2';
+    const room = `company-quest:${runId}`;
+
+    const c1 = await connectAuthed(app, { userId: 'tu1', email: 'tu1@goki.gg', username: 'SwiftHero' });
+    const c2 = await connectAuthed(app, { userId: 'tu2', email: 'tu2@goki.gg', username: 'HeavyHero' });
+
+    c1.ws.send(
+      JSON.stringify({
+        type: 'COMPANY_QUEST_JOIN',
+        room,
+        runId,
+        characterId: 'char_fast',
+        characterName: 'SwiftHero',
+        questSlug: 'guild_contract_crypt_patrol',
+        turnTimeoutMs: 120,
+        partyMember: {
+          coreStats: {
+            strengthLevel: 6,
+            enduranceLevel: 6,
+            agilityLevel: 30,
+            dexLevel: 10,
+            conLevel: 6,
+            wisLevel: 4,
+            sprLevel: 4,
+          },
+        },
+      })
+    );
+    await c1.helper.waitFor((m) => m.type === 'COMPANY_QUEST_LOBBY_STATE');
+
+    c2.ws.send(
+      JSON.stringify({
+        type: 'COMPANY_QUEST_JOIN',
+        room,
+        runId,
+        characterId: 'char_slow',
+        characterName: 'HeavyHero',
+        partyMember: {
+          coreStats: {
+            strengthLevel: 8,
+            enduranceLevel: 8,
+            agilityLevel: 2,
+            dexLevel: 2,
+            conLevel: 8,
+            wisLevel: 2,
+            sprLevel: 2,
+          },
+        },
+      })
+    );
+    await c2.helper.waitFor(
+      (m) =>
+        m.type === 'COMPANY_QUEST_LOBBY_STATE' &&
+        Array.isArray(m.participants) &&
+        m.participants.length === 2
+    );
+
+    c1.ws.send(JSON.stringify({ type: 'COMPANY_QUEST_READY', room, runId, ready: true }));
+    c2.ws.send(JSON.stringify({ type: 'COMPANY_QUEST_READY', room, runId, ready: true }));
+    await c1.helper.waitFor((m) => m.type === 'COMPANY_QUEST_LOBBY_STATE' && m.allConnectedReady === true);
+
+    const startedPromise = c1.helper.waitFor((m) => m.type === 'COMPANY_QUEST_STARTED');
+    c1.ws.send(JSON.stringify({ type: 'COMPANY_QUEST_START', room, runId }));
+    const started = await startedPromise;
+    const initCombat = started.combatState as { activeUnitId: string; stepSeq: number };
+    expect(initCombat.activeUnitId).toBe('char_fast');
+
+    // Out-of-turn player cannot act
+    const turnErrPromise = c2.helper.waitFor((m) => m.type === 'ERROR');
+    c2.ws.send(
+      JSON.stringify({
+        type: 'COMPANY_QUEST_ACTION',
+        room,
+        runId,
+        action: { type: 'GUARD' },
+      })
+    );
+    const turnErr = await turnErrPromise;
+    expect(String(turnErr.message)).toContain('Not your turn');
+
+    // Active player executes GUARD -> server steps & arms timer
+    const stepPromise = c2.helper.waitFor((m) => m.type === 'COMPANY_QUEST_STATE_UPDATE');
+    c1.ws.send(
+      JSON.stringify({
+        type: 'COMPANY_QUEST_ACTION',
+        room,
+        runId,
+        action: { type: 'GUARD' },
+      })
+    );
+    const stepped = await stepPromise;
+    const steppedCombat = stepped.combatState as { stepSeq: number; status: string };
+    expect(steppedCombat.stepSeq).toBeGreaterThan(initCombat.stepSeq);
+
+    // Wait for 120ms turn timer to fire automatically without player input
+    if (steppedCombat.status === 'IN_PROGRESS') {
+      const timeoutEvt = await c1.helper.waitFor(
+        (m) => m.type === 'COMPANY_QUEST_TURN_TIMEOUT',
+        2000
+      );
+      expect(timeoutEvt.runId).toBe(runId);
+      const afterTimeout = await c1.helper.waitFor(
+        (m) =>
+          m.type === 'COMPANY_QUEST_STATE_UPDATE' &&
+          (m.combatState as { stepSeq: number }).stepSeq > steppedCombat.stepSeq,
+        2000,
+        'COMPANY_QUEST_STATE_UPDATE after timeout'
+      );
+      expect((afterTimeout.combatState as { stepSeq: number }).stepSeq).toBeGreaterThan(
+        steppedCombat.stepSeq
+      );
+    }
+  });
+
+  it('triggers automatic AI takeover on disconnect and restores PLAYER control on reconnect', async () => {
+    const mockDb = {} as unknown as PrismaClient;
+    const testWsManager = new WebSocketManager(0);
+    app = await buildServerApp({ db: mockDb, wsManager: testWsManager });
+    const address = await app.listen({ port: 0, host: '127.0.0.1' });
+    const wsBase = address.replace(/^http/i, 'ws');
+
+    const connectRealWs = async (user: { userId: string; email: string; username: string }) => {
+      const token = app!.jwt.sign(user);
+      const helper = createMatcherClient();
+      const ws = new WebSocket(`${wsBase}/api/ws/connect?token=${encodeURIComponent(token)}`);
+      helper.onInit(ws);
+      openSockets.push(ws);
+      await helper.waitFor((m) => m.type === 'CONNECTED', 3000, 'CONNECTED');
+      return { ws, helper };
+    };
+
+    const runId = 'coop_disconnect_run_3';
+    const room = `company-quest:${runId}`;
+
+    const c1 = await connectRealWs({ userId: 'du1', email: 'du1@goki.gg', username: 'LeadHero' });
+    const c2 = await connectRealWs({ userId: 'du2', email: 'du2@goki.gg', username: 'AllyHero' });
+
+    c1.ws.send(
+      JSON.stringify({
+        type: 'COMPANY_QUEST_JOIN',
+        room,
+        runId,
+        characterId: 'char_lead',
+        characterName: 'LeadHero',
+        questSlug: 'guild_contract_crypt_patrol',
+        partyMember: {
+          coreStats: {
+            strengthLevel: 6,
+            enduranceLevel: 6,
+            agilityLevel: 28,
+            dexLevel: 8,
+            conLevel: 6,
+            wisLevel: 4,
+            sprLevel: 4,
+          },
+        },
+      })
+    );
+    await c1.helper.waitFor((m) => m.type === 'COMPANY_QUEST_LOBBY_STATE');
+
+    c2.ws.send(
+      JSON.stringify({
+        type: 'COMPANY_QUEST_JOIN',
+        room,
+        runId,
+        characterId: 'char_ally',
+        characterName: 'AllyHero',
+        partyMember: {
+          coreStats: {
+            strengthLevel: 6,
+            enduranceLevel: 6,
+            agilityLevel: 4,
+            dexLevel: 4,
+            conLevel: 6,
+            wisLevel: 4,
+            sprLevel: 4,
+          },
+        },
+      })
+    );
+    await c2.helper.waitFor(
+      (m) =>
+        m.type === 'COMPANY_QUEST_LOBBY_STATE' &&
+        Array.isArray(m.participants) &&
+        m.participants.length === 2
+    );
+
+    c1.ws.send(JSON.stringify({ type: 'COMPANY_QUEST_READY', room, runId, ready: true }));
+    c2.ws.send(JSON.stringify({ type: 'COMPANY_QUEST_READY', room, runId, ready: true }));
+    await c1.helper.waitFor((m) => m.type === 'COMPANY_QUEST_LOBBY_STATE' && m.allConnectedReady === true);
+
+    const startP2 = c2.helper.waitFor((m) => m.type === 'COMPANY_QUEST_STARTED');
+    c1.ws.send(JSON.stringify({ type: 'COMPANY_QUEST_START', room, runId }));
+    const started = await startP2;
+    const initCombat = started.combatState as { activeUnitId: string; stepSeq: number };
+    expect(initCombat.activeUnitId).toBe('char_lead');
+
+    // Disconnect active player mid-turn -> AI takes over immediately and advances turn
+    const takeoverP2 = c2.helper.waitFor((m) => m.type === 'COMPANY_QUEST_AI_TAKEOVER', 3000, 'takeoverP2');
+    const stateUpdateP2 = c2.helper.waitFor(
+      (m) =>
+        m.type === 'COMPANY_QUEST_STATE_UPDATE' &&
+        (m.combatState as { stepSeq: number }).stepSeq > initCombat.stepSeq,
+      3000,
+      'stateUpdateP2'
+    );
+    c1.ws.close();
+
+    const [takeoverEvt, updatedEvt] = await Promise.all([takeoverP2, stateUpdateP2]);
+    expect(takeoverEvt.characterId).toBe('char_lead');
+    expect((updatedEvt.combatState as { stepSeq: number }).stepSeq).toBeGreaterThan(
+      initCombat.stepSeq
+    );
+
+    // Reconnect user du1 and verify controlMode returns to PLAYER
+    const c1Reconnected = await connectRealWs({
+      userId: 'du1',
+      email: 'du1@goki.gg',
+      username: 'LeadHero',
+    });
+    const rejoinSnapPromise = c1Reconnected.helper.waitFor(
+      (m) => m.type === 'COMPANY_QUEST_STATE_UPDATE'
+    );
+    c1Reconnected.ws.send(
+      JSON.stringify({
+        type: 'COMPANY_QUEST_JOIN',
+        room,
+        runId,
+        characterId: 'char_lead',
+        characterName: 'LeadHero',
+      })
+    );
+    const rejoinSnap = await rejoinSnapPromise;
+    const leadParticipant = (
+      rejoinSnap.participants as Array<{ characterId: string; controlMode: string; connected: boolean }>
+    ).find((p) => p.characterId === 'char_lead');
+    expect(leadParticipant?.connected).toBe(true);
+    expect(leadParticipant?.controlMode).toBe('PLAYER');
+  });
+});

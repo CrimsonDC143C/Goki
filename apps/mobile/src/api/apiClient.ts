@@ -41,12 +41,30 @@ export function resolveApiBaseUrl(): string {
       return `http://${lanHost}:4000`;
     }
   }
+  if (Platform.OS === 'web' && typeof globalThis !== 'undefined') {
+    const webHost = (globalThis as { location?: { hostname?: string } }).location?.hostname;
+    if (webHost === 'localhost' || webHost === '127.0.0.1') {
+      return `http://${webHost}:4000`;
+    }
+  }
   return 'https://goki-server.onrender.com';
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
 
 export function resolveWsBaseUrl(): string {
+  if (Platform.OS === 'web' && typeof globalThis !== 'undefined') {
+    try {
+      const webOverride = (
+        globalThis as { localStorage?: { getItem?: (key: string) => string | null } }
+      ).localStorage?.getItem?.('goki_ws_base_url');
+      if (webOverride && webOverride.trim()) {
+        return webOverride.trim().replace(/\/$/, '');
+      }
+    } catch {
+      // Ignore restricted web storage errors
+    }
+  }
   const envWs = process.env.EXPO_PUBLIC_WS_URL?.trim();
   if (envWs) {
     return envWs.replace(/\/$/, '');

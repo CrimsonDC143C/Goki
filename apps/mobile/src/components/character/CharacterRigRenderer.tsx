@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, View, type ViewStyle } from 'react-native';
+import { type ImageSourcePropType, StyleSheet, View, type ViewStyle } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import Svg, { Ellipse, G, Path, Polygon } from 'react-native-svg';
 import {
   adaptCustomizationForRaceChange,
@@ -11,6 +12,12 @@ import {
   type CharacterRace,
   type EquipmentLoadoutMap,
 } from '@goki/game-engine';
+import {
+  getEquipmentRigOverlaySource,
+  getMorphEvolutionOverlay,
+  getRigBodyPartIllustration,
+  type MorphEvolutionOverlaySlotKey,
+} from '../../assets/rpgArtRegistry';
 import {
   AuraBackdropSvg,
   ForearmPartSvg,
@@ -69,6 +76,29 @@ const ZERO_PIVOT: ViewStyle = {
   height: 0,
   overflow: 'visible',
 };
+
+function renderDropInOverlay(
+  source: ImageSourcePropType | null,
+  width: number,
+  height: number,
+  offsetX = -width / 2,
+  offsetY = 0
+): React.ReactElement | null {
+  if (!source) return null;
+  return (
+    <ExpoImage
+      source={source as any}
+      style={{
+        position: 'absolute',
+        left: offsetX,
+        top: offsetY,
+        width,
+        height,
+      }}
+      contentFit="contain"
+    />
+  );
+}
 
 const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
   race,
@@ -192,6 +222,45 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
   const hideHairTop =
     equipped.head !== null && equipped.head.variant !== 'crown_circlet';
 
+  // Milestone 6 drop-in raster overrides (all null by default until final art is added)
+  const auraOverlayKey = metrics.aura.visible
+    ? (`energy_aura_t${Math.min(3, Math.max(1, metrics.aura.tier))}` as MorphEvolutionOverlaySlotKey)
+    : null;
+  const hornsOverlayKey = metrics.horns.visible
+    ? (`oni_horns_t${Math.min(3, Math.max(1, metrics.horns.tier))}` as MorphEvolutionOverlaySlotKey)
+    : null;
+  const tailsOverlayKey =
+    metrics.tails.count > 0
+      ? (`kitsune_tails_${Math.min(9, Math.max(1, metrics.tails.count))}` as MorphEvolutionOverlaySlotKey)
+      : null;
+
+  const auraArt = auraOverlayKey ? getMorphEvolutionOverlay(auraOverlayKey) : null;
+  const hornsArt = hornsOverlayKey ? getMorphEvolutionOverlay(hornsOverlayKey) : null;
+  const tailsArt = tailsOverlayKey ? getMorphEvolutionOverlay(tailsOverlayKey) : null;
+  const headArt = getRigBodyPartIllustration(effectiveRace, 'head');
+  const torsoArt = getRigBodyPartIllustration(effectiveRace, 'torso');
+  const upperArmArt = getRigBodyPartIllustration(effectiveRace, 'upperArm');
+  const forearmArt = getRigBodyPartIllustration(effectiveRace, 'forearm');
+  const thighArt = getRigBodyPartIllustration(effectiveRace, 'thigh');
+  const shinArt = getRigBodyPartIllustration(effectiveRace, 'shin');
+  const headGearArt = equipped.head ? getEquipmentRigOverlaySource(equipped.head.variant) : null;
+  const chestGearArt = equipped.chest ? getEquipmentRigOverlaySource(equipped.chest.variant) : null;
+  const legsGearArt = equipped.legs ? getEquipmentRigOverlaySource(equipped.legs.variant) : null;
+  const bootsGearArt = equipped.boots ? getEquipmentRigOverlaySource(equipped.boots.variant) : null;
+  const mainHandGearArt = equipped.mainHand
+    ? getEquipmentRigOverlaySource(equipped.mainHand.variant)
+    : null;
+  const offHandGearArt =
+    showOffhandGear && equipped.offHand
+      ? getEquipmentRigOverlaySource(equipped.offHand.variant)
+      : null;
+  const acc1GearArt = equipped.accessory1
+    ? getEquipmentRigOverlaySource(equipped.accessory1.variant)
+    : null;
+  const acc2GearArt = equipped.accessory2
+    ? getEquipmentRigOverlaySource(equipped.accessory2.variant)
+    : null;
+
   // Anatomical joint coordinates relative to parent bones
   const shoulderY = -metrics.torso.height + 7;
   const backShoulderX = metrics.torso.shoulderSpan * 0.34;
@@ -227,7 +296,9 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
             ]}
           >
             <RigAnimatedView style={[ZERO_PIVOT, animation.auraStyle]}>
-              <AuraBackdropSvg metrics={metrics} />
+              {renderDropInOverlay(auraArt, 180, 220, -90, -110) ?? (
+                <AuraBackdropSvg metrics={metrics} />
+              )}
             </RigAnimatedView>
           </View>
         )}
@@ -274,6 +345,22 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
           <RigAnimatedView style={[ZERO_PIVOT, animation.pelvisStyle]}>
             {/* 3A. Kitsune Fan Tails (behind pelvis & legs) */}
             {metrics.tails.count > 0 && (
+              tailsArt ? (
+                <View
+                  style={[
+                    ZERO_PIVOT,
+                    {
+                      left: -7,
+                      top: -5,
+                      zIndex: 1,
+                    },
+                  ]}
+                >
+                  <RigAnimatedView style={[ZERO_PIVOT, animation.tailWaveStyle]}>
+                    {renderDropInOverlay(tailsArt, 130, 110, -110, -75)}
+                  </RigAnimatedView>
+                </View>
+              ) : (
               <View
                 style={[
                   ZERO_PIVOT,
@@ -311,6 +398,7 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                   </View>
                 ))}
               </View>
+              )
             )}
 
             {/* 3B. Back Leg Chain: backThigh -> backShin */}
@@ -321,19 +409,22 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                 animation.backThighStyle,
               ]}
             >
-              <ThighPartSvg
-                metrics={metrics}
-                identity={effectiveConfig.identity}
-                hasLegsArmor={hasLegsArmor}
-                isFront={false}
-              />
-              {equipped.legs && (
-                <LegsArmorSvg
-                  profile={equipped.legs}
+              {renderDropInOverlay(thighArt, metrics.thigh.width * 1.4, metrics.thigh.length + 6, -(metrics.thigh.width * 0.7), -2) ?? (
+                <ThighPartSvg
                   metrics={metrics}
+                  identity={effectiveConfig.identity}
+                  hasLegsArmor={hasLegsArmor}
                   isFront={false}
                 />
               )}
+              {equipped.legs &&
+                (renderDropInOverlay(legsGearArt, metrics.thigh.width * 1.6, metrics.thigh.length + 8, -(metrics.thigh.width * 0.8), -3) ?? (
+                  <LegsArmorSvg
+                    profile={equipped.legs}
+                    metrics={metrics}
+                    isFront={false}
+                  />
+                ))}
 
               {/* Knee -> backShin */}
               <RigAnimatedView
@@ -343,19 +434,22 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                   animation.backShinStyle,
                 ]}
               >
-                <ShinPartSvg
-                  metrics={metrics}
-                  identity={effectiveConfig.identity}
-                  hasBootsArmor={hasBootsArmor}
-                  isFront={false}
-                />
-                {equipped.boots && (
-                  <BootsArmorSvg
-                    profile={equipped.boots}
+                {renderDropInOverlay(shinArt, metrics.shin.width * 1.4, metrics.shin.length + 8, -(metrics.shin.width * 0.7), -2) ?? (
+                  <ShinPartSvg
                     metrics={metrics}
+                    identity={effectiveConfig.identity}
+                    hasBootsArmor={hasBootsArmor}
                     isFront={false}
                   />
                 )}
+                {equipped.boots &&
+                  (renderDropInOverlay(bootsGearArt, metrics.shin.width * 1.8, metrics.shin.length + 10, -(metrics.shin.width * 0.9), -2) ?? (
+                    <BootsArmorSvg
+                      profile={equipped.boots}
+                      metrics={metrics}
+                      isFront={false}
+                    />
+                  ))}
               </RigAnimatedView>
             </RigAnimatedView>
 
@@ -367,19 +461,22 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                 animation.frontThighStyle,
               ]}
             >
-              <ThighPartSvg
-                metrics={metrics}
-                identity={effectiveConfig.identity}
-                hasLegsArmor={hasLegsArmor}
-                isFront
-              />
-              {equipped.legs && (
-                <LegsArmorSvg
-                  profile={equipped.legs}
+              {renderDropInOverlay(thighArt, metrics.thigh.width * 1.4, metrics.thigh.length + 6, -(metrics.thigh.width * 0.7), -2) ?? (
+                <ThighPartSvg
                   metrics={metrics}
+                  identity={effectiveConfig.identity}
+                  hasLegsArmor={hasLegsArmor}
                   isFront
                 />
               )}
+              {equipped.legs &&
+                (renderDropInOverlay(legsGearArt, metrics.thigh.width * 1.6, metrics.thigh.length + 8, -(metrics.thigh.width * 0.8), -3) ?? (
+                  <LegsArmorSvg
+                    profile={equipped.legs}
+                    metrics={metrics}
+                    isFront
+                  />
+                ))}
 
               {/* Knee -> frontShin */}
               <RigAnimatedView
@@ -389,19 +486,22 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                   animation.frontShinStyle,
                 ]}
               >
-                <ShinPartSvg
-                  metrics={metrics}
-                  identity={effectiveConfig.identity}
-                  hasBootsArmor={hasBootsArmor}
-                  isFront
-                />
-                {equipped.boots && (
-                  <BootsArmorSvg
-                    profile={equipped.boots}
+                {renderDropInOverlay(shinArt, metrics.shin.width * 1.4, metrics.shin.length + 8, -(metrics.shin.width * 0.7), -2) ?? (
+                  <ShinPartSvg
                     metrics={metrics}
+                    identity={effectiveConfig.identity}
+                    hasBootsArmor={hasBootsArmor}
                     isFront
                   />
                 )}
+                {equipped.boots &&
+                  (renderDropInOverlay(bootsGearArt, metrics.shin.width * 1.8, metrics.shin.length + 10, -(metrics.shin.width * 0.9), -2) ?? (
+                    <BootsArmorSvg
+                      profile={equipped.boots}
+                      metrics={metrics}
+                      isFront
+                    />
+                  ))}
               </RigAnimatedView>
             </RigAnimatedView>
 
@@ -417,12 +517,14 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                   animation.backUpperArmStyle,
                 ]}
               >
-                <UpperArmPartSvg
-                  metrics={metrics}
-                  identity={effectiveConfig.identity}
-                  morphs={effectiveConfig.morphs}
-                  isFront={false}
-                />
+                {renderDropInOverlay(upperArmArt, metrics.upperArm.width * 1.5, metrics.upperArm.length + 6, -(metrics.upperArm.width * 0.75), -3) ?? (
+                  <UpperArmPartSvg
+                    metrics={metrics}
+                    identity={effectiveConfig.identity}
+                    morphs={effectiveConfig.morphs}
+                    isFront={false}
+                  />
+                )}
                 {equipped.chest && (
                   <ShoulderPauldronSvg
                     profile={equipped.chest}
@@ -439,12 +541,14 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                     animation.backForearmStyle,
                   ]}
                 >
-                  <ForearmPartSvg
-                    metrics={metrics}
-                    identity={effectiveConfig.identity}
-                    morphs={effectiveConfig.morphs}
-                    isFront={false}
-                  />
+                  {renderDropInOverlay(forearmArt, metrics.forearm.width * 1.5, metrics.forearm.length + 6, -(metrics.forearm.width * 0.75), -3) ?? (
+                    <ForearmPartSvg
+                      metrics={metrics}
+                      identity={effectiveConfig.identity}
+                      morphs={effectiveConfig.morphs}
+                      isFront={false}
+                    />
+                  )}
                   {showOffhandGear && equipped.offHand && (
                     <View
                       style={[
@@ -452,10 +556,12 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                         { left: 0, top: metrics.forearm.length },
                       ]}
                     >
-                      <OffhandPartSvg
-                        profile={equipped.offHand}
-                        metrics={metrics}
-                      />
+                      {renderDropInOverlay(offHandGearArt, 54, 54, -27, -27) ?? (
+                        <OffhandPartSvg
+                          profile={equipped.offHand}
+                          metrics={metrics}
+                        />
+                      )}
                     </View>
                   )}
                 </RigAnimatedView>
@@ -463,16 +569,19 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
 
               {/* Torso Body + Chest Armor + Accessory 2 Neck Pendant */}
               <View style={[ZERO_PIVOT, { left: 0, top: 0, zIndex: 3 }]}>
-                <TorsoPartSvg
-                  metrics={metrics}
-                  identity={effectiveConfig.identity}
-                  morphs={effectiveConfig.morphs}
-                  hasChestArmor={hasChestArmor}
-                  hasLegsArmor={hasLegsArmor}
-                />
-                {equipped.chest && (
-                  <ChestArmorSvg profile={equipped.chest} metrics={metrics} />
+                {renderDropInOverlay(torsoArt, metrics.torso.shoulderSpan * 1.35, metrics.torso.height + 10, -(metrics.torso.shoulderSpan * 0.675), -metrics.torso.height - 4) ?? (
+                  <TorsoPartSvg
+                    metrics={metrics}
+                    identity={effectiveConfig.identity}
+                    morphs={effectiveConfig.morphs}
+                    hasChestArmor={hasChestArmor}
+                    hasLegsArmor={hasLegsArmor}
+                  />
                 )}
+                {equipped.chest &&
+                  (renderDropInOverlay(chestGearArt, metrics.torso.shoulderSpan * 1.5, metrics.torso.height + 12, -(metrics.torso.shoulderSpan * 0.75), -metrics.torso.height - 5) ?? (
+                    <ChestArmorSvg profile={equipped.chest} metrics={metrics} />
+                  ))}
                 {equipped.accessory2 && (
                   <View
                     style={[
@@ -480,10 +589,12 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                       { left: 0, top: -metrics.torso.height * 0.78 },
                     ]}
                   >
-                    <AccessoryNeckSvg
-                      profile={equipped.accessory2}
-                      metrics={metrics}
-                    />
+                    {renderDropInOverlay(acc2GearArt, 26, 26, -13, -6) ?? (
+                      <AccessoryNeckSvg
+                        profile={equipped.accessory2}
+                        metrics={metrics}
+                      />
+                    )}
                   </View>
                 )}
               </View>
@@ -496,18 +607,24 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                   animation.headStyle,
                 ]}
               >
-                <HeadPartSvg
-                  race={effectiveRace}
-                  metrics={metrics}
-                  identity={effectiveConfig.identity}
-                  morphs={effectiveConfig.morphs}
-                  hideHairTop={hideHairTop}
-                  showHorns={false}
-                />
-                {equipped.head && (
-                  <HeadArmorSvg profile={equipped.head} metrics={metrics} />
+                {renderDropInOverlay(headArt, metrics.head.width * 1.35, metrics.head.height * 1.25, -(metrics.head.width * 0.675), -(metrics.head.height * 1.05)) ?? (
+                  <HeadPartSvg
+                    race={effectiveRace}
+                    metrics={metrics}
+                    identity={effectiveConfig.identity}
+                    morphs={effectiveConfig.morphs}
+                    hideHairTop={hideHairTop}
+                    showHorns={false}
+                  />
                 )}
-                {metrics.horns.visible && <OniHornsLayerSvg metrics={metrics} />}
+                {equipped.head &&
+                  (renderDropInOverlay(headGearArt, metrics.head.width * 1.5, metrics.head.height * 1.4, -(metrics.head.width * 0.75), -(metrics.head.height * 1.15)) ?? (
+                    <HeadArmorSvg profile={equipped.head} metrics={metrics} />
+                  ))}
+                {metrics.horns.visible &&
+                  (renderDropInOverlay(hornsArt, metrics.head.width * 1.7, metrics.head.height * 1.1, -(metrics.head.width * 0.85), -(metrics.head.height * 1.45)) ?? (
+                    <OniHornsLayerSvg metrics={metrics} />
+                  ))}
               </RigAnimatedView>
 
               {/* Front Arm Chain (in front of torso & thighs): frontUpperArm -> frontForearm -> accessory1 + mainHand */}
@@ -518,12 +635,14 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                   animation.frontUpperArmStyle,
                 ]}
               >
-                <UpperArmPartSvg
-                  metrics={metrics}
-                  identity={effectiveConfig.identity}
-                  morphs={effectiveConfig.morphs}
-                  isFront
-                />
+                {renderDropInOverlay(upperArmArt, metrics.upperArm.width * 1.5, metrics.upperArm.length + 6, -(metrics.upperArm.width * 0.75), -3) ?? (
+                  <UpperArmPartSvg
+                    metrics={metrics}
+                    identity={effectiveConfig.identity}
+                    morphs={effectiveConfig.morphs}
+                    isFront
+                  />
+                )}
                 {equipped.chest && (
                   <ShoulderPauldronSvg
                     profile={equipped.chest}
@@ -540,12 +659,14 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                     animation.frontForearmStyle,
                   ]}
                 >
-                  <ForearmPartSvg
-                    metrics={metrics}
-                    identity={effectiveConfig.identity}
-                    morphs={effectiveConfig.morphs}
-                    isFront
-                  />
+                  {renderDropInOverlay(forearmArt, metrics.forearm.width * 1.5, metrics.forearm.length + 6, -(metrics.forearm.width * 0.75), -3) ?? (
+                    <ForearmPartSvg
+                      metrics={metrics}
+                      identity={effectiveConfig.identity}
+                      morphs={effectiveConfig.morphs}
+                      isFront
+                    />
+                  )}
                   {equipped.accessory1 && (
                     <View
                       style={[
@@ -553,10 +674,12 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                         { left: 0, top: metrics.forearm.length * 0.72 },
                       ]}
                     >
-                      <AccessoryWristSvg
-                        profile={equipped.accessory1}
-                        metrics={metrics}
-                      />
+                      {renderDropInOverlay(acc1GearArt, 20, 20, -10, -10) ?? (
+                        <AccessoryWristSvg
+                          profile={equipped.accessory1}
+                          metrics={metrics}
+                        />
+                      )}
                     </View>
                   )}
                   {equipped.mainHand && (
@@ -566,10 +689,12 @@ const CharacterRigRendererComponent: React.FC<CharacterRigRendererProps> = ({
                         { left: 0, top: metrics.forearm.length },
                       ]}
                     >
-                      <WeaponPartSvg
-                        profile={equipped.mainHand}
-                        metrics={metrics}
-                      />
+                      {renderDropInOverlay(mainHandGearArt, 68, 96, -34, -72) ?? (
+                        <WeaponPartSvg
+                          profile={equipped.mainHand}
+                          metrics={metrics}
+                        />
+                      )}
                     </View>
                   )}
                 </RigAnimatedView>

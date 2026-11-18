@@ -1,6 +1,8 @@
+import { PrismaClient } from '@goki/database';
 import { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { AuthJwtPayload } from '../middleware/auth';
+import { CompanyQuestCoopManager } from '../services/company-quest-coop';
 import { WebSocketManager, websocketManager } from '../services/websocket-manager';
 
 interface ConnectQueryParams {
@@ -16,8 +18,12 @@ interface InboundWsMessage {
 
 export function registerWebSocketRoutes(
   app: FastifyInstance,
-  wsManager: WebSocketManager = websocketManager
-): void {
+  wsManager: WebSocketManager = websocketManager,
+  db?: PrismaClient,
+  coopManager?: CompanyQuestCoopManager
+): CompanyQuestCoopManager {
+  const resolvedCoopManager = coopManager ?? new CompanyQuestCoopManager(wsManager, db);
+
   app.get<{ Querystring: ConnectQueryParams }>(
     '/api/ws/connect',
     { websocket: true },
@@ -47,11 +53,20 @@ export function registerWebSocketRoutes(
       });
 
       // 3. Process inbound messages
-      socket.on('message', (raw) => {
+      socket.on('message', async (raw) => {
+        let data: InboundWsMessage;
         try {
           const rawStr = typeof raw === 'string' ? raw : raw.toString('utf-8');
-          const data: InboundWsMessage = JSON.parse(rawStr);
+          data = JSON.parse(rawStr);
+        } catch {
+          wsManager.sendToSocket(socket, {
+            type: 'ERROR',
+            message: 'Malformed JSON payload received',
+          });
+          return;
+        }
 
+        try {
           switch (data.type) {
             case 'PING': {
               wsManager.sendToSocket(socket, {
@@ -105,6 +120,7 @@ export function registerWebSocketRoutes(
                   room,
                   timestamp: Date.now(),
                 });
+                resolvedCoopManager.handleSocketSubscribed(socket, room);
               } else {
                 wsManager.sendToSocket(socket, {
                   type: 'ERROR',
@@ -127,6 +143,31 @@ export function registerWebSocketRoutes(
               break;
             }
 
+            case 'COMPANY_QUEST_JOIN': {
+              await resolvedCoopManager.handleJoin(socket, data);
+              break;
+            }
+
+            case 'COMPANY_QUEST_READY': {
+              await resolvedCoopManager.handleReady(socket, data);
+              break;
+            }
+
+            case 'COMPANY_QUEST_START': {
+              await resolvedCoopManager.handleStart(socket, data);
+              break;
+            }
+
+            case 'COMPANY_QUEST_ACTION': {
+              await resolvedCoopManager.handleAction(socket, data);
+              break;
+            }
+
+            case 'COMPANY_QUEST_STATE_REQUEST': {
+              resolvedCoopManager.handleStateRequest(socket, data);
+              break;
+            }
+
             default: {
               wsManager.sendToSocket(socket, {
                 type: 'ERROR',
@@ -135,10 +176,10 @@ export function registerWebSocketRoutes(
               break;
             }
           }
-        } catch {
+        } catch (err) {
           wsManager.sendToSocket(socket, {
             type: 'ERROR',
-            message: 'Malformed JSON payload received',
+            message: err instanceof Error ? err.message : 'WebSocket handler error',
           });
         }
       });
@@ -153,4 +194,6 @@ export function registerWebSocketRoutes(
       });
     }
   );
+
+  return resolvedCoopManager;
 }
