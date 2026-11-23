@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import {
   AURA_PALETTE_OPTIONS,
   BASE_SILHOUETTE_OPTIONS,
@@ -28,7 +29,6 @@ import {
   SKIN_PALETTE_OPTIONS,
   VASCULARITY_TIERS,
   adaptCustomizationForRaceChange,
-  deriveCustomizationFromLegacyAppearance,
   getUnlockedCustomizationState,
   type CharacterCustomizationConfig,
   type CharacterMorphConfig,
@@ -38,7 +38,11 @@ import {
   type MorphTierDescriptor,
   type StatType,
 } from '@goki/game-engine';
-import { CHARACTER_APPEARANCES } from '../assets/characterArtRegistry';
+import {
+  RACE_APPEARANCE_PRESETS,
+  type RaceAppearancePreset,
+  getRaceAwareBustSource,
+} from '../assets/characterArtRegistry';
 import { CharacterManagerModal } from '../components/CharacterManagerModal';
 import { CharacterRigRenderer, type RigAnimationState } from '../components/character';
 import { RpgIcon } from '../components/icons/RpgIcon';
@@ -329,37 +333,39 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
     setDraftConfig(customizationConfig);
   };
 
-  const handleSelectAppearance = async (presetId: string, title: string) => {
-    setSavingAppearanceId(presetId);
+  const handleSelectAppearance = async (preset: RaceAppearancePreset) => {
+    setSavingAppearanceId(preset.id);
     setAppearanceFeedback(null);
-    const derived = deriveCustomizationFromLegacyAppearance(presetId);
     const adapted = adaptCustomizationForRaceChange(
       {
         version: 1,
-        identity: derived.config.identity,
+        identity: {
+          ...draftConfig.identity,
+          baseSilhouette: preset.silhouette,
+        },
         morphs: draftConfig.morphs,
       },
-      derived.race
+      preset.race
     );
     const mergedConfig: CharacterCustomizationConfig = {
       ...adapted,
-      morphs: clampMorphsToUnlocked(derived.race, adapted.morphs, heroCoreStats),
+      morphs: clampMorphsToUnlocked(preset.race, adapted.morphs, heroCoreStats),
     };
-    setDraftRace(derived.race);
+    setDraftRace(preset.race);
     setDraftConfig(mergedConfig);
     const res = await updateCharacterCustomization(
       {
-        race: derived.race,
+        race: preset.race,
         customizationConfig: mergedConfig,
-        appearanceId: presetId,
+        appearanceId: preset.id,
       },
       activeCharacterId ?? undefined
     );
     setSavingAppearanceId(null);
     if (res.ok) {
-      setAppearanceFeedback(`Equipped ${title} visual archetype.`);
+      setAppearanceFeedback(`Equipped ${preset.title} archetype.`);
     } else {
-      void updateCharacterAppearance(presetId, activeCharacterId ?? undefined);
+      void updateCharacterAppearance(preset.id, activeCharacterId ?? undefined);
       setAppearanceFeedback(res.error ?? 'Could not update appearance.');
     }
   };
@@ -983,11 +989,13 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
               level={1}
               eyebrow="VISUAL ARCHETYPES"
               title="Appearance Presets"
-              subtitle="Quick-equip classic looks while keeping your unlocked morphs."
+              subtitle="Quick-equip race and silhouette looks while keeping your unlocked morphs."
             >
               <View style={styles.presetGrid}>
-                {CHARACTER_APPEARANCES.map((preset) => {
-                  const selected = preset.id === appearanceId;
+                {RACE_APPEARANCE_PRESETS.map((preset) => {
+                  const selected =
+                    preset.race === draftRace &&
+                    preset.silhouette === draftConfig.identity.baseSilhouette;
                   const busy = savingAppearanceId === preset.id;
                   return (
                     <TouchableOpacity
@@ -996,7 +1004,7 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
                         styles.presetTile,
                         selected && styles.presetTileSelected,
                       ]}
-                      onPress={() => void handleSelectAppearance(preset.id, preset.title)}
+                      onPress={() => void handleSelectAppearance(preset)}
                       activeOpacity={0.75}
                       disabled={busy}
                       testID={`appearance-preset-${preset.id}`}
@@ -1007,11 +1015,11 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
                           selected && { borderColor: COLORS.gold },
                         ]}
                       >
-                        <CharacterRigRenderer
-                          mode="bust"
-                          appearanceId={preset.id}
-                          width={46}
-                          height={46}
+                        <ExpoImage
+                          source={getRaceAwareBustSource(preset.race, preset.silhouette) as any}
+                          style={{ width: 46, height: 46, borderRadius: 8 }}
+                          contentFit="cover"
+                          contentPosition="top center"
                         />
                       </View>
                       <View style={styles.presetInfo}>

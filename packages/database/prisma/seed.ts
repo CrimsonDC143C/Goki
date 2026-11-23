@@ -602,7 +602,7 @@ export async function runSeed(db: PrismaClient = prisma): Promise<void> {
           },
           {
             itemSlug: 'crown_of_the_wyrm',
-            itemName: 'Crown of the World Wyrm',
+            itemName: 'Wyrm Crown',
             rarity: 'MYTHIC',
             quantity: 1,
             weight: 15,

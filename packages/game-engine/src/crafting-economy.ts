@@ -363,7 +363,7 @@ export const CRAFTING_RECIPES: readonly CraftingRecipeDefinition[] = [
   },
   {
     recipeSlug: 'forge_copper_guild_ring',
-    name: 'Forge Copper Guild Signet',
+    name: 'Forge Copper Signet Ring',
     description: 'Inscribe an obsidian-banded signet charged with arcane reforge dust.',
     category: 'GEAR_FORGE',
     profession: 'ALCHEMY',

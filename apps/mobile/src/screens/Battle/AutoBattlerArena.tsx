@@ -20,21 +20,25 @@ import { COLORS, CRIMSON_ONI, RARITY_COLORS } from '../../theme';
 import { audioManager } from '../../services/AudioManager';
 import { LOOT_CHEST_SVGS } from '../../assets/v0Vault';
 import { getItemIconSource } from '../../assets/itemArtRegistry';
+import {
+  getCombatEnemySprite,
+  getHeroCombatSprite,
+  getLootChestArt,
+} from '../../assets/rpgArtRegistry';
 import { triggerSensoryCue } from '../../utils/sensoryFeedback';
 import {
+  ReanimatedCombatantSprite,
+  resolveWeaponSlashTheme,
+} from '../../components/battle/ReanimatedCombatantSprite';
+import {
   ParallaxBackground,
-  WHITEWOOD_ARENA_PRESET,
+  resolveBattleArenaPreset,
   WHITEWOOD_GROUND_BASELINE_BOTTOM,
 } from '../../components/battle/background/ParallaxBackground';
 import type { ScrollMode } from '../../components/battle/background/parallax.types';
-import { SpriteAnimator } from '../../components/battle/sprites/SpriteAnimator';
-import type { AnimationState, SpriteSheetConfig } from '../../components/battle/sprites/sprite.types';
-import {
-  resolveHeroSpriteConfig,
-  resolveEnemySpriteConfig,
-  getGroundAlignedBottomOffset,
-} from '../../components/battle/sprites/spriteManifest';
 import { LOOT_SPRITES } from '../../assets/sprites';
+
+type AnimationState = 'idle' | 'walk' | 'attack' | 'hurt' | 'death';
 import {
   ArenaAnimatedView,
   useArenaMotionDriver,
@@ -93,29 +97,25 @@ export interface HeroStagePosition {
   baselineBottom: number;
   scale: number;
   cellSize: number;
-  bottomOffset: number;
   zIndex: number;
 }
 
 export function getHeroStagePosition(
   heroIndex: number,
-  viewportWidth: number,
-  sheet: SpriteSheetConfig
+  viewportWidth: number
 ): HeroStagePosition {
   if (heroIndex === 0) {
     const scale = 2.25;
-    const cellSize = Math.round(sheet.frameWidth * scale);
+    const cellSize = Math.round(100 * scale);
     const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM;
-    const bottomOffset = getGroundAlignedBottomOffset(baselineBottom, sheet, scale);
     const leftPx = Math.max(10, Math.round(viewportWidth * 0.15));
-    return { leftPx, baselineBottom, scale, cellSize, bottomOffset, zIndex: 14 };
+    return { leftPx, baselineBottom, scale, cellSize, zIndex: 14 };
   }
   const scale = 2.0;
-  const cellSize = Math.round(sheet.frameWidth * scale);
+  const cellSize = Math.round(100 * scale);
   const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM + (heroIndex % 2 === 1 ? 7 : 2);
-  const bottomOffset = getGroundAlignedBottomOffset(baselineBottom, sheet, scale);
   const leftPx = Math.round(viewportWidth * 0.05) - (heroIndex - 1) * 22;
-  return { leftPx, baselineBottom, scale, cellSize, bottomOffset, zIndex: 13 - heroIndex };
+  return { leftPx, baselineBottom, scale, cellSize, zIndex: 13 - heroIndex };
 }
 
 export interface EnemyStagePosition {
@@ -123,38 +123,33 @@ export interface EnemyStagePosition {
   baselineBottom: number;
   scale: number;
   cellSize: number;
-  bottomOffset: number;
   zIndex: number;
 }
 
 export function getEnemyStagePosition(
   enemyIndex: number,
   viewportWidth: number,
-  sheet: SpriteSheetConfig,
   isBoss?: boolean
 ): EnemyStagePosition {
   if (isBoss) {
     const scale = 2.65;
-    const cellSize = Math.round(sheet.frameWidth * scale);
+    const cellSize = Math.round(100 * scale);
     const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM;
-    const bottomOffset = getGroundAlignedBottomOffset(baselineBottom, sheet, scale);
     const rightPx = Math.max(4, Math.round(viewportWidth * 0.05));
-    return { rightPx, baselineBottom, scale, cellSize, bottomOffset, zIndex: 13 };
+    return { rightPx, baselineBottom, scale, cellSize, zIndex: 13 };
   }
   if (enemyIndex === 0) {
     const scale = 2.25;
-    const cellSize = Math.round(sheet.frameWidth * scale);
+    const cellSize = Math.round(100 * scale);
     const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM;
-    const bottomOffset = getGroundAlignedBottomOffset(baselineBottom, sheet, scale);
     const rightPx = Math.max(12, Math.round(viewportWidth * 0.13));
-    return { rightPx, baselineBottom, scale, cellSize, bottomOffset, zIndex: 13 };
+    return { rightPx, baselineBottom, scale, cellSize, zIndex: 13 };
   }
   const scale = 2.05;
-  const cellSize = Math.round(sheet.frameWidth * scale);
+  const cellSize = Math.round(100 * scale);
   const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM + (enemyIndex % 2 === 1 ? 7 : 2);
-  const bottomOffset = getGroundAlignedBottomOffset(baselineBottom, sheet, scale);
   const rightPx = Math.round(viewportWidth * 0.01) - (enemyIndex - 1) * 20 - 12;
-  return { rightPx, baselineBottom, scale, cellSize, bottomOffset, zIndex: 12 - enemyIndex };
+  return { rightPx, baselineBottom, scale, cellSize, zIndex: 12 - enemyIndex };
 }
 
 function getReplayEventStepDurationMs(
@@ -209,6 +204,13 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
 }) => {
   const { race, customizationConfig, equipmentLoadout } = useGame();
   const [viewportWidth, setViewportWidth] = useState<number>(380);
+  const arenaPreset = useMemo(
+    () =>
+      resolveBattleArenaPreset(
+        `${dungeon.dungeonSlug} ${dungeon.dungeonName} ${dungeon.themeLabel ?? ''}`
+      ),
+    [dungeon.dungeonSlug, dungeon.dungeonName, dungeon.themeLabel]
+  );
 
   // Playback state
   const [cursorIndex, setCursorIndex] = useState(0);
@@ -789,16 +791,14 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
     // Two-phase strike events (BASIC_ATTACK, offensive SKILL_CAST, DODGE)
     if (isTwoPhaseStrikeEvent(currentEvent, replay)) {
       const isHeroActor = replay.partySummaries.some((h) => h.characterId === currentEvent.actorId);
-      const actorHero = isHeroActor ? stageStateRef.current.heroes.find((h) => h.id === currentEvent.actorId) : undefined;
-      const actorEnemy = !isHeroActor ? stageStateRef.current.enemies.find((e) => e.id === currentEvent.actorId) : undefined;
-      const actorSheet = isHeroActor
-        ? resolveHeroSpriteConfig(actorHero?.name)
-        : resolveEnemySpriteConfig(actorEnemy?.isBoss, actorEnemy?.name);
+      const actorEnemy = !isHeroActor
+        ? stageStateRef.current.enemies.find((e) => e.id === currentEvent.actorId)
+        : undefined;
 
-      const impactFrame = actorSheet.attackImpactFrame ?? 3;
-      const rawImpactMs = currentEvent.type === 'DODGE'
-        ? Math.round(impactFrame * actorSheet.clips.attack.frameDurationMs * 0.85)
-        : impactFrame * actorSheet.clips.attack.frameDurationMs;
+      // Synced to ReanimatedCombatantSprite coil (110ms) + lunge apex (95ms)
+      const baseImpactMs = !isHeroActor && actorEnemy?.isBoss ? 240 : 210;
+      const rawImpactMs =
+        currentEvent.type === 'DODGE' ? Math.round(baseImpactMs * 0.85) : baseImpactMs;
       const impactDelayMs = Math.max(55, Math.round(rawImpactMs / currentSpeed));
       const lungeReturnMs = Math.max(70, Math.round(250 / currentSpeed));
 
@@ -948,9 +948,6 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
     return 'combat';
   }, [replay, isPlaying, cursorIndex, isWaveTransition, stageState.activeRoomNum]);
 
-  // Sprite configs
-  const heroSheet = useMemo(() => resolveHeroSpriteConfig(leadHero?.name), [leadHero?.name]);
-
   const isLivePatrol = !replay;
   const isMarching = isLivePatrol || isWaveTransition || stageState.activeRoomNum === 0;
 
@@ -960,14 +957,9 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
     return idx >= 0 ? idx : 0;
   }, [heroFloatingTargetId, stageState.heroes]);
 
-  const floatingHeroSheet = useMemo(() => {
-    const h = stageState.heroes[floatingHeroIndex];
-    return resolveHeroSpriteConfig(h?.name);
-  }, [stageState.heroes, floatingHeroIndex]);
-
   const floatingHeroPos = useMemo(() => {
-    return getHeroStagePosition(floatingHeroIndex, viewportWidth, floatingHeroSheet);
-  }, [floatingHeroIndex, viewportWidth, floatingHeroSheet]);
+    return getHeroStagePosition(floatingHeroIndex, viewportWidth);
+  }, [floatingHeroIndex, viewportWidth]);
 
   const floatingEnemyIndex = useMemo(() => {
     if (!enemyFloatingTargetId) return 0;
@@ -976,13 +968,10 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
   }, [enemyFloatingTargetId, stageState.enemies]);
 
   const floatingEnemy = stageState.enemies[floatingEnemyIndex];
-  const floatingEnemySheet = useMemo(() => {
-    return resolveEnemySpriteConfig(floatingEnemy?.isBoss, floatingEnemy?.name);
-  }, [floatingEnemy?.isBoss, floatingEnemy?.name]);
 
   const floatingEnemyPos = useMemo(() => {
-    return getEnemyStagePosition(floatingEnemyIndex, viewportWidth, floatingEnemySheet, floatingEnemy?.isBoss);
-  }, [floatingEnemyIndex, viewportWidth, floatingEnemySheet, floatingEnemy?.isBoss]);
+    return getEnemyStagePosition(floatingEnemyIndex, viewportWidth, floatingEnemy?.isBoss);
+  }, [floatingEnemyIndex, viewportWidth, floatingEnemy?.isBoss]);
 
   const progressPct =
     replay && replay.events.length > 1 ? (cursorIndex / (replay.events.length - 1)) * 100 : 100;
@@ -1040,7 +1029,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       <View style={styles.stage}>
         {/* Z-0 & Z-5: Parallax Terrain Layers */}
         <ParallaxBackground
-          arenaConfig={WHITEWOOD_ARENA_PRESET}
+          arenaConfig={arenaPreset}
           viewportWidth={viewportWidth}
           scrollMode={scrollMode}
           playbackRate={isLivePatrol ? 1 : speedMultiplier}
@@ -1049,13 +1038,21 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
         {/* Z-10: Companion Sprites */}
         {companions.map((comp, cIdx) => {
           const compIndex = cIdx + 1;
-          const compSheet = resolveHeroSpriteConfig(comp.name);
-          const pos = getHeroStagePosition(compIndex, viewportWidth, compSheet);
+          const pos = getHeroStagePosition(compIndex, viewportWidth);
           const compAnim = heroAnimStates[comp.id] ?? 'idle';
           const effectiveCompState: AnimationState =
             comp.hp <= 0 ? 'death' : isMarching ? 'walk' : compAnim;
           const isCompActiveActor = activeActorId === comp.id;
           const isCompTarget = activeTargetId === comp.id;
+          const compPreset = (
+            [
+              { race: 'ONI' as const, sil: 'balanced' as const, armored: false, theme: 'crimson' as const },
+              { race: 'KITSUNE' as const, sil: 'lithe' as const, armored: false, theme: 'azure' as const },
+              { race: 'HUMAN' as const, sil: 'broad_shouldered' as const, armored: true, theme: 'gold' as const },
+            ] as const
+          )[cIdx % 3]!;
+          const compCombatArt = getHeroCombatSprite(compPreset.race, compPreset.sil, compPreset.armored);
+          const compArtSize = Math.round(96 * pos.scale);
 
           return (
             <ArenaAnimatedView
@@ -1064,31 +1061,35 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                 styles.unitPositioner,
                 {
                   left: pos.leftPx,
-                  bottom: pos.bottomOffset,
+                  bottom: pos.baselineBottom,
                   zIndex: pos.zIndex,
-                  opacity: comp.hp <= 0 ? 0.45 : 0.88,
+                  opacity: comp.hp <= 0 ? 0.45 : 0.92,
                 },
                 isCompActiveActor ? heroTransformStyle : undefined,
               ]}
             >
-              <SpriteAnimator
-                config={compSheet}
-                state={effectiveCompState}
-                actionTriggerKey={heroActionKeys[comp.id] ?? 0}
-                scale={pos.scale}
-                flipHorizontal={false}
-                playbackRate={isLivePatrol ? 1 : speedMultiplier}
-                hitFlash={isCompTarget && heroHitFlash}
-                paused={!isPlaying && !isLivePatrol}
-                onAnimationComplete={(s, k) => handleHeroUnitAnimComplete(comp.id, s, k)}
-              />
+              {compCombatArt ? (
+                <ReanimatedCombatantSprite
+                  source={compCombatArt}
+                  state={effectiveCompState}
+                  facing="right"
+                  width={compArtSize}
+                  height={compArtSize}
+                  actionTriggerKey={heroActionKeys[comp.id] ?? 0}
+                  playbackRate={isLivePatrol ? 1 : speedMultiplier}
+                  hitFlash={isCompTarget && heroHitFlash}
+                  slashTheme={compPreset.theme}
+                  paused={!isPlaying && !isLivePatrol}
+                  onAnimationComplete={(s, k) => handleHeroUnitAnimComplete(comp.id, s as AnimationState, k)}
+                />
+              ) : null}
             </ArenaAnimatedView>
           );
         })}
 
         {/* Lead Hero Unit */}
         {leadHero && (() => {
-          const leadPos = getHeroStagePosition(0, viewportWidth, heroSheet);
+          const leadPos = getHeroStagePosition(0, viewportWidth);
           const leadAnim = heroAnimStates[leadHero.id] ?? 'idle';
           const effectiveHeroState: AnimationState =
             leadHero.hp <= 0 ? 'death' : isMarching ? 'walk' : leadAnim;
@@ -1113,6 +1114,11 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
           );
           const isLeadActiveActor = activeActorId === leadHero.id;
           const isLeadTarget = activeTargetId === leadHero.id;
+          const leadSilhouette = customizationConfig?.identity?.baseSilhouette ?? 'balanced';
+          const leadArmored = Boolean(equipmentLoadout?.chest || equipmentLoadout?.head);
+          const leadCombatArt = getHeroCombatSprite(race, leadSilhouette, leadArmored);
+          const leadSlashTheme = resolveWeaponSlashTheme(equipmentLoadout?.mainHand);
+          const leadArtSize = Math.round(112 * leadPos.scale);
 
           return (
             <ArenaAnimatedView
@@ -1121,36 +1127,62 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                 styles.unitPositioner,
                 {
                   left: leadPos.leftPx,
-                  bottom: rigBottomOffset,
+                  bottom: leadCombatArt ? leadPos.baselineBottom : rigBottomOffset,
                   zIndex: leadPos.zIndex,
                 },
                 isLeadActiveActor ? heroTransformStyle : undefined,
               ]}
             >
-              <CharacterRigRenderer
-                race={race}
-                customizationConfig={customizationConfig}
-                equippedLoadout={equipmentLoadout}
-                animationState={rigAnimState}
-                actionTriggerKey={heroActionKeys[leadHero.id] ?? 0}
-                width={rigWidth}
-                height={rigHeight}
-                flipHorizontal={false}
-                playbackRate={isLivePatrol ? 1 : speedMultiplier}
-                hitFlash={isLeadTarget && heroHitFlash}
-                paused={!isPlaying && !isLivePatrol}
-                onAnimationComplete={(s, k) => {
-                  if (
-                    s === 'attack' ||
-                    s === 'hurt' ||
-                    s === 'death' ||
-                    s === 'idle' ||
-                    s === 'walk'
-                  ) {
-                    handleHeroUnitAnimComplete(leadHero.id, s, k);
-                  }
-                }}
-              />
+              {leadCombatArt ? (
+                <ReanimatedCombatantSprite
+                  source={leadCombatArt}
+                  state={rigAnimState}
+                  facing="right"
+                  width={leadArtSize}
+                  height={leadArtSize}
+                  actionTriggerKey={heroActionKeys[leadHero.id] ?? 0}
+                  playbackRate={isLivePatrol ? 1 : speedMultiplier}
+                  hitFlash={isLeadTarget && heroHitFlash}
+                  slashTheme={leadSlashTheme}
+                  paused={!isPlaying && !isLivePatrol}
+                  onAnimationComplete={(s, k) => {
+                    if (
+                      s === 'attack' ||
+                      s === 'hurt' ||
+                      s === 'death' ||
+                      s === 'idle' ||
+                      s === 'walk'
+                    ) {
+                      handleHeroUnitAnimComplete(leadHero.id, s, k);
+                    }
+                  }}
+                />
+              ) : (
+                <CharacterRigRenderer
+                  race={race}
+                  customizationConfig={customizationConfig}
+                  equippedLoadout={equipmentLoadout}
+                  animationState={rigAnimState}
+                  actionTriggerKey={heroActionKeys[leadHero.id] ?? 0}
+                  width={rigWidth}
+                  height={rigHeight}
+                  flipHorizontal={false}
+                  playbackRate={isLivePatrol ? 1 : speedMultiplier}
+                  hitFlash={isLeadTarget && heroHitFlash}
+                  paused={!isPlaying && !isLivePatrol}
+                  onAnimationComplete={(s, k) => {
+                    if (
+                      s === 'attack' ||
+                      s === 'hurt' ||
+                      s === 'death' ||
+                      s === 'idle' ||
+                      s === 'walk'
+                    ) {
+                      handleHeroUnitAnimComplete(leadHero.id, s, k);
+                    }
+                  }}
+                />
+              )}
             </ArenaAnimatedView>
           );
         })()}
@@ -1160,13 +1192,14 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
           (stageState.activeRoomDef?.roomType === 'MOB_ENCOUNTER' ||
             stageState.activeRoomDef?.roomType === 'BOSS') &&
           stageState.enemies.map((enemy, eIdx) => {
-            const enemySheet = resolveEnemySpriteConfig(enemy.isBoss, enemy.name);
-            const pos = getEnemyStagePosition(eIdx, viewportWidth, enemySheet, enemy.isBoss);
+            const pos = getEnemyStagePosition(eIdx, viewportWidth, enemy.isBoss);
             const animState = enemyAnimStates[enemy.id] ?? 'idle';
             const effectiveEnemyState: AnimationState =
               enemy.hp <= 0 ? 'death' : isWaveTransition ? 'walk' : animState;
             const isEnemyActiveActor = activeActorId === enemy.id;
             const isEnemyTarget = activeTargetId === enemy.id;
+            const enemyCombatArt = getCombatEnemySprite(enemy.isBoss, enemy.name);
+            const enemyArtSize = Math.round((enemy.isBoss ? 132 : 104) * pos.scale);
 
             return (
               <ArenaAnimatedView
@@ -1175,7 +1208,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                   styles.unitPositioner,
                   {
                     right: pos.rightPx,
-                    bottom: pos.bottomOffset,
+                    bottom: pos.baselineBottom,
                     zIndex: pos.zIndex,
                     opacity: enemy.hp <= 0 ? 0.55 : 1,
                   },
@@ -1188,8 +1221,8 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                     style={[
                       styles.enemyMiniHpTrack,
                       {
-                        left: Math.round((pos.cellSize - 46) / 2),
-                        bottom: (pos.baselineBottom + (enemy.isBoss ? 78 : 62)) - pos.bottomOffset,
+                        left: Math.round((enemyArtSize - 46) / 2),
+                        bottom: enemyArtSize + 4,
                       },
                     ]}
                   >
@@ -1203,18 +1236,22 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                     />
                   </View>
                 )}
-                <SpriteAnimator
-                  key={enemy.id}
-                  config={enemySheet}
-                  state={effectiveEnemyState}
-                  actionTriggerKey={enemyActionKeys[enemy.id] ?? 0}
-                  scale={pos.scale}
-                  flipHorizontal={true}
-                  playbackRate={speedMultiplier}
-                  hitFlash={isEnemyTarget && enemyHitFlash}
-                  paused={!isPlaying}
-                  onAnimationComplete={(s, k) => handleEnemyUnitAnimComplete(enemy.id, s, k)}
-                />
+                {enemyCombatArt ? (
+                  <ReanimatedCombatantSprite
+                    source={enemyCombatArt}
+                    state={effectiveEnemyState}
+                    facing="left"
+                    width={enemyArtSize}
+                    height={enemyArtSize}
+                    actionTriggerKey={enemyActionKeys[enemy.id] ?? 0}
+                    playbackRate={speedMultiplier}
+                    hitFlash={isEnemyTarget && enemyHitFlash}
+                    telegraphGlow={Boolean(enemy.enraged || (enemy.isBoss && isEnemyActiveActor))}
+                    slashTheme={enemy.isBoss ? 'astral' : 'crimson'}
+                    paused={!isPlaying}
+                    onAnimationComplete={(s, k) => handleEnemyUnitAnimComplete(enemy.id, s as AnimationState, k)}
+                  />
+                ) : null}
                 {enemy.enraged && (
                   <View style={styles.enragedBadge}>
                     <Text style={styles.enragedBadgeText}>🔥 ENRAGED</Text>
@@ -1227,41 +1264,62 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
         {/* Non-combat room feature (Treasure chest or hazard) */}
         {!isLivePatrol &&
           (stageState.activeRoomDef?.roomType === 'LOOT_CHEST' ||
-            stageState.activeRoomDef?.roomType === 'HAZARD_EVENT') && (
-            <ArenaAnimatedView
-              style={[
-                styles.unitPositioner,
-                {
-                  right: Math.max(12, Math.round(viewportWidth * 0.13)) + 12,
-                  bottom: 42,
-                  zIndex: 10,
-                },
-                enemyApproachStyle,
-              ]}
-            >
-              <View
+            stageState.activeRoomDef?.roomType === 'HAZARD_EVENT') && (() => {
+            const rankUpper = (dungeon.requiredRank ?? 'COPPER').toUpperCase();
+            const chestTier: 1 | 2 | 3 | 4 | 5 =
+              rankUpper === 'MYTHIC' || rankUpper === 'PLATINUM'
+                ? 5
+                : rankUpper === 'GOLD'
+                ? 4
+                : rankUpper === 'SILVER'
+                ? 3
+                : rankUpper === 'BRONZE' || rankUpper === 'IRON'
+                ? 2
+                : 1;
+            const compiledChest =
+              stageState.activeRoomDef?.roomType === 'LOOT_CHEST'
+                ? getLootChestArt(chestTier)
+                : null;
+            return (
+              <ArenaAnimatedView
                 style={[
-                  styles.shadowEllipse,
+                  styles.unitPositioner,
                   {
-                    left: 10,
-                    bottom: -4,
-                    width: 52,
-                    height: 10,
+                    right: Math.max(12, Math.round(viewportWidth * 0.13)) + 12,
+                    bottom: 42,
+                    zIndex: 10,
                   },
+                  enemyApproachStyle,
                 ]}
-              />
-              <ExpoImage
-                source={{
-                  uri:
-                    stageState.activeRoomDef?.roomType === 'HAZARD_EVENT'
-                      ? LOOT_SPRITES.relic_trophy
-                      : LOOT_SPRITES.chest_epic,
-                }}
-                style={styles.roomFeatureSprite}
-                contentFit="contain"
-              />
-            </ArenaAnimatedView>
-          )}
+              >
+                <View
+                  style={[
+                    styles.shadowEllipse,
+                    {
+                      left: 10,
+                      bottom: -4,
+                      width: 52,
+                      height: 10,
+                    },
+                  ]}
+                />
+                <ExpoImage
+                  source={
+                    compiledChest
+                      ? (compiledChest as any)
+                      : {
+                          uri:
+                            stageState.activeRoomDef?.roomType === 'HAZARD_EVENT'
+                              ? LOOT_SPRITES.relic_trophy
+                              : LOOT_SPRITES.chest_epic,
+                        }
+                  }
+                  style={styles.roomFeatureSprite}
+                  contentFit="contain"
+                />
+              </ArenaAnimatedView>
+            );
+          })()}
 
         {/* Z-20: Floating Combat Numbers */}
         {heroFloatingText && (

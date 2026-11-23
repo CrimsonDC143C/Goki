@@ -23,9 +23,15 @@ import {
   ParallaxBackground,
   resolveBattleArenaPreset,
 } from '../../components/battle/background/ParallaxBackground';
-import { SpriteAnimator } from '../../components/battle/sprites/SpriteAnimator';
-import type { AnimationState } from '../../components/battle/sprites/sprite.types';
-import { resolveEnemySpriteConfig } from '../../components/battle/sprites/spriteManifest';
+import {
+  getCombatEnemySprite,
+  getHeroCombatSprite,
+} from '../../assets/rpgArtRegistry';
+import {
+  ReanimatedCombatantSprite,
+  resolveWeaponSlashTheme,
+  type CombatantAnimState,
+} from '../../components/battle/ReanimatedCombatantSprite';
 import {
   CharacterRigRenderer,
   type RigAnimationState,
@@ -88,7 +94,7 @@ function deriveUnitAnimState(
   unit: TurnBasedCombatant,
   events: readonly TurnBasedCombatEvent[],
   combatStatus: TurnBasedCombatState['status']
-): { partyAnim: RigAnimationState; enemyAnim: AnimationState; hitFlash: boolean } {
+): { partyAnim: RigAnimationState; enemyAnim: CombatantAnimState; hitFlash: boolean } {
   if (!unit.alive) {
     return { partyAnim: 'death', enemyAnim: 'death', hitFlash: false };
   }
@@ -437,18 +443,42 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
                   ) : null}
 
                   <View style={styles.rigWrap}>
-                    <CharacterRigRenderer
-                      race={unit.race ?? 'HUMAN'}
-                      appearanceId={unit.appearanceId}
-                      customizationConfig={unit.customizationConfig}
-                      equippedLoadout={unit.equippedLoadout}
-                      animationState={anim.partyAnim}
-                      actionTriggerKey={state.stepSeq}
-                      hitFlash={anim.hitFlash}
-                      playbackRate={playbackSpeed}
-                      width={isHero ? 64 : 52}
-                      height={isHero ? 84 : 70}
-                    />
+                    {(() => {
+                      const heroArt = getHeroCombatSprite(
+                        unit.race ?? 'HUMAN',
+                        unit.customizationConfig?.identity?.baseSilhouette ?? 'balanced',
+                        Boolean(unit.equippedLoadout?.chest || unit.equippedLoadout?.head)
+                      );
+                      if (heroArt) {
+                        return (
+                          <ReanimatedCombatantSprite
+                            source={heroArt}
+                            state={anim.partyAnim}
+                            facing="right"
+                            width={isHero ? 74 : 62}
+                            height={isHero ? 78 : 66}
+                            actionTriggerKey={state.stepSeq}
+                            hitFlash={anim.hitFlash}
+                            playbackRate={playbackSpeed}
+                            slashTheme={resolveWeaponSlashTheme(unit.equippedLoadout?.mainHand)}
+                          />
+                        );
+                      }
+                      return (
+                        <CharacterRigRenderer
+                          race={unit.race ?? 'HUMAN'}
+                          appearanceId={unit.appearanceId}
+                          customizationConfig={unit.customizationConfig}
+                          equippedLoadout={unit.equippedLoadout}
+                          animationState={anim.partyAnim}
+                          actionTriggerKey={state.stepSeq}
+                          hitFlash={anim.hitFlash}
+                          playbackRate={playbackSpeed}
+                          width={isHero ? 64 : 52}
+                          height={isHero ? 84 : 70}
+                        />
+                      );
+                    })()}
                   </View>
 
                   <View style={styles.unitHud}>
@@ -508,7 +538,6 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
               const isSelected = enemy.unitId === resolvedTargetId && enemy.alive;
               const isTurnActive = enemy.unitId === state.activeUnitId;
               const hpPct = Math.max(0, Math.min(100, (enemy.hp / Math.max(1, enemy.maxHp)) * 100));
-              const spriteConfig = resolveEnemySpriteConfig(Boolean(enemy.isBoss), enemy.name);
 
               return (
                 <Pressable
@@ -549,15 +578,31 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
                   ) : null}
 
                   <View style={styles.enemySpriteWrap}>
-                    <SpriteAnimator
-                      config={spriteConfig}
-                      state={anim.enemyAnim}
-                      actionTriggerKey={state.stepSeq}
-                      scale={enemy.isBoss ? 0.95 : 0.8}
-                      flipHorizontal
-                      playbackRate={playbackSpeed}
-                      hitFlash={anim.hitFlash}
-                    />
+                    {(() => {
+                      const enemyArt = getCombatEnemySprite(Boolean(enemy.isBoss), enemy.name);
+                      if (!enemyArt) return null;
+                      const sz = enemy.isBoss ? 86 : 72;
+                      const telegraph = Boolean(
+                        enemy.alive &&
+                          enemy.isBoss &&
+                          enemy.nextIntent &&
+                          enemy.nextIntent.estimatedDamage > 0
+                      );
+                      return (
+                        <ReanimatedCombatantSprite
+                          source={enemyArt}
+                          state={anim.enemyAnim}
+                          facing="left"
+                          width={sz}
+                          height={sz}
+                          actionTriggerKey={state.stepSeq}
+                          playbackRate={playbackSpeed}
+                          hitFlash={anim.hitFlash}
+                          telegraphGlow={telegraph}
+                          slashTheme={enemy.isBoss ? 'astral' : 'crimson'}
+                        />
+                      );
+                    })()}
                   </View>
 
                   <View style={styles.unitHud}>

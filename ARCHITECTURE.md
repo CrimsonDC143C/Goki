@@ -11,7 +11,7 @@
 * **Physical-to-Digital Translation:** Real-world workouts (resistance training, low/moderate cardio, high-intensity VO2 max sport, calisthenics, daily steps, sleep, mobility, and mindfulness) are converted deterministically into a holistic **7-Stat RPG System**: **Strength (STR)**, **Endurance (END)**, **Agility (AGI)**, **Dexterity (DEX)**, **Constitution (CON)**, **Wisdom (WIS)**, and **Spirit (SPR)**, with full backward compatibility for legacy 3-stat profiles.
 * **Dual-Paced Behavioral Loops:**
   * **Intra-Workout ("Zero Cognitive Drag"):** High-contrast, minimal-tap, haptic-driven UI designed for the gym floor. Focus locks prevent menu distractions while dynamic rest timers, plate warm-up calculations, real-time exercise search/filtering, and live PR tracking run seamlessly. Real-time audio cues run natively via `expo-audio` with a procedural Web Audio synthesizer fallback and a persistent Gym Silence toggle.
-  * **Extra-Workout ("Tavern & World Hub"):** Rich metagame featuring 10 stat-bound talent trees across all 7 stats, 8-slot equipment loadouts, 2-hour idle gathering/crafting professions (Mining, Foraging, Smelting, Alchemy), 24-hour solo/co-op auto-battler dungeons, and 7-day public/guild boss raids.
+  * **Extra-Workout ("5-Tab RPG World Hub"):** Rich metagame organized across `Hero | Adventure | Artisan | Social | Train` featuring modular bone-rigged heroes (`Human`, `Oni`, `Kitsune`), 10 stat-bound talent trees across all 7 stats, 8-slot equipment loadouts, live turn-based Adventurer's Guild quests with 4-player WebSocket co-op, 2-hour idle gathering & crafting professions (Mining, Foraging, Smelting, Alchemy), 24-hour solo/co-op expeditions, real-world Gym Clans, Adventurer Companies, and 7-day boss raids—unified under an **East-meets-West Woodblock, Sumi-e Scroll, & Twilight Silhouette** visual direction (see Section 12).
 * **Operational Ironman Verification & Hardware Telemetry:** Dual-mode architecture (`STANDARD` vs `IRONMAN_VERIFIED`). Native telemetry pipeline interfaces with Apple HealthKit (`react-native-health`) and Google Health Connect (`react-native-health-connect`), featuring permission negotiation, session BPM streaming, activity classifications, sleep stages, and pedometer steps. Server-side validation routines (`verifyTelemetry`, `verifyMindBodyTelemetry`, `verifyRecoveryTelemetry`) perform physiological sanity checks (35–240 BPM), flatline checks, and cryptographic verification to prevent spoofing.
 * **Dual Runtime Engine:** The core RPG and fitness math lives in a zero-dependency package (`@goki/game-engine`) that runs identically in Node.js (backend) and React Native / Expo Web (client). The mobile app remains fully functional and deterministic even when completely offline or disconnected from the server.
 
@@ -321,7 +321,7 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
   * [`apps/mobile/eas.json`](./apps/mobile/eas.json) — Expo Application Services (EAS) build and submit profiles covering `development`, `preview` (standalone Android `.apk` & iOS simulator), `production` (App Store / Google Play store builds), and `testflight` (`extends: "production"` with auto-resolved App Store Connect submission).
   * [`apps/mobile/app.json`](./apps/mobile/app.json) — Expo native configuration (`v0.2.0`, `runtimeVersion: "0.1.0"`, bundle ID `com.gokirpg.app`, scheme `gokirpg://`, EAS `projectId`), 1024×1024 opaque App Store icon, `ITSAppUsesNonExemptEncryption`, HealthKit / Health Connect permissions, and `expo-build-properties` (`minSdkVersion: 26`, Proguard disabled).
   * [`scripts/patch-react-native-health.mjs`](./scripts/patch-react-native-health.mjs) — Automated `npm postinstall` native patcher removing obsolete `setBridge:` and `+sharedJsModule` calls from `react-native-health@1.19.0` (`RCTAppleHealthKit.m`) for React Native 0.88+ Bridgeless / New Architecture iOS builds.
-  * [`scripts/generate-layer-icons.mjs`](./scripts/generate-layer-icons.mjs) — Standalone generation and asset processing script connecting to Layer.ai MCP for batch 1:1 dark fantasy RPG icon synthesis.
+  * [`scripts/generate-layer-icons.mjs`](./scripts/generate-layer-icons.mjs) — Standalone generation and asset processing script connecting to Layer.ai MCP for batch 1:1 RPG icon synthesis and `512x512` resizing (scheduled to migrate from legacy WoW Reference Sets to fresh `GOKI_WOODBLOCK_HUB` woodblock Reference Sets in Milestone 6 / Phase 2).
 * **Game Engine Core:**
   * [`packages/game-engine/src/types.ts`](./packages/game-engine/src/types.ts) — Shared core types, holistic 7-stat normalization (`normalizeCoreStatBlock`, `NormalizedCoreStatBlock`), and `finalXpByHolisticStat` on `WorkoutEvaluationResult`.
   * [`packages/game-engine/src/item-affix-engine.ts`](./packages/game-engine/src/item-affix-engine.ts) — Procedural Itemization & 5-Tier Affix Engine: 32 base equippable items, 12 prefixes, 10 suffixes, 32 T5 Mythic Uniques with passives, affix scaling, and equipment modifier aggregation (9 unit tests).
@@ -372,6 +372,7 @@ With core mechanics, authentication, WebSockets, wearable Ironman telemetry, aud
   * [`apps/server/src/queues/bullmq-workers.ts`](./apps/server/src/queues/bullmq-workers.ts) — Redis and BullMQ async worker scheduler.
 * **Mobile Client:**
   * [`apps/mobile/App.tsx`](./apps/mobile/App.tsx) — Top-level shell housing the 5-tab World navigation layout (`Hero`, `Adventure`, `Artisan`, `Social`, `Train`), overhauled HUD with Japanese Oni `TopMenuBorderArt` header offset, global top-left `🐛` bug report trigger, centered circular character portrait medallion, cosmetic location badge, and intra-workout focus lock banner.
+  * [`apps/mobile/src/theme.ts`](./apps/mobile/src/theme.ts) — Design token registry (`COLORS`, `CRIMSON_ONI`, `RARITY_COLORS`, `SURFACES`, `TYPOGRAPHY`, `SPACING`, `RADII`); currently dark-slate (`#0B0E14` / `#090C12`) and targeted to retune toward deep ink-teal (`#0E1A1E`), twilight indigo (`#131526`), and lantern gold (`#E6B86A`) as Milestone 6 woodblock backdrops land.
   * [`apps/mobile/src/components/TopMenuBorderArt.tsx`](./apps/mobile/src/components/TopMenuBorderArt.tsx) — Dark fantasy Japanese Oni architectural SVG trim providing an ornamental header cushion protecting HUD elements and update banners from screen notches and bezels.
   * [`apps/mobile/src/assets/characterArtRegistry.ts`](./apps/mobile/src/assets/characterArtRegistry.ts) — Paired character appearance registry housing 10 paired 1:1 Bust Portraits and 2:3 Full-Body Standing artworks plus race-aware fallback helpers (`getRaceAwareBustSource`, `getRaceAwareStandingSource`).
   * [`apps/mobile/src/assets/itemArtRegistry.ts`](./apps/mobile/src/assets/itemArtRegistry.ts) — Bespoke 1:1 Dark-Fantasy RPG item artwork registry (`DEDICATED_ITEM_ICON_SLOTS`, `ITEM_ICON_REGISTRY`, `ITEM_ICON_ALIASES`) plus re-exported equipment rig slots via `getItemIconSource()`.
@@ -739,6 +740,48 @@ Across Milestones 1–6, Goki evolved from isolated utility screens into an inte
     * `NPC_PORTRAIT_ART_REGISTRY` (6 NPC archetypes × 4 `NpcExpression` variants: `'neutral' | 'happy' | 'focused' | 'alert'`), resolved via `getNpcPortraitArtSource` inside `NpcPortraitSvg` and `NpcDialogueOverlay` (`expression`, `pageExpressions`, `sceneSlotId`).
     * `BATTLE_ARENA_ART_REGISTRY` (`whitewood_forest` plus 4 biome themes), resolved cleanly through `inferBattleArenaThemeId` and `resolveBattleArenaPreset`.
     * `RACE_ILLUSTRATION_SLOTS`, `RIG_BODY_PART_ILLUSTRATION_SLOTS`, `MORPH_EVOLUTION_OVERLAY_SLOTS` (15 horn/tail/aura tiers), `EQUIPMENT_RIG_OVERLAY_SLOTS` (all 34 equipment variants), `getRaceAwareBustSource`, `getRaceAwareStandingSource`, and `DEDICATED_ITEM_ICON_SLOTS`.
+
+---
+
+## 12. Visual Direction & Art Production Architecture (East-meets-West Woodblock & Twilight Silhouette)
+
+Goki's visual overhaul replaces legacy cold obsidian (`#090C12`) surfaces, World-of-Warcraft painted icons, bright Western forest stages, and `100x100` pixel enemy sprites with a unified **East-meets-West Woodblock, Sumi-e Scroll, & Twilight Silhouette** art system.
+
+### A. Role-Based Style Pillars & Linework Grammar
+* **Calm Hub Environments (`Hero`, `Adventure`, `Artisan`, `Social`):** *Shin-hanga* Japanese woodblock print blended with *Sumi-e* ink wash—crisp fine contour ink lines, muted mineral pigments (`jade-teal`, `ochre gold`, `slate`, `cinnabar`, `sakura`, `aged cream`), subtle warm washi paper grain, and serene natural flourishes (cranes, gnarled pines, lotus pads, glowing lanterns, falling petals) with zero mascot sprites.
+* **Battle Arenas & Raids (`TurnBasedArenaScreen.tsx`, `AutoBattlerArena.tsx`):** Graphic layered twilight silhouettes backlit by luminous misty horizons across all 5 battle biomes (`whitewood_forest`, `crypt_catacombs`, `obsidian_citadel`, `sun_scorched_caldera`, `arena_courtyard`).
+* **Characters, NPCs, & Inventory Icons (`44px–72px` Mobile Readability):** Modern woodblock ink-contour rendering with crisp thin ink outlines, flat mineral fills, and subtle paper grain so expressions and gear remain immediately scannable at small UI sizes.
+
+### B. UI Surface Retuning & Scene Composition (`theme.ts`, `HubSceneShell.tsx`, `rpgArtRegistry.ts`)
+* **Retuned Dark Palette Target:** Maintain dark cards for gym-floor readability and AMOLED contrast while shifting `SURFACES` and scrim defaults from cold obsidian (`#0B0E14` / `#090C12`) toward deep ink-teal (`#0E1A1E` / `#0B1317`), twilight indigo (`#131526`), and warm lantern gold (`#E6B86A`).
+* **Backdrop Framing Contract (`1080x1920`):** Place focal architecture, sky glow, and lanterns in the **upper third**; anchor the **lower two-thirds** in deep dark foreground shadows (water, stone, pine shade) so light text and semi-transparent cards stay legible without heavy black scrims.
+* **Header Banner Framing Contract (`1440x480`):** Place luminous architectural motifs on the left and right outer thirds around a darker low-contrast center behind top HUD controls.
+
+### C. East-meets-West Cultural Split, Racial Contrast, & NPC Heritage
+* **Hub Architecture Split (`HUB_ENVIRONMENT_ART_REGISTRY`):**
+  * *Eastern Woodblock / Sumi-e:* `hero_sanctum` (lakeside wooden armory pavilion & lotus pond) and `artisan_gathering_wilds` (misty cedar cliffs, sakura boughs, mineral outcrops).
+  * *East-meets-West Fusion:* `adventure_guild_hall`, `adventure_expedition_map`, `artisan_forge_apothecary`, `social_clan_hall`, and `social_company_tavern` blend Western medieval stone vaults, gothic arches, and timber rafters with teal-gold and amber woodblock brushwork.
+* **3-Way Racial Contrast (`RACE_ILLUSTRATION_SLOTS`):**
+  * **`HUMAN`:** Western medieval linen tunics, leather baldrics, and armor silhouettes in muted slate, wool cream, and bronze.
+  * **`ONI`:** **Darker** Eastern mythic styling—stormy indigo-charcoal shadows, obsidian and cinnabar crimson garments, iron accents, and moody lighting.
+  * **`KITSUNE`:** **Lighter** Eastern shrine styling—luminous jade mist, pearl ivory, soft sakura rose, and warm cream-gold silk haori.
+* **NPC Cast Heritage (`NPC_PORTRAIT_ART_REGISTRY`, `NpcPortraitSvg.tsx`):**
+  * *Western Guild Heritage:* `GUILD_RECEPTIONIST` (*Lyra Vance*), `TRADER` (*Bramwell*), and `QUARTERMASTER` (*Commander Veyra*).
+  * *Eastern Sanctum / Guardian Heritage:* `GUIDE` (*Auren the Wayfinder*), `TRAINER` (*Master Kaelen*), and `CLAN_WARDEN` (*Warden Torin*, oxidized horned iron helm).
+
+### D. Tooling Strategy & Phased Migration (`Phase 1` vs. `Phase 2`)
+* **Fresh Layer.ai Reference Sets (Retiring Legacy WoW Sets):**
+  * `GOKI_WOODBLOCK_HUB`: Drives Stage 1 hub backdrops/banners (`14`), Stage 2 `neutral` NPC base portraits (`6`), Stage 4 `DEDICATED_ITEM_ICON_SLOTS` (`27`), and Stage 5 `2:3` standing race cards (`9`, cropped deterministically to `1:1` busts).
+  * `GOKI_TWILIGHT_ARENA`: Drives Stage 3's `5` 6-layer battle arenas (`30` PNGs) via Layer.ai **Parallax Split** (`export_parallax`) followed by a Photoshop/Krita `+1280px` horizontal offset check to eliminate scrolling wrap seams (`2560` px wide layers).
+* **Hybrid Masked Editing (NPC Expressions):** Generate `18` expression variants (`happy`, `focused`, `alert`) via Layer.ai masked inpaint (`source_file_id` + eye/brow/mouth `mask_file_id`) or Krita/Photoshop overpaint locked to each approved `neutral` portrait so head pose, line weight, and lighting never shift across dialogue pages.
+* **Non-AI Alternative Pipelines:**
+  * **Modular Bone-Rig Overlays (`67` slots in `CharacterRigRenderer.tsx`):** Keep vector SVG rigs (`BodyPartSvg.tsx`, `EquipmentPartSvg.tsx`) tuned to woodblock mineral pigments or paint pivot-locked puppet slices on a `4x` (`800x1080`) mannequin template matching `RIG_STAGE_WIDTH = 200, RIG_STAGE_HEIGHT = 270` in **Spine 2D, Affinity Designer, Illustrator, or Krita**.
+  * **Combat & Skill VFX (`TurnBasedArenaScreen.tsx`, `AutoBattlerArena.tsx`):** Author **Sumi-e ink-brush slash arcs, glowing calligraphy seals, and drifting petals/ember sparks** via **Rive (`@rive-app/react-native`), Lottie, or procedural `react-native-svg` + `react-native-reanimated`** (or `6–8` frame `128x128` Aseprite/Procreate strips) to guarantee 60 FPS cross-platform performance without triggering Expo EAS's `2000`-asset OTA cap.
+* **Phase 2 Legacy Overhaul (After Milestone 6 Slots Populate):**
+  1. Update `scripts/generate-layer-icons.mjs` to point at `GOKI_WOODBLOCK_HUB` and regenerate the `40` legacy WoW icons in `ITEM_ICON_REGISTRY`.
+  2. Replace the `10` legacy `CHARACTER_APPEARANCES` standing/bust cards (`characterArtRegistry.ts`) in matching East-meets-West woodblock style.
+  3. Replace the `7` `100x100` pixel-art enemy sheets (`spriteManifest.ts`) with crisp non-pixel ink-contour/silhouette fighters built as **Rive/Spine 2D rigs** or `256x256` Procreate/Krita sheets so combatants integrate seamlessly against twilight silhouette arenas.
+
 
 
 

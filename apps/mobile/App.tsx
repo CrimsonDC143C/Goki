@@ -85,6 +85,8 @@ const MainShell: React.FC<MainShellProps> = ({
     characterName,
     characterArtUri,
     appearanceId,
+    race,
+    customizationConfig,
     overallLevel,
     gold,
     location,
@@ -214,6 +216,8 @@ const MainShell: React.FC<MainShellProps> = ({
                   isCircle
                   isActive={tab === 'HERO'}
                   appearanceId={appearanceId}
+                  race={race}
+                  customizationConfig={customizationConfig}
                   imageSource={characterArtUri}
                 />
                 {/* Mini Level badge */}

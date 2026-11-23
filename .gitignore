@@ -33,3 +33,6 @@ redis-data/
 npm-debug.log*
 .DS_Store
 Thumbs.db
+
+# Art pipeline raw assets (local generation staging; compiled WebPs are committed)
+art-pipeline/raw/

@@ -1860,7 +1860,7 @@ export const DEFAULT_DUNGEON_CATALOG: readonly DungeonDefinition[] = [
           },
           {
             itemSlug: 'windrunner_daggers',
-            itemName: 'Twin Windrunner Blades',
+            itemName: 'Windrunner Dagger',
             rarity: 'RARE',
             quantity: 1,
             weight: 50,
@@ -1883,7 +1883,7 @@ export const DEFAULT_DUNGEON_CATALOG: readonly DungeonDefinition[] = [
           },
           {
             itemSlug: 'windrunner_daggers',
-            itemName: 'Twin Windrunner Blades',
+            itemName: 'Windrunner Dagger',
             rarity: 'RARE',
             quantity: 1,
             weight: 55,
@@ -2448,7 +2448,7 @@ export const DEFAULT_DUNGEON_CATALOG: readonly DungeonDefinition[] = [
         lootTable: [
           {
             itemSlug: 'crown_of_the_wyrm',
-            itemName: 'Crown of the World Wyrm',
+            itemName: 'Wyrm Crown',
             rarity: 'MYTHIC',
             quantity: 1,
             weight: 30,
@@ -2471,7 +2471,7 @@ export const DEFAULT_DUNGEON_CATALOG: readonly DungeonDefinition[] = [
         lootTable: [
           {
             itemSlug: 'crown_of_the_wyrm',
-            itemName: 'Crown of the World Wyrm',
+            itemName: 'Wyrm Crown',
             rarity: 'MYTHIC',
             quantity: 1,
             weight: 25,

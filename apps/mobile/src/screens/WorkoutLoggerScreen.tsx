@@ -84,12 +84,8 @@ import {
   DisclosureBottomSheet,
 } from '../components/ui/SurfacePrimitives';
 import { COLORS, RARITY_COLORS, CRIMSON_ONI, SURFACES } from '../theme';
-import {
-  DEMON_BOSS_SPRITE_CONFIG,
-  GREATSWORD_SKELETON_SPRITE_CONFIG,
-} from '../components/battle/sprites/spriteManifest';
-import { SpriteAnimator as BaseSpriteAnimator } from '../components/battle/sprites/SpriteAnimator';
-import type { AnimationState, SpriteAnimatorProps } from '../components/battle/sprites/sprite.types';
+import { Image as ExpoImage } from 'expo-image';
+import { getBossBustArt } from '../assets/rpgArtRegistry';
 
 // ============================================================================
 // CONSTANTS & CATALOGS
@@ -131,37 +127,6 @@ const STAT_XP_META: Record<
   CONSTITUTION: { label: 'CON', emoji: '🛡️', color: '#66BB6A' },
   WISDOM: { label: 'WIS', emoji: '🧘‍♀️', color: '#AB47BC' },
   SPIRIT: { label: 'SPR', emoji: '🔮', color: '#EC407A' },
-};
-
-// ============================================================================
-// SPRITE ANIMATOR ADAPTER
-// ============================================================================
-
-interface CustomSpriteProps {
-  rig?: 'greatsword_skeleton' | 'demon_boss' | string;
-  state?: string;
-  size?: number;
-  style?: any;
-}
-
-const SpriteAnimator: React.FC<SpriteAnimatorProps | CustomSpriteProps> = (props: any) => {
-  if (props.rig) {
-    const config =
-      props.rig === 'greatsword_skeleton'
-        ? GREATSWORD_SKELETON_SPRITE_CONFIG
-        : DEMON_BOSS_SPRITE_CONFIG;
-    const animState: AnimationState =
-      props.state === 'take_hit' ? 'hurt' : (props.state as AnimationState) || 'idle';
-    return (
-      <BaseSpriteAnimator
-        config={config}
-        state={animState}
-        size={props.size ?? 48}
-        style={props.style}
-      />
-    );
-  }
-  return <BaseSpriteAnimator {...props} />;
 };
 
 // ============================================================================
@@ -2145,13 +2110,35 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
             ]}
           >
             <View style={styles.bossMainRow}>
-              {/* Mini Boss Avatar Frame with Animated Sprite and Damage Flash Overlay */}
+              {/* Mini Boss Avatar Frame with Illustrated Boss Bust and Damage Flash Overlay */}
               <View style={styles.bossAvatarFrame}>
-                <SpriteAnimator
-                  rig={selectedBoss.id === 'vaelgor' ? 'greatsword_skeleton' : 'demon_boss'}
-                  state={bossAnimState}
-                  size={48}
-                />
+                {(() => {
+                  const bossBust = getBossBustArt(selectedBoss.name);
+                  if (bossBust) {
+                    return (
+                      <ExpoImage
+                        source={bossBust as any}
+                        style={{ width: '100%', height: '100%' }}
+                        contentFit="cover"
+                        contentPosition="top center"
+                      />
+                    );
+                  }
+                  return <RpgIcon name="raid" size={24} color={COLORS.gold} />;
+                })()}
+                {bossAnimState === 'take_hit' && (
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      right: 0,
+                      bottom: 0,
+                      left: 0,
+                      backgroundColor: 'rgba(239, 68, 68, 0.34)',
+                    }}
+                  />
+                )}
                 {lastDamageDealt !== null && (
                   <View style={styles.damageFlashBadge}>
                     <Text style={styles.damageFlashText}>-{lastDamageDealt} DMG</Text>

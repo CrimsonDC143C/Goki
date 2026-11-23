@@ -112,7 +112,7 @@ const PR_CRIT_LOOT_TABLE: readonly WeightedLootTemplate[] = [
   },
   {
     itemSlug: 'copper_guild_ring',
-    itemName: 'Copper Guild Signet',
+    itemName: 'Copper Signet Ring',
     rarity: 'RARE',
     quantity: 1,
     weight: 6,

@@ -1,0 +1,20 @@
+{
+  "name": "@goki/asset-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone Layer.ai 2.5D anime asset compiler and static require() registry generator",
+  "type": "module",
+  "scripts": {
+    "build": "tsx src/build-assets.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "sharp": "^0.34.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

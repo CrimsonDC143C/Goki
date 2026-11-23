@@ -38,7 +38,7 @@ export const HubSceneBackdrop: React.FC<HubSceneBackdropProps> = ({
           <View
             style={[
               StyleSheet.absoluteFill,
-              { backgroundColor: art.scrimColors[1], opacity: 0.72 },
+              { backgroundColor: art.scrimColors[1], opacity: 0.58 },
             ]}
           />
         </>
@@ -89,7 +89,7 @@ export const HubSceneHeaderSlot: React.FC<HubSceneHeaderSlotProps> = ({
             <View
               style={[
                 StyleSheet.absoluteFill,
-                { backgroundColor: art.scrimColors[0], opacity: 0.76 },
+                { backgroundColor: art.scrimColors[0], opacity: 0.58 },
               ]}
             />
           </>

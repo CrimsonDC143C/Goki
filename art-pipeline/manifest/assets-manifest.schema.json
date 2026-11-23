@@ -1,0 +1,289 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Goki Art Pipeline Assets Manifest",
+  "description": "Schema for Layer.ai generated 2.5D anime asset manifest and compiled mobile WebP targets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "layer", "defaults", "assets"],
+  "definitions": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "referenceSetEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "category"],
+      "properties": {
+        "id": { "$ref": "#/definitions/uuid" },
+        "name": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "defaultModelId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "assetEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "registry",
+        "slot",
+        "referenceSetKey",
+        "generationMethod",
+        "priority",
+        "status",
+        "dimensions",
+        "fit",
+        "format",
+        "removeBackground",
+        "rawPath",
+        "compiledPath"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "hub_backdrop",
+            "hub_banner",
+            "arena_parallax_layer",
+            "npc_portrait",
+            "item_icon",
+            "rig_part",
+            "character_portrait",
+            "combat_mob",
+            "combat_boss",
+            "boss_bust",
+            "hero_combat_sprite",
+            "loot_chest"
+          ]
+        },
+        "registry": {
+          "type": "string",
+          "enum": [
+            "HUB_ENVIRONMENT_ART_REGISTRY",
+            "BATTLE_ARENA_ART_REGISTRY",
+            "NPC_PORTRAIT_ART_REGISTRY",
+            "ITEM_ICON_REGISTRY",
+            "RACE_ILLUSTRATION_SLOTS",
+            "COMBAT_ENEMY_ART_REGISTRY",
+            "HERO_COMBAT_ART_REGISTRY",
+            "LOOT_CHEST_ART_REGISTRY"
+          ]
+        },
+        "slot": {
+          "type": "string",
+          "minLength": 1
+        },
+        "field": {
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "referenceSetKey": {
+          "type": "string",
+          "enum": [
+            "ANIME_WORLD",
+            "ANIME_ARENA",
+            "ANIME_RIG_PARTS",
+            "ANIME_ITEMS"
+          ]
+        },
+        "generationMethod": {
+          "type": "string",
+          "enum": [
+            "forge",
+            "export_parallax",
+            "masked_inpaint",
+            "manual"
+          ]
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "generated",
+            "review",
+            "approved",
+            "rejected"
+          ]
+        },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "cropRegion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["left", "top", "width", "height"],
+          "properties": {
+            "left": { "type": "number", "minimum": 0, "maximum": 1 },
+            "top": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          }
+        },
+        "fit": {
+          "type": "string",
+          "enum": ["cover", "contain", "fill", "inside", "outside"]
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "centre",
+            "center",
+            "top",
+            "right top",
+            "right",
+            "right bottom",
+            "bottom",
+            "left bottom",
+            "left",
+            "left top",
+            "north",
+            "northeast",
+            "east",
+            "southeast",
+            "south",
+            "southwest",
+            "west",
+            "northwest",
+            "entropy",
+            "attention"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "enum": ["webp"]
+        },
+        "quality": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "alphaQuality": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "preserveAlpha": {
+          "type": "boolean"
+        },
+        "removeBackground": {
+          "type": "boolean"
+        },
+        "backdropStyle": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rawPath": {
+          "type": "string",
+          "pattern": "^art-pipeline/raw/.+\\.(png|jpg|jpeg|webp)$"
+        },
+        "compiledPath": {
+          "type": "string",
+          "pattern": "^apps/mobile/assets/compiled/.+\\.webp$"
+        },
+        "parallaxGroup": {
+          "type": "string",
+          "minLength": 1
+        },
+        "layerIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "baseAssetId": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$"
+        },
+        "promptNotes": {
+          "type": "string"
+        },
+        "layerFileId": {
+          "anyOf": [
+            { "$ref": "#/definitions/uuid" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  },
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "workspaceName",
+        "workspaceSlug",
+        "projectId",
+        "referenceSets"
+      ],
+      "properties": {
+        "workspaceId": { "$ref": "#/definitions/uuid" },
+        "workspaceName": { "type": "string", "minLength": 1 },
+        "workspaceSlug": { "type": "string", "minLength": 1 },
+        "projectId": {
+          "anyOf": [
+            { "$ref": "#/definitions/uuid" },
+            { "type": "null" }
+          ]
+        },
+        "referenceSets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ANIME_WORLD",
+            "ANIME_ARENA",
+            "ANIME_RIG_PARTS",
+            "ANIME_ITEMS"
+          ],
+          "properties": {
+            "ANIME_WORLD": { "$ref": "#/definitions/referenceSetEntry" },
+            "ANIME_ARENA": { "$ref": "#/definitions/referenceSetEntry" },
+            "ANIME_RIG_PARTS": { "$ref": "#/definitions/referenceSetEntry" },
+            "ANIME_ITEMS": { "$ref": "#/definitions/referenceSetEntry" }
+          }
+        }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["webpQuality", "webpAlphaQuality", "webpEffort"],
+      "properties": {
+        "webpQuality": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "webpAlphaQuality": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "webpEffort": { "type": "integer", "minimum": 0, "maximum": 6 }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/assetEntry" }
+    }
+  }
+}

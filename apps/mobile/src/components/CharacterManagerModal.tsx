@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import {
   BASE_SILHOUETTE_OPTIONS,
   CHARACTER_RACES,
@@ -31,9 +32,10 @@ import {
   normalizeCustomizationConfig,
 } from '@goki/game-engine';
 import {
-  CHARACTER_APPEARANCES,
-  CharacterAppearancePreset,
-  getCharacterAppearance,
+  RACE_APPEARANCE_PRESETS,
+  RaceAppearancePreset,
+  getRaceAccentColor,
+  getRaceAwareBustSource,
 } from '../assets/characterArtRegistry';
 import { PersistedCharacterProfile } from '../utils/offlineStorage';
 import { useGame } from '../state/GameContext';
@@ -180,7 +182,7 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
   const ironmanCharacter = characters.find((c) => c.gameMode === 'IRONMAN_VERIFIED');
   const activeCount = (standardCharacter ? 1 : 0) + (ironmanCharacter ? 1 : 0);
 
-  const selectedPreset: CharacterAppearancePreset = getCharacterAppearance(selectedAppearanceId);
+  const raceAccentColor = getRaceAccentColor(draftRace);
 
   const handleSwitch = async (charId: string) => {
     setErrorMsg(null);
@@ -394,40 +396,49 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
       });
     };
 
-    const handleApplyQuickPreset = (presetId: string) => {
+    const handleApplyQuickPreset = (preset: RaceAppearancePreset) => {
       setErrorMsg(null);
-      setSelectedAppearanceId(presetId);
-      const derived = deriveCustomizationFromLegacyAppearance(presetId);
-      setDraftRace(derived.race);
+      setSelectedAppearanceId(preset.id);
+      setDraftRace(preset.race);
       if (isEditingExisting) {
         const adapted = adaptCustomizationForRaceChange(
           {
             version: 1,
-            identity: derived.config.identity,
+            identity: {
+              ...draftConfig.identity,
+              baseSilhouette: preset.silhouette,
+            },
             morphs: draftConfig.morphs,
           },
-          derived.race
+          preset.race
         );
         setDraftConfig({
           ...adapted,
           morphs: clampMorphsForRace(
-            derived.race,
+            preset.race,
             adapted.morphs,
             customizingCharacter?.stats
           ),
         });
       } else {
-        setDraftConfig(derived.config);
+        const base = createDefaultCustomizationConfig(preset.race);
+        setDraftConfig({
+          ...base,
+          identity: {
+            ...base.identity,
+            baseSilhouette: preset.silhouette,
+          },
+        });
       }
     };
 
     return (
       <View style={styles.customizerContainer}>
         {/* Live Rig Preview Stage */}
-        <View style={[styles.previewFrame, { borderColor: selectedPreset.accentColor }]}>
+        <View style={[styles.previewFrame, { borderColor: raceAccentColor }]}>
           <View style={styles.previewStageWrap}>
             {previewPose === 'bust' ? (
-              <View style={[styles.previewBustRing, { borderColor: selectedPreset.accentColor }]}>
+              <View style={[styles.previewBustRing, { borderColor: raceAccentColor }]}>
                 <CharacterRigRenderer
                   race={draftRace}
                   customizationConfig={draftConfig}
@@ -513,7 +524,7 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
           </View>
 
           <View style={styles.presetMetaBanner}>
-            <Text style={[styles.presetTitle, { color: selectedPreset.accentColor }]}>
+            <Text style={[styles.presetTitle, { color: raceAccentColor }]}>
               {raceDef.name} • {raceDef.tagline}
             </Text>
           </View>
@@ -724,8 +735,10 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.presetScrollContent}
         >
-          {CHARACTER_APPEARANCES.map((preset) => {
-            const isSelected = selectedAppearanceId === preset.id;
+          {RACE_APPEARANCE_PRESETS.map((preset) => {
+            const isSelected =
+              draftRace === preset.race &&
+              draftConfig.identity.baseSilhouette === preset.silhouette;
             return (
               <Pressable
                 key={preset.id}
@@ -733,14 +746,14 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
                   styles.presetThumbnailCard,
                   isSelected && { borderColor: preset.accentColor, borderWidth: 2.5 },
                 ]}
-                onPress={() => handleApplyQuickPreset(preset.id)}
+                onPress={() => handleApplyQuickPreset(preset)}
               >
                 <View style={styles.presetThumbRigWrap}>
-                  <CharacterRigRenderer
-                    mode="bust"
-                    appearanceId={preset.id}
-                    width={48}
-                    height={48}
+                  <ExpoImage
+                    source={getRaceAwareBustSource(preset.race, preset.silhouette) as any}
+                    style={{ width: 48, height: 48, borderRadius: 8 }}
+                    contentFit="cover"
+                    contentPosition="top center"
                   />
                 </View>
                 <Text

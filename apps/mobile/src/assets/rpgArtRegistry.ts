@@ -2,6 +2,20 @@ import type { ImageSourcePropType } from 'react-native';
 import type { BaseSilhouetteId, CharacterRace } from '@goki/game-engine';
 import type { EquipmentVisualVariant } from '../components/character/EquipmentPartSvg';
 import type { NpcArchetypeId, NpcExpression } from '../components/npc/NpcPortraitSvg';
+import {
+  COMPILED_BATTLE_ARENA_ART,
+  COMPILED_COMBAT_ENEMY_ART,
+  COMPILED_HERO_COMBAT_ART,
+  COMPILED_HUB_ENVIRONMENT_ART,
+  COMPILED_LOOT_CHEST_ART,
+  COMPILED_NPC_PORTRAIT_ART,
+  COMPILED_RACE_ILLUSTRATION_ART,
+  type CompiledBattleArenaOverrides,
+  type CompiledCombatEnemyOverrides,
+  type CompiledHubEnvironmentOverrides,
+  type CompiledNpcPortraitOverrides,
+  type CompiledRaceIllustrationOverrides,
+} from './generated/compiledAssets.generated';
 
 // ============================================================================
 // 1. HUB ENVIRONMENT BACKDROPS & ILLUSTRATED HEADERS
@@ -28,7 +42,7 @@ export interface HubEnvironmentArtSlot {
   scrimColors: readonly [string, string];
 }
 
-export const HUB_ENVIRONMENT_ART_REGISTRY: Readonly<
+const BASE_HUB_ENVIRONMENT_ART_REGISTRY: Readonly<
   Record<HubEnvironmentSlotId, HubEnvironmentArtSlot>
 > = {
   hero_sanctum: {
@@ -110,6 +124,30 @@ export const HUB_ENVIRONMENT_ART_REGISTRY: Readonly<
   },
 };
 
+function mergeHubEnvironmentArt(
+  base: Readonly<Record<HubEnvironmentSlotId, HubEnvironmentArtSlot>>,
+  overrides: CompiledHubEnvironmentOverrides
+): Readonly<Record<HubEnvironmentSlotId, HubEnvironmentArtSlot>> {
+  const merged = {} as Record<HubEnvironmentSlotId, HubEnvironmentArtSlot>;
+  for (const slotId of Object.keys(base) as HubEnvironmentSlotId[]) {
+    const slot = base[slotId];
+    const override = overrides[slotId];
+    merged[slotId] = {
+      ...slot,
+      backdropSource: override?.backdropSource ?? slot.backdropSource,
+      headerBannerSource: override?.headerBannerSource ?? slot.headerBannerSource,
+    };
+  }
+  return merged;
+}
+
+export const HUB_ENVIRONMENT_ART_REGISTRY: Readonly<
+  Record<HubEnvironmentSlotId, HubEnvironmentArtSlot>
+> = mergeHubEnvironmentArt(
+  BASE_HUB_ENVIRONMENT_ART_REGISTRY,
+  COMPILED_HUB_ENVIRONMENT_ART
+);
+
 export function getHubEnvironmentArt(slotId: HubEnvironmentSlotId): HubEnvironmentArtSlot {
   return HUB_ENVIRONMENT_ART_REGISTRY[slotId];
 }
@@ -120,7 +158,7 @@ export function getHubEnvironmentArt(slotId: HubEnvironmentSlotId): HubEnvironme
 
 export type NpcPortraitExpressionMap = Record<NpcExpression, ImageSourcePropType | null>;
 
-export const NPC_PORTRAIT_ART_REGISTRY: Readonly<
+const BASE_NPC_PORTRAIT_ART_REGISTRY: Readonly<
   Record<NpcArchetypeId, NpcPortraitExpressionMap>
 > = {
   GUIDE: { neutral: null, happy: null, focused: null, alert: null },
@@ -130,6 +168,31 @@ export const NPC_PORTRAIT_ART_REGISTRY: Readonly<
   QUARTERMASTER: { neutral: null, happy: null, focused: null, alert: null },
   CLAN_WARDEN: { neutral: null, happy: null, focused: null, alert: null },
 };
+
+function mergeNpcPortraitArt(
+  base: Readonly<Record<NpcArchetypeId, NpcPortraitExpressionMap>>,
+  overrides: CompiledNpcPortraitOverrides
+): Readonly<Record<NpcArchetypeId, NpcPortraitExpressionMap>> {
+  const merged = {} as Record<NpcArchetypeId, NpcPortraitExpressionMap>;
+  for (const npcId of Object.keys(base) as NpcArchetypeId[]) {
+    const baseMap = base[npcId];
+    const override = overrides[npcId];
+    merged[npcId] = {
+      neutral: override?.neutral ?? baseMap.neutral,
+      happy: override?.happy ?? baseMap.happy,
+      focused: override?.focused ?? baseMap.focused,
+      alert: override?.alert ?? baseMap.alert,
+    };
+  }
+  return merged;
+}
+
+export const NPC_PORTRAIT_ART_REGISTRY: Readonly<
+  Record<NpcArchetypeId, NpcPortraitExpressionMap>
+> = mergeNpcPortraitArt(
+  BASE_NPC_PORTRAIT_ART_REGISTRY,
+  COMPILED_NPC_PORTRAIT_ART
+);
 
 /**
  * Resolves a drop-in NPC expression portrait (512x512). Falls back to neutral, then null (keeps vector SVG).
@@ -153,6 +216,14 @@ export type BattleArenaThemeId =
   | 'sun_scorched_caldera'
   | 'arena_courtyard';
 
+export type BattleArenaParallaxLayerKey =
+  | 'sky'
+  | 'cloudsOrMist'
+  | 'mountainsOrWalls'
+  | 'hillBackground'
+  | 'hillMidground'
+  | 'groundForeground';
+
 export interface BattleArenaParallaxSlots {
   themeId: BattleArenaThemeId;
   name: string;
@@ -164,7 +235,7 @@ export interface BattleArenaParallaxSlots {
   groundForeground: ImageSourcePropType | null;
 }
 
-export const BATTLE_ARENA_ART_REGISTRY: Readonly<
+const BASE_BATTLE_ARENA_ART_REGISTRY: Readonly<
   Record<BattleArenaThemeId, BattleArenaParallaxSlots>
 > = {
   whitewood_forest: {
@@ -219,6 +290,34 @@ export const BATTLE_ARENA_ART_REGISTRY: Readonly<
   },
 };
 
+function mergeBattleArenaArt(
+  base: Readonly<Record<BattleArenaThemeId, BattleArenaParallaxSlots>>,
+  overrides: CompiledBattleArenaOverrides
+): Readonly<Record<BattleArenaThemeId, BattleArenaParallaxSlots>> {
+  const merged = {} as Record<BattleArenaThemeId, BattleArenaParallaxSlots>;
+  for (const themeId of Object.keys(base) as BattleArenaThemeId[]) {
+    const slot = base[themeId];
+    const override = overrides[themeId];
+    merged[themeId] = {
+      ...slot,
+      sky: override?.sky ?? slot.sky,
+      cloudsOrMist: override?.cloudsOrMist ?? slot.cloudsOrMist,
+      mountainsOrWalls: override?.mountainsOrWalls ?? slot.mountainsOrWalls,
+      hillBackground: override?.hillBackground ?? slot.hillBackground,
+      hillMidground: override?.hillMidground ?? slot.hillMidground,
+      groundForeground: override?.groundForeground ?? slot.groundForeground,
+    };
+  }
+  return merged;
+}
+
+export const BATTLE_ARENA_ART_REGISTRY: Readonly<
+  Record<BattleArenaThemeId, BattleArenaParallaxSlots>
+> = mergeBattleArenaArt(
+  BASE_BATTLE_ARENA_ART_REGISTRY,
+  COMPILED_BATTLE_ARENA_ART
+);
+
 export function inferBattleArenaThemeId(questOrThemeSlug?: string | null): BattleArenaThemeId {
   const s = (questOrThemeSlug ?? '').toLowerCase();
   if (s.includes('crypt') || s.includes('catacomb') || s.includes('undead')) {
@@ -245,7 +344,7 @@ export interface RaceSilhouetteIllustrationSlot {
   bustSource: ImageSourcePropType | null;
 }
 
-export const RACE_ILLUSTRATION_SLOTS: Readonly<
+const BASE_RACE_ILLUSTRATION_SLOTS: Readonly<
   Record<CharacterRace, Record<BaseSilhouetteId, RaceSilhouetteIllustrationSlot>>
 > = {
   HUMAN: {
@@ -264,6 +363,36 @@ export const RACE_ILLUSTRATION_SLOTS: Readonly<
     broad_shouldered: { standingSource: null, bustSource: null },
   },
 };
+
+function mergeRaceIllustrationArt(
+  base: Readonly<Record<CharacterRace, Record<BaseSilhouetteId, RaceSilhouetteIllustrationSlot>>>,
+  overrides: CompiledRaceIllustrationOverrides
+): Readonly<Record<CharacterRace, Record<BaseSilhouetteId, RaceSilhouetteIllustrationSlot>>> {
+  const merged = {} as Record<
+    CharacterRace,
+    Record<BaseSilhouetteId, RaceSilhouetteIllustrationSlot>
+  >;
+  for (const race of Object.keys(base) as CharacterRace[]) {
+    const silMap = {} as Record<BaseSilhouetteId, RaceSilhouetteIllustrationSlot>;
+    for (const silhouette of Object.keys(base[race]) as BaseSilhouetteId[]) {
+      const slot = base[race][silhouette];
+      const override = overrides[race]?.[silhouette];
+      silMap[silhouette] = {
+        standingSource: override?.standingSource ?? slot.standingSource,
+        bustSource: override?.bustSource ?? slot.bustSource,
+      };
+    }
+    merged[race] = silMap;
+  }
+  return merged;
+}
+
+export const RACE_ILLUSTRATION_SLOTS: Readonly<
+  Record<CharacterRace, Record<BaseSilhouetteId, RaceSilhouetteIllustrationSlot>>
+> = mergeRaceIllustrationArt(
+  BASE_RACE_ILLUSTRATION_SLOTS,
+  COMPILED_RACE_ILLUSTRATION_ART
+);
 
 export type RigBodyPartSlotKey =
   | 'head'
@@ -421,4 +550,130 @@ export function getEquipmentRigOverlaySource(
   variant: EquipmentVisualVariant
 ): ImageSourcePropType | null {
   return EQUIPMENT_RIG_OVERLAY_SLOTS[variant] ?? null;
+}
+
+// ============================================================================
+// 6. STAGE 4: REANIMATED COMBAT ENEMIES, RAID BOSSES, HERO SKINS & LOOT CHESTS
+// ============================================================================
+
+export type CombatMobArtId =
+  | 'skeleton'
+  | 'orc'
+  | 'greatsword_skeleton'
+  | 'knight'
+  | 'swordsman'
+  | 'archer';
+
+export type CombatBossArtId =
+  | 'ignisrax'
+  | 'vaelgor'
+  | 'malakor'
+  | 'goretooth'
+  | 'commander_vane'
+  | 'valerius'
+  | 'chronos';
+
+export type CombatEnemyArtId = CombatMobArtId | CombatBossArtId;
+
+export type LootChestTierId = 'tier_1' | 'tier_2' | 'tier_3' | 'tier_4' | 'tier_5';
+
+export interface CombatEnemyArtSlot {
+  id: CombatEnemyArtId;
+  label: string;
+  isBoss: boolean;
+  spriteSource: ImageSourcePropType | null;
+  bustSource: ImageSourcePropType | null;
+}
+
+const BASE_COMBAT_ENEMY_ART_REGISTRY: Readonly<Record<CombatEnemyArtId, CombatEnemyArtSlot>> = {
+  skeleton: { id: 'skeleton', label: 'Skeleton Grunt', isBoss: false, spriteSource: null, bustSource: null },
+  orc: { id: 'orc', label: 'Orc Marauder', isBoss: false, spriteSource: null, bustSource: null },
+  greatsword_skeleton: { id: 'greatsword_skeleton', label: 'Dreadsword Skeleton', isBoss: false, spriteSource: null, bustSource: null },
+  knight: { id: 'knight', label: 'Corrupted Knight', isBoss: false, spriteSource: null, bustSource: null },
+  swordsman: { id: 'swordsman', label: 'Ashblade Duelist', isBoss: false, spriteSource: null, bustSource: null },
+  archer: { id: 'archer', label: 'Duskwood Archer', isBoss: false, spriteSource: null, bustSource: null },
+  ignisrax: { id: 'ignisrax', label: 'Ignisrax, World-Forge Wyrm', isBoss: true, spriteSource: null, bustSource: null },
+  vaelgor: { id: 'vaelgor', label: 'Vaelgor, Guild Dread-Colossus', isBoss: true, spriteSource: null, bustSource: null },
+  malakor: { id: 'malakor', label: 'Bone Lord Malakor', isBoss: true, spriteSource: null, bustSource: null },
+  goretooth: { id: 'goretooth', label: 'Warchief Goretooth', isBoss: true, spriteSource: null, bustSource: null },
+  commander_vane: { id: 'commander_vane', label: 'Fallen Commander Vane', isBoss: true, spriteSource: null, bustSource: null },
+  valerius: { id: 'valerius', label: 'Arch-Lich Valerius', isBoss: true, spriteSource: null, bustSource: null },
+  chronos: { id: 'chronos', label: 'Chronos, Void Watcher', isBoss: true, spriteSource: null, bustSource: null },
+};
+
+function mergeCombatEnemyArt(
+  base: Readonly<Record<CombatEnemyArtId, CombatEnemyArtSlot>>,
+  overrides: CompiledCombatEnemyOverrides
+): Readonly<Record<CombatEnemyArtId, CombatEnemyArtSlot>> {
+  const merged = {} as Record<CombatEnemyArtId, CombatEnemyArtSlot>;
+  for (const id of Object.keys(base) as CombatEnemyArtId[]) {
+    const slot = base[id];
+    const ov = overrides[id];
+    merged[id] = {
+      ...slot,
+      spriteSource: ov?.spriteSource ?? slot.spriteSource,
+      bustSource: ov?.bustSource ?? slot.bustSource,
+    };
+  }
+  return merged;
+}
+
+export const COMBAT_ENEMY_ART_REGISTRY: Readonly<Record<CombatEnemyArtId, CombatEnemyArtSlot>> =
+  mergeCombatEnemyArt(BASE_COMBAT_ENEMY_ART_REGISTRY, COMPILED_COMBAT_ENEMY_ART);
+
+export function resolveCombatEnemyArtId(isBoss?: boolean, nameOrId?: string | null): CombatEnemyArtId {
+  const s = (nameOrId ?? '').toLowerCase();
+  if (isBoss) {
+    if (s.includes('ignis') || s.includes('wyrm') || s.includes('arbiter')) return 'ignisrax';
+    if (s.includes('vaelgor') || s.includes('defiler') || s.includes('colossus') || s.includes('watch-captain')) return 'vaelgor';
+    if (s.includes('malakor') || s.includes('bone lord')) return 'malakor';
+    if (s.includes('goretooth') || s.includes('warchief') || s.includes('gnarlfang')) return 'goretooth';
+    if (s.includes('vane') || s.includes('commander') || s.includes('korr')) return 'commander_vane';
+    if (s.includes('valerius') || s.includes('lich') || s.includes('tidecaller') || s.includes('vess')) return 'valerius';
+    if (s.includes('chronos') || s.includes('void') || s.includes('harbinger') || s.includes('xylar')) return 'chronos';
+    return 'ignisrax';
+  }
+  if (s.includes('greatsword') || s.includes('executioner') || s.includes('dread-knight')) return 'greatsword_skeleton';
+  if (s.includes('orc') || s.includes('brute') || s.includes('raider') || s.includes('marauder')) return 'orc';
+  if (s.includes('knight') || s.includes('paladin') || s.includes('deserter') || s.includes('guardian') || s.includes('warden')) return 'knight';
+  if (s.includes('swordsman') || s.includes('duelist') || s.includes('blade') || s.includes('assassin') || s.includes('warrior')) return 'swordsman';
+  if (s.includes('archer') || s.includes('ranger') || s.includes('bow') || s.includes('hunter') || s.includes('stalker')) return 'archer';
+  return 'skeleton';
+}
+
+export function getCombatEnemySprite(isBoss?: boolean, nameOrId?: string | null): ImageSourcePropType | null {
+  const id = resolveCombatEnemyArtId(isBoss, nameOrId);
+  return COMBAT_ENEMY_ART_REGISTRY[id]?.spriteSource ?? null;
+}
+
+export function getBossBustArt(nameOrId?: string | null): ImageSourcePropType | null {
+  const id = resolveCombatEnemyArtId(true, nameOrId);
+  return COMBAT_ENEMY_ART_REGISTRY[id]?.bustSource ?? null;
+}
+
+export const HERO_COMBAT_ART_REGISTRY: Readonly<Record<string, ImageSourcePropType>> =
+  COMPILED_HERO_COMBAT_ART;
+
+export function getHeroCombatSprite(
+  race: CharacterRace = 'HUMAN',
+  silhouette: BaseSilhouetteId = 'balanced',
+  armored = false
+): ImageSourcePropType | null {
+  const r = race.toLowerCase();
+  if (armored) {
+    return HERO_COMBAT_ART_REGISTRY[`${r}_vanguard`] ?? HERO_COMBAT_ART_REGISTRY[`${r}_${silhouette}`] ?? null;
+  }
+  return HERO_COMBAT_ART_REGISTRY[`${r}_${silhouette}`] ?? HERO_COMBAT_ART_REGISTRY[`${r}_balanced`] ?? null;
+}
+
+export const LOOT_CHEST_ART_REGISTRY: Readonly<Record<LootChestTierId, ImageSourcePropType | null>> = {
+  tier_1: COMPILED_LOOT_CHEST_ART.tier_1 ?? null,
+  tier_2: COMPILED_LOOT_CHEST_ART.tier_2 ?? null,
+  tier_3: COMPILED_LOOT_CHEST_ART.tier_3 ?? null,
+  tier_4: COMPILED_LOOT_CHEST_ART.tier_4 ?? null,
+  tier_5: COMPILED_LOOT_CHEST_ART.tier_5 ?? null,
+};
+
+export function getLootChestArt(tier: 1 | 2 | 3 | 4 | 5): ImageSourcePropType | null {
+  return LOOT_CHEST_ART_REGISTRY[`tier_${tier}`] ?? null;
 }

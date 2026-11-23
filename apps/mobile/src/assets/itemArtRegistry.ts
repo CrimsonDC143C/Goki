@@ -1,4 +1,5 @@
 import { ImageSourcePropType } from 'react-native';
+import { COMPILED_ITEM_ICON_ART } from './generated/compiledAssets.generated';
 import {
   EQUIPMENT_RIG_OVERLAY_SLOTS,
   getEquipmentRigOverlaySource,
@@ -10,7 +11,7 @@ export { EQUIPMENT_RIG_OVERLAY_SLOTS, getEquipmentRigOverlaySource };
  * Dedicated 512x512 drop-in slots for currently aliased consumables, materials, and gear slugs.
  * Checked before ITEM_ICON_ALIASES so final illustrations drop in without changing any screen.
  */
-export const DEDICATED_ITEM_ICON_SLOTS: Readonly<Record<string, ImageSourcePropType | null>> = {
+const BASE_DEDICATED_ITEM_ICON_SLOTS: Readonly<Record<string, ImageSourcePropType | null>> = {
   sunleaf_healing_draught: null,
   astral_mana_tonic: null,
   astral_dew_vial: null,
@@ -40,66 +41,22 @@ export const DEDICATED_ITEM_ICON_SLOTS: Readonly<Record<string, ImageSourcePropT
   astral_teardrop_amulet: null,
 };
 
+export const DEDICATED_ITEM_ICON_SLOTS: Readonly<Record<string, ImageSourcePropType | null>> =
+  Object.fromEntries(
+    Object.entries(BASE_DEDICATED_ITEM_ICON_SLOTS).map(
+      ([slug, fallback]): [string, ImageSourcePropType | null] => [
+        slug,
+        COMPILED_ITEM_ICON_ART[slug] ?? fallback,
+      ]
+    )
+  );
+
 /**
- * 40 High-Res (512x512 LANCZOS PNG) RPG Item Icons.
- * Hades-inspired comic cel-shaded ink art generated via Layer.ai.
+ * 40 Canonical Compiled WebP RPG Item Icons (256x256) + Dedicated Drop-In Slots
+ * sourced from compiledAssets.generated.ts (`npm run assets:build`).
  */
 export const ITEM_ICON_REGISTRY: Record<string, ImageSourcePropType> = {
-  // Weapons
-  ironbound_greatsword: require('../../assets/items/ironbound_greatsword.png'),
-  spiked_kanabo: require('../../assets/items/spiked_kanabo.png'),
-  ashwood_longbow: require('../../assets/items/ashwood_longbow.png'),
-  blackened_halberd: require('../../assets/items/blackened_halberd.png'),
-  astral_warstaff: require('../../assets/items/astral_warstaff.png'),
-  watch_broadsword: require('../../assets/items/watch_broadsword.png'),
-  windrunner_daggers: require('../../assets/items/windrunner_daggers.png'),
-  reaver_hatchet: require('../../assets/items/reaver_hatchet.png'),
-  kensei_katana: require('../../assets/items/kensei_katana.png'),
-  reliquary_mace: require('../../assets/items/reliquary_mace.png'),
-  iron_war_fan: require('../../assets/items/iron_war_fan.png'),
-
-  // Shields & Off-Hands
-  tempered_iron_buckler: require('../../assets/items/tempered_iron_buckler.png'),
-  oni_tower_shield: require('../../assets/items/oni_tower_shield.png'),
-  reliquary_lantern: require('../../assets/items/reliquary_lantern.png'),
-
-  // Helmets & Headwear
-  ashen_iron_helm: require('../../assets/items/ashen_iron_helm.png'),
-  horned_oni_kabuto: require('../../assets/items/horned_oni_kabuto.png'),
-  dusk_menpo_mask: require('../../assets/items/dusk_menpo_mask.png'),
-  solar_halo_circlet: require('../../assets/items/solar_halo_circlet.png'),
-  crown_of_the_wyrm: require('../../assets/items/crown_of_the_wyrm.png'),
-
-  // Chest Armor
-  warden_chainmail: require('../../assets/items/warden_chainmail.png'),
-  cataphract_cuirass: require('../../assets/items/cataphract_cuirass.png'),
-  oxblood_brigandine: require('../../assets/items/oxblood_brigandine.png'),
-  vermilion_martial_gi: require('../../assets/items/vermilion_martial_gi.png'),
-
-  // Leg Armor
-  strider_greaves: require('../../assets/items/strider_greaves.png'),
-  blackened_iron_tassets: require('../../assets/items/blackened_iron_tassets.png'),
-  ebony_hakama: require('../../assets/items/ebony_hakama.png'),
-  wolf_pelt_warkilt: require('../../assets/items/wolf_pelt_warkilt.png'),
-
-  // Boots
-  ironshod_sabatons: require('../../assets/items/ironshod_sabatons.png'),
-  shinobi_tabi_boots: require('../../assets/items/shinobi_tabi_boots.png'),
-  pilgrim_boots: require('../../assets/items/pilgrim_boots.png'),
-
-  // Accessories
-  copper_guild_ring: require('../../assets/items/copper_guild_ring.png'),
-  malakor_signet: require('../../assets/items/malakor_signet.png'),
-  crimson_oni_charm: require('../../assets/items/crimson_oni_charm.png'),
-  astral_pendant: require('../../assets/items/astral_pendant.png'),
-
-  // Consumables & Crafting Materials
-  vitality_elixir: require('../../assets/items/vitality_elixir.png'),
-  tempered_whetstone: require('../../assets/items/tempered_whetstone.png'),
-  iron_ore_cluster: require('../../assets/items/iron_ore_cluster.png'),
-  sunleaf_herb_bundle: require('../../assets/items/sunleaf_herb_bundle.png'),
-  obsidian_ingot: require('../../assets/items/obsidian_ingot.png'),
-  raid_essence_crystal: require('../../assets/items/raid_essence_crystal.png'),
+  ...COMPILED_ITEM_ICON_ART,
 };
 
 /**

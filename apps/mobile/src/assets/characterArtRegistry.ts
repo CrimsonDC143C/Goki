@@ -1,5 +1,9 @@
 import { ImageSourcePropType } from 'react-native';
-import type { BaseSilhouetteId, CharacterRace } from '@goki/game-engine';
+import {
+  deriveCustomizationFromLegacyAppearance,
+  type BaseSilhouetteId,
+  type CharacterRace,
+} from '@goki/game-engine';
 import {
   MORPH_EVOLUTION_OVERLAY_SLOTS,
   RACE_ILLUSTRATION_SLOTS,
@@ -20,184 +24,153 @@ export {
   getRigBodyPartIllustration,
 };
 
-export interface CharacterAppearancePreset {
+export interface RaceAppearancePreset {
   id: string;
+  race: CharacterRace;
+  silhouette: BaseSilhouetteId;
   title: string;
   shortTitle: string;
-  subtitle: string;
-  bustSource: ImageSourcePropType;
-  standingSource: ImageSourcePropType;
   accentColor: string;
 }
 
-export const CHARACTER_APPEARANCES: readonly CharacterAppearancePreset[] = [
+const RACE_ACCENT_COLORS: Record<CharacterRace, string> = {
+  HUMAN: '#38BDF8',
+  ONI: '#EF4444',
+  KITSUNE: '#A855F7',
+};
+
+export function getRaceAccentColor(race: CharacterRace = 'HUMAN'): string {
+  return RACE_ACCENT_COLORS[race] ?? RACE_ACCENT_COLORS.HUMAN;
+}
+
+/**
+ * Canonical Milestone 6 Race × Silhouette appearance cards backed by compiled WebPs
+ * in RACE_ILLUSTRATION_SLOTS (replaces retired legacy CHARACTER_APPEARANCES PNGs).
+ */
+export const RACE_APPEARANCE_PRESETS: readonly RaceAppearancePreset[] = [
   {
-    id: 'oni_warlord',
-    title: 'Juggernaut',
-    shortTitle: 'Juggernaut',
-    subtitle: '',
-    bustSource: require('../../assets/characters/oni_warlord_bust.png'),
-    standingSource: require('../../assets/characters/oni_warlord_standing.png'),
-    accentColor: '#EF4444',
+    id: 'human_balanced',
+    race: 'HUMAN',
+    silhouette: 'balanced',
+    title: 'Human • Balanced',
+    shortTitle: 'Human',
+    accentColor: RACE_ACCENT_COLORS.HUMAN,
   },
   {
-    id: 'dread_knight',
-    title: 'Vanguard',
-    shortTitle: 'Vanguard',
-    subtitle: '',
-    bustSource: require('../../assets/characters/dread_knight_bust.png'),
-    standingSource: require('../../assets/characters/dread_knight_standing.png'),
-    accentColor: '#8B5CF6',
+    id: 'human_lithe',
+    race: 'HUMAN',
+    silhouette: 'lithe',
+    title: 'Human • Lithe',
+    shortTitle: 'Human Lithe',
+    accentColor: RACE_ACCENT_COLORS.HUMAN,
   },
   {
-    id: 'oath_sentinel',
-    title: 'Warden',
-    shortTitle: 'Warden',
-    subtitle: '',
-    bustSource: require('../../assets/characters/oath_sentinel_bust.png'),
-    standingSource: require('../../assets/characters/oath_sentinel_standing.png'),
-    accentColor: '#38BDF8',
+    id: 'human_broad_shouldered',
+    race: 'HUMAN',
+    silhouette: 'broad_shouldered',
+    title: 'Human • Broad',
+    shortTitle: 'Human Broad',
+    accentColor: RACE_ACCENT_COLORS.HUMAN,
   },
   {
-    id: 'wayfarer',
-    title: 'Outrider',
-    shortTitle: 'Outrider',
-    subtitle: '',
-    bustSource: require('../../assets/characters/wayfarer_bust.png'),
-    standingSource: require('../../assets/characters/wayfarer_standing.png'),
-    accentColor: '#10B981',
+    id: 'oni_balanced',
+    race: 'ONI',
+    silhouette: 'balanced',
+    title: 'Oni • Balanced',
+    shortTitle: 'Oni',
+    accentColor: RACE_ACCENT_COLORS.ONI,
   },
   {
-    id: 'northern_reaver',
-    title: 'Berserker',
-    shortTitle: 'Berserker',
-    subtitle: '',
-    bustSource: require('../../assets/characters/northern_reaver_bust.png'),
-    standingSource: require('../../assets/characters/northern_reaver_standing.png'),
-    accentColor: '#06B6D4',
+    id: 'oni_lithe',
+    race: 'ONI',
+    silhouette: 'lithe',
+    title: 'Oni • Lithe',
+    shortTitle: 'Oni Lithe',
+    accentColor: RACE_ACCENT_COLORS.ONI,
   },
   {
-    id: 'dusk_shinobi',
-    title: 'Assassin',
-    shortTitle: 'Assassin',
-    subtitle: '',
-    bustSource: require('../../assets/characters/dusk_shinobi_bust.png'),
-    standingSource: require('../../assets/characters/dusk_shinobi_standing.png'),
-    accentColor: '#A855F7',
+    id: 'oni_broad_shouldered',
+    race: 'ONI',
+    silhouette: 'broad_shouldered',
+    title: 'Oni • Broad',
+    shortTitle: 'Oni Broad',
+    accentColor: RACE_ACCENT_COLORS.ONI,
   },
   {
-    id: 'blade_dancer',
-    title: 'Acrobat',
-    shortTitle: 'Acrobat',
-    subtitle: '',
-    bustSource: require('../../assets/characters/blade_dancer_bust.png'),
-    standingSource: require('../../assets/characters/blade_dancer_standing.png'),
-    accentColor: '#F59E0B',
+    id: 'kitsune_balanced',
+    race: 'KITSUNE',
+    silhouette: 'balanced',
+    title: 'Kitsune • Balanced',
+    shortTitle: 'Kitsune',
+    accentColor: RACE_ACCENT_COLORS.KITSUNE,
   },
   {
-    id: 'bastion_ironclad',
-    title: 'Guardian',
-    shortTitle: 'Guardian',
-    subtitle: '',
-    bustSource: require('../../assets/characters/bastion_ironclad_bust.png'),
-    standingSource: require('../../assets/characters/bastion_ironclad_standing.png'),
-    accentColor: '#64748B',
+    id: 'kitsune_lithe',
+    race: 'KITSUNE',
+    silhouette: 'lithe',
+    title: 'Kitsune • Lithe',
+    shortTitle: 'Kitsune Lithe',
+    accentColor: RACE_ACCENT_COLORS.KITSUNE,
   },
   {
-    id: 'solar_mystic',
-    title: 'Cleric',
-    shortTitle: 'Cleric',
-    subtitle: '',
-    bustSource: require('../../assets/characters/solar_mystic_bust.png'),
-    standingSource: require('../../assets/characters/solar_mystic_standing.png'),
-    accentColor: '#FBBF24',
-  },
-  {
-    id: 'astral_arcanist',
-    title: 'Mage',
-    shortTitle: 'Mage',
-    subtitle: '',
-    bustSource: require('../../assets/characters/astral_arcanist_bust.png'),
-    standingSource: require('../../assets/characters/astral_arcanist_standing.png'),
-    accentColor: '#818CF8',
+    id: 'kitsune_broad_shouldered',
+    race: 'KITSUNE',
+    silhouette: 'broad_shouldered',
+    title: 'Kitsune • Broad',
+    shortTitle: 'Kitsune Broad',
+    accentColor: RACE_ACCENT_COLORS.KITSUNE,
   },
 ] as const;
 
-export const DEFAULT_APPEARANCE_ID = 'oni_warlord';
-
-export const LEGACY_AVATAR_MAP: Record<string, string> = {
-  warrior: 'oni_warlord',
-  juggernaut: 'oni_warlord',
-  vanguard: 'dread_knight',
-  warden: 'oath_sentinel',
-  outrider: 'wayfarer',
-  berserker: 'northern_reaver',
-  assassin: 'dusk_shinobi',
-  acrobat: 'blade_dancer',
-  guardian: 'bastion_ironclad',
-  cleric: 'solar_mystic',
-  mage: 'astral_arcanist',
-  adventurer_default: 'oni_warlord',
-  default: 'oni_warlord',
-};
-
-const APPEARANCE_MAP: Record<string, CharacterAppearancePreset> = Object.fromEntries(
-  CHARACTER_APPEARANCES.map((preset) => [preset.id, preset])
-);
-
-/**
- * Resolves an appearance preset by exact preset ID or legacy sprite key.
- * Always falls back cleanly to DEFAULT_APPEARANCE_ID ('oni_warlord').
- */
-export function getCharacterAppearance(idOrLegacyKey?: string | null): CharacterAppearancePreset {
-  if (!idOrLegacyKey) {
-    return APPEARANCE_MAP[DEFAULT_APPEARANCE_ID]!;
+export function resolveAppearanceToRaceSilhouette(
+  idOrLegacyKey?: string | null
+): { race: CharacterRace; silhouette: BaseSilhouetteId } {
+  const normalized = (idOrLegacyKey ?? '').trim().toLowerCase();
+  const presetMatch = RACE_APPEARANCE_PRESETS.find((preset) => preset.id === normalized);
+  if (presetMatch) {
+    return { race: presetMatch.race, silhouette: presetMatch.silhouette };
   }
-  const normalized = idOrLegacyKey.trim().toLowerCase();
-  if (APPEARANCE_MAP[normalized]) {
-    return APPEARANCE_MAP[normalized]!;
-  }
-  const mappedId = LEGACY_AVATAR_MAP[normalized];
-  if (mappedId && APPEARANCE_MAP[mappedId]) {
-    return APPEARANCE_MAP[mappedId]!;
-  }
-  return APPEARANCE_MAP[DEFAULT_APPEARANCE_ID]!;
+  const derived = deriveCustomizationFromLegacyAppearance(idOrLegacyKey);
+  return {
+    race: derived.race,
+    silhouette: derived.config.identity.baseSilhouette,
+  };
 }
 
 /**
- * Resolves the 1:1 square bust portrait image source for circle/avatar medallions.
- */
-export function getCharacterBustSource(idOrLegacyKey?: string | null): ImageSourcePropType {
-  return getCharacterAppearance(idOrLegacyKey).bustSource;
-}
-
-/**
- * Resolves the 2:3 full-body standing pose image source for tall hero cards and paperdoll views.
- */
-export function getCharacterStandingSource(idOrLegacyKey?: string | null): ImageSourcePropType {
-  return getCharacterAppearance(idOrLegacyKey).standingSource;
-}
-
-/**
- * Resolves a drop-in Milestone 6 race/silhouette bust illustration when populated,
- * falling back to the legacy appearance bust preset.
+ * Resolves the compiled 1:1 square bust illustration for a hero race and silhouette.
+ * Falls back cleanly via legacy appearance ID mapping and finally HUMAN/balanced.
  */
 export function getRaceAwareBustSource(
-  race: CharacterRace = 'HUMAN',
-  silhouette: BaseSilhouetteId = 'balanced',
+  race?: CharacterRace | null,
+  silhouette?: BaseSilhouetteId | null,
   idOrLegacyKey?: string | null
 ): ImageSourcePropType {
-  return getRaceBustIllustration(race, silhouette) ?? getCharacterBustSource(idOrLegacyKey);
+  const fallback = resolveAppearanceToRaceSilhouette(idOrLegacyKey);
+  const resolvedRace: CharacterRace = race ?? fallback.race;
+  const resolvedSilhouette: BaseSilhouetteId = silhouette ?? fallback.silhouette;
+  return (
+    getRaceBustIllustration(resolvedRace, resolvedSilhouette) ??
+    getRaceBustIllustration(resolvedRace, 'balanced') ??
+    getRaceBustIllustration('HUMAN', 'balanced')!
+  );
 }
 
 /**
- * Resolves a drop-in Milestone 6 race/silhouette standing illustration when populated,
- * falling back to the legacy appearance standing preset.
+ * Resolves the compiled 2:3 standing illustration for a hero race and silhouette.
+ * Falls back cleanly via legacy appearance ID mapping and finally HUMAN/balanced.
  */
 export function getRaceAwareStandingSource(
-  race: CharacterRace = 'HUMAN',
-  silhouette: BaseSilhouetteId = 'balanced',
+  race?: CharacterRace | null,
+  silhouette?: BaseSilhouetteId | null,
   idOrLegacyKey?: string | null
 ): ImageSourcePropType {
-  return getRaceStandingIllustration(race, silhouette) ?? getCharacterStandingSource(idOrLegacyKey);
+  const fallback = resolveAppearanceToRaceSilhouette(idOrLegacyKey);
+  const resolvedRace: CharacterRace = race ?? fallback.race;
+  const resolvedSilhouette: BaseSilhouetteId = silhouette ?? fallback.silhouette;
+  return (
+    getRaceStandingIllustration(resolvedRace, resolvedSilhouette) ??
+    getRaceStandingIllustration(resolvedRace, 'balanced') ??
+    getRaceStandingIllustration('HUMAN', 'balanced')!
+  );
 }

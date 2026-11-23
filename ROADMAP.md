@@ -34,7 +34,7 @@ These core decisions guide every milestone below:
 | **M3** | Live Turn-Based Combat & Adventurer's Guild Hub | `[x]` Complete |
 | **M4** | Artisan Economy, NPC Cast, & Fitness Coaching | `[x]` Complete |
 | **M5** | Social Hub, Real-World Gym Clans, & Adventurer Companies | `[x]` Complete |
-| **M6** | Full RPG Illustration Polish & Real-Time Co-op Readiness | `[/]` In Progress |
+| **M6** | Full RPG Illustration Polish & Real-Time Co-op Readiness | `[x]` Complete |
 
 ---
 
@@ -144,19 +144,52 @@ These core decisions guide every milestone below:
 ---
 
 ## Milestone 6: Full RPG Illustration Polish & Real-Time Co-op Readiness
-**Status:** `[/]` In Progress  
-**Goal:** Deliver the high-impact visual art pass across all RPG screens and unlock live real-time multiplayer Adventurer Company co-op over WebSockets.
+**Status:** `[x]` Complete  
+**Goal:** Deliver the cohesive 2.5D anime cel-shaded visual art pass across all RPG screens, battles, NPCs, and items while maintaining OTA `0.1.0` compatibility, strict Creative Unit discipline, and real-time Adventurer Company co-op over WebSockets.
 
-### Actionable Steps
-- [ ] **Bespoke RPG Environment & NPC Art Pass (`apps/mobile`):**
-  - [x] Wire drop-in asset-registry slots (`rpgArtRegistry.ts`) and zero-reflow scene layout hooks (`HubSceneShell.tsx`) across `Hero`, `Adventure`, `Artisan`, `Social`, `NpcDialogueOverlay`, `CharacterRigRenderer`, and `ParallaxBackground`.
-  - [ ] Commission/generate cohesive layered backgrounds and illustrated headers for `Hero`, `Adventure` (Adventurer's Guild), `Artisan` (Forge & Apothecary), and `Social` (Clan Hall & Tavern).
-  - [ ] Upgrade all hub NPC portraits (**Guide**, **Guild Receptionist**, **Trader**, **Trainer**, **Quartermaster**, **Clan Warden**) with expression variants.
-  - [ ] Polish combat VFX, skill animations, and parallax battle backdrops while keeping screen density clean and scannable.
+### Locked Art Pipeline & Visual Guardrails
+* **Layer.ai Workspace:** `02c84d2c-9787-43a9-865c-f2bfd9149993` (`Warm Hyrax of Energy`)
+* **Locked Reference Sets:**
+  * `ANIME_WORLD` (`scene`): `295d3143-1cf3-40cd-a091-bad7357f44cb`
+  * `ANIME_ARENA` (`scene`): `708ccd8a-bd42-4e63-a1d9-e9ee6cb158d1`
+  * `ANIME_RIG_PARTS` (`character`): `73986943-ee0b-47da-a609-17fe660d595a`
+  * `ANIME_ITEMS` (`object`): `b59306b4-5ca1-4c47-a0ed-97eed6cf8f47` (`defaultModelId: "nano-banana-2.1"`)
+* **Model & Workflow Policy:**
+  * **Item Icons & NPC Portrait Edits:** Lock to `nano-banana-2.1` (`1024×1024` opaque RGB) for reliable style lock; use Google AI Studio single-icon prompt packs (`0 Layer CU`, no `3×3` grids) for Wave 3C icons and Wave 3D race cards.
+  * **Battle Parallax Biomes:** Permanently retire `export_parallax` Z-depth slicing. Generate 6 clean individual semantic layers (`2560×1080`) via Google AI Studio (`0 CU`) or `nano-banana-2.1` + local `sharp` alpha unmixing, seam blending, and surgical targeted repairs (`nano-banana-2.1`).
+  * **Pre-Wave Reuse Checks:** Always inspect and confirm local asset mappings in `art-pipeline/raw/` before calling Layer MCP. Keep `art-pipeline/raw/npcs/references/` strictly for NPCs (never reuse NPC art as hero race baselines).
+* **Architecture Guardrails:**
+  * Keep `tools/asset-pipeline` isolated from root `package.json` `workspaces` and `npm run build` (`render.yaml` safety).
+  * Stay strictly under `600` compiled mobile assets (well below Expo EAS's `2,000`-asset OTA cap).
+  * Preserve `runtimeVersion: "0.1.0"` OTA compatibility (zero native binary rebuilds for Stage 1C, Stage 3, and Reanimated 4 combatants).
+  * Retire legacy `CHARACTER_APPEARANCES` (deprecated) and legacy `100×100` enemy pixel sprite sheets in Stage 5A.
+
+### Actionable Steps — Execution Sequence (`1A/1B → 1C → Stage 3 OTA Waves → Stage 2 Bake-Off → Stage 4 → Stage 5`)
 - [x] **Real-Time Co-op Turn-Based Combat (`apps/server/src/routes/websocket.ts`, `@goki/game-engine`):**
   - [x] Host `stepTurnBasedCombat` authoritatively in Fastify WebSocket rooms (`company-quest:{runId}`) for up to 4 active Adventurer Company squadmates.
   - [x] Add live lobby readiness, turn countdown timers, and automatic AI takeover if a teammate disconnects.
-- [x] **Final Release QA:** Full monorepo typecheck, Vitest suite, Playwright E2E verification, and mobile performance profiling across iOS, Android, and Web.
+- [x] **Stage 1A & 1B — Asset Pipeline Scaffold & Vertical Slice (`21` Approved WebPs, `3.12 MB`):**
+  - [x] Wire drop-in asset-registry slots (`rpgArtRegistry.ts`, `itemArtRegistry.ts`) and zero-reflow scene layout hooks (`HubSceneShell.tsx`) across `Hero`, `Adventure`, `Artisan`, `Social`, `NpcDialogueOverlay`, `CharacterRigRenderer`, and `ParallaxBackground`.
+  - [x] Build standalone `tools/asset-pipeline/` (`sharp`, `ajv`, `tsx`), `art-pipeline/manifest/assets-manifest.json`, and `npm run assets:build` emitting `apps/mobile/src/assets/generated/compiledAssets.generated.ts`.
+  - [x] Approve and compile all `21` vertical-slice assets: `7` Hub backdrops (`1080×1920`), `1` `hero_sanctum` banner (`1440×480`), `6` seamless `whitewood_forest` semantic parallax layers (`2560×1080`), `4` repaired belt-free `GUIDE` (*Auren*) portraits (`512×512`), and `3` `nano-banana-2.1` item icons (`iron_greatsword`, `ashen_iron_helm`, `vitality_elixir`, `256×256`).
+- [x] **Stage 1C — Scrim Tuning & Live Verification (`0 CU`, OTA `0.1.0`):**
+  - [x] Lighten `HubSceneShell.tsx` backdrop and banner scrims gently so twilight anime backdrops and lanterns read clearly behind dark-slate cards without reducing legibility.
+  - [x] Run `npm run typecheck`, `npm run test`, and `npx playwright test e2e/milestone6-coop-and-art-hooks.spec.ts`.
+- [x] **Stage 3 — Full-World 2D/2.5D OTA Art Scale-Out (`352.11 CU` Remaining after Wave 3A):**
+  - [x] **Wave 3A — Hub Banners & 4 Remaining Biomes (`51.71 CU` actual, `51/51` Compiled WebPs):** Approved and compiled all `6` remaining Hub header banners (`7/7` total) and all `4` remaining 6-layer semantic battle biomes (`crypt_catacombs`, `obsidian_citadel`, `sun_scorched_caldera`, `arena_courtyard` — `5/5` biomes total), aligned `ParallaxBackground.tsx` to native `2560×1080` full-frame framing (`verticalOffset: 0`), and wired `AutoBattlerArena.tsx` to `resolveBattleArenaPreset`.
+  - [x] **Wave 3B — Remaining 5 Hub NPCs (`0.00 Layer CU`, Gemini Nano Banana 2.1 via Ultra Cloud Credits, `71/71` Compiled WebPs):** Mapped local references for *Lyra Vance*, *Master Kaelen*, *Commander Veyra* (Kitsune Tactician), and *Warden Torin* (Horned Oni Warlord with obsidian-sclera eyes & lower tusks) plus style-locked *Bramwell*, generated all `20` `1024×1024` portraits (`4` expressions each), passed human QA, and compiled all `24/24` Hub NPC portraits to `512×512` WebP via `npm run assets:build`.
+  - [x] **Wave 3C — 38 Canonical Base Item Icons (`0.00 Layer CU`, Gemini Nano Banana 2.1 via Ultra Cloud Credits, `109/109` Compiled WebPs):** Generated all `38` remaining canonical `BASE_ITEM_ICON_REGISTRY` `1024×1024` WoW-style icons (applying all 12 QA redesigns & 9 display-name updates), passed human QA, and compiled all `40/40` base item icons to `256×256` WebP via `npm run assets:build`.
+  - [x] **Wave 3D — 9 Dedicated Hero Race Cards (`0.00 Layer CU`, Gemini Nano Banana 2.1 via Ultra Cloud Credits, `127/127` Compiled WebPs):** Generated all `9` `RACE_ILLUSTRATION_SLOTS` `2:3` standing cards (`HUMAN`, `ONI`, `KITSUNE` × `balanced`, `lithe`, `broad_shouldered` with silhouette-locked apparel & V-taper/muscularity polish), added deterministic `cropRegion` `384×384` bust cropping in `tools/asset-pipeline/src/build-assets.ts`, merged into `rpgArtRegistry.ts` / `characterArtRegistry.ts`, passed human QA, and compiled all `18` WebPs (`9` `640×960` standing + `9` `384×384` bust). Skipped deprecated `CHARACTER_APPEARANCES`.
+- [x] **Stage 2 — Hero Rig Visual Bake-Off Gate (`0.00 Layer CU` actual):**
+  - [x] Built interactive live HTML motion bake-offs over `whitewood_forest` comparing **(a)** Reanimated 4 12-bone layered anime paperdoll (`stage2_hero_rig_bakeoff.html`), **(b)** Reanimated 4 full-body illustrated anime hero + code-driven slash VFX, and **(c)** a live Rive-style 2D skeletal mesh simulation (`stage2_path_c_mesh_demo.html`).
+  - [x] Selected **Path B now (`OTA 0.1.0`) — Reanimated 4 Full-Body Illustrated Anime Hero + Slash VFX**, preserving a clean drop-in upgrade slot for a future Rive (`hero_rig.riv`) mesh rig in `0.2.0` (avoiding `34+` modular overlays and keeping `0.1.0` OTA compatibility).
+- [x] **Stage 4 — Reanimated Enemies, Raid Bosses, VFX & Hero Visuals (`0.00 Layer CU`, `164/164` Compiled WebPs):**
+  - [x] Standardized all `6` mob archetypes (`Skeleton Grunt`, `Orc Marauder`, `Dreadsword Skeleton`, `Corrupted Knight`, `Ashblade Duelist`, `Duskwood Archer`, `512×512`) and all `7` live raid/dungeon bosses (*Ignisrax*, *Vaelgor*, *Bone Lord Malakor*, *Warchief Goretooth*, *Fallen Commander Vane*, *Arch-Lich Valerius*, *Chronos*, `768×768`) as left-facing transparent anime cutouts + `7` dedicated `256×256` illustrated boss bust portraits for `GuildHallScreen.tsx` and `WorkoutLoggerScreen.tsx`.
+  - [x] Implemented Path B (`12` full-body combat Hero cutouts: `9` race/silhouette stances + `3` Armored Vanguard skins with 2-tail Kitsune parity across Wave 3D & 4B), `5` T1–T5 rarity loot chests (`256×256`), and `ReanimatedCombatantSprite.tsx` (breathing, telegraph glow, attack lunge, hitstop, guard barrier, and weapon-matched slash VFX) across `AutoBattlerArena.tsx` and `TurnBasedArenaScreen.tsx`.
+- [x] **Stage 5 — Bundle Audit, Legacy Cleanup & Release Cut (`246` Bundled Mobile Assets, `37.26 MB` Saved):**
+  - [x] Verified `246` bundled static + compiled mobile assets (`251` total files in `apps/mobile/assets/`, `16.63 MB`, strictly under the `600`-asset target and Expo EAS `2,000`-asset cap); retired deprecated `CHARACTER_APPEARANCES` + `20` legacy character PNGs (`10.57 MB`), `40` legacy `512×512` item PNGs (`19.13 MB`), `35` legacy `100×100` enemy pixel sprite sheets (`0.07 MB`) + dead `SpriteAnimator`/`spriteManifest` files, `7` legacy static Whitewood PNGs (`7.48 MB`), and `scripts/generate-layer-icons.mjs` + `scripts/resize-image.ps1`.
+  - [x] Passed full automated verification gate: `npm run assets:build` (`164/164` WebPs), `npm run typecheck` (`4/4` workspaces), `npm run build` (`3/3` workspaces, `tools/asset-pipeline` isolated), `npm run test` (`282/282` unit/integration tests), and `npm run test:e2e` (`8/8` Playwright E2E specs).
+  - [x] Verified `runtimeVersion: "0.1.0"` OTA compatibility in `apps/mobile/app.json` and `apps/mobile/package.json` (Reanimated 4 Path B, zero native binary rebuilds required); ready for user-confirmed `eas update` OTA release cut.
 
 ---
 

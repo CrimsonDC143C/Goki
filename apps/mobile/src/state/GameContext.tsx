@@ -6870,7 +6870,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           },
           {
             itemSlug: 'crown_of_the_wyrm',
-            itemName: 'Crown of the World Wyrm',
+            itemName: 'Wyrm Crown',
             rarity: 'MYTHIC',
             quantity: 1,
             weight: 25,

@@ -22,4 +22,9 @@ config.resolver.extraNodeModules = {
   'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
 };
 
+// Support Rive (.riv) animation assets (Stage 2 rig pipeline)
+config.resolver.assetExts = Array.from(
+  new Set([...(config.resolver.assetExts || []), 'riv'])
+);
+
 module.exports = config;

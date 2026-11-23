@@ -230,8 +230,8 @@ export const BASE_EQUIPPABLE_ITEMS: readonly BaseEquippableItemDefinition[] = [
   // --- One-Handed Weapons (5) ---
   {
     baseSlug: 'windrunner_daggers',
-    baseName: 'Twin Windrunner Blades',
-    description: 'Featherweight blades scaling with high Agility and swift strikes.',
+    baseName: 'Windrunner Dagger',
+    description: 'Featherweight one-handed blade scaling with high Agility and swift strikes.',
     itemType: 'WEAPON',
     slot: 'mainHand',
     handedness: 'ONE_HANDED',
@@ -434,7 +434,7 @@ export const BASE_EQUIPPABLE_ITEMS: readonly BaseEquippableItemDefinition[] = [
   },
   {
     baseSlug: 'crown_of_the_wyrm',
-    baseName: 'Crown of the World Wyrm',
+    baseName: 'Wyrm Crown',
     description: 'Mythic horned helm awarded exclusively to dragonslayers.',
     itemType: 'HEAD',
     slot: 'head',
@@ -689,7 +689,7 @@ export const BASE_EQUIPPABLE_ITEMS: readonly BaseEquippableItemDefinition[] = [
   // --- Accessories — Rings & Amulets (4) ---
   {
     baseSlug: 'copper_guild_ring',
-    baseName: 'Copper Guild Signet',
+    baseName: 'Copper Signet Ring',
     description: 'Brass signet ring marking official membership in the guild.',
     itemType: 'ACCESSORY',
     slot: 'accessory1',
@@ -713,7 +713,7 @@ export const BASE_EQUIPPABLE_ITEMS: readonly BaseEquippableItemDefinition[] = [
   },
   {
     baseSlug: 'crimson_oni_charm',
-    baseName: 'Crimson Oni War-Charm',
+    baseName: 'Oni Charm',
     description: 'Talisman carved from volcanic jet that heats when rage builds.',
     itemType: 'ACCESSORY',
     slot: 'accessory1',

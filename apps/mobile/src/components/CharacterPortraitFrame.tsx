@@ -8,16 +8,15 @@ import type {
   EquipmentLoadoutMap,
 } from '@goki/game-engine';
 import {
-  getCharacterBustSource,
-  getCharacterStandingSource,
-  getRaceBustIllustration,
-  getRaceStandingIllustration,
+  getRaceAwareBustSource,
+  getRaceAwareStandingSource,
+  resolveAppearanceToRaceSilhouette,
 } from '../assets/characterArtRegistry';
 import { HUD_SVGS } from '../assets/v0Vault';
 import { CRIMSON_ONI } from '../theme';
 import { CharacterRigRenderer, RigAnimationState } from './character';
 
-export const DEFAULT_HERO_PORTRAIT = require('../../assets/images/adventurer-portrait.png');
+export const DEFAULT_HERO_PORTRAIT = getRaceAwareStandingSource('ONI', 'balanced');
 
 export interface CharacterPortraitFrameProps {
   /**
@@ -69,13 +68,20 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
       imageSource.startsWith('https://') ||
       imageSource.startsWith('file://'));
   const isCustomImageProp = Boolean(imageSource && typeof imageSource !== 'string');
-  const resolvedRace: CharacterRace = race ?? 'HUMAN';
-  const resolvedSilhouette = customizationConfig?.identity?.baseSilhouette ?? 'balanced';
-  const racePortraitOverride = !isSilhouette
-    ? effectivePose === 'bust'
-      ? getRaceBustIllustration(resolvedRace, resolvedSilhouette)
-      : getRaceStandingIllustration(resolvedRace, resolvedSilhouette)
-    : null;
+  const legacyAppearanceKey =
+    appearanceId ??
+    (typeof imageSource === 'string' && !isExternalUri && !isSilhouette && imageSource.trim().length > 0
+      ? imageSource
+      : null);
+  const derivedIdentity = resolveAppearanceToRaceSilhouette(legacyAppearanceKey);
+  const resolvedRace: CharacterRace = race ?? derivedIdentity.race;
+  const resolvedSilhouette = customizationConfig?.identity?.baseSilhouette ?? derivedIdentity.silhouette;
+  const racePortraitOverride =
+    !isSilhouette && !isExternalUri && !isCustomImageProp
+      ? effectivePose === 'bust'
+        ? getRaceAwareBustSource(resolvedRace, resolvedSilhouette, legacyAppearanceKey)
+        : getRaceAwareStandingSource(resolvedRace, resolvedSilhouette, legacyAppearanceKey)
+      : null;
   const useRigRenderer =
     !isSilhouette && !isExternalUri && !isCustomImageProp && !racePortraitOverride;
   const rigAppearanceId =
@@ -85,29 +91,16 @@ export const CharacterPortraitFrame: React.FC<CharacterPortraitFrameProps> = ({
 
   if (isSilhouette) {
     resolvedSource = null;
-  } else if (racePortraitOverride) {
-    resolvedSource = racePortraitOverride;
-  } else if (appearanceId) {
-    resolvedSource =
-      effectivePose === 'bust'
-        ? getCharacterBustSource(appearanceId)
-        : getCharacterStandingSource(appearanceId);
   } else if (isCustomImageProp) {
     resolvedSource = imageSource as ImageSourcePropType;
-  } else if (typeof imageSource === 'string' && imageSource.trim().length > 0) {
-    if (isExternalUri) {
-      resolvedSource = { uri: imageSource };
-    } else {
-      resolvedSource =
-        effectivePose === 'bust'
-          ? getCharacterBustSource(imageSource)
-          : getCharacterStandingSource(imageSource);
-    }
+  } else if (isExternalUri && typeof imageSource === 'string') {
+    resolvedSource = { uri: imageSource };
   } else {
     resolvedSource =
-      effectivePose === 'bust'
-        ? getCharacterBustSource(null)
-        : getCharacterStandingSource(null);
+      racePortraitOverride ??
+      (effectivePose === 'bust'
+        ? getRaceAwareBustSource(resolvedRace, resolvedSilhouette, legacyAppearanceKey)
+        : getRaceAwareStandingSource(resolvedRace, resolvedSilhouette, legacyAppearanceKey));
   }
 
   if (variant === 'circle' || (variant === 'avatar' && isCircle)) {

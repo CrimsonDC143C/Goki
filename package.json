@@ -19,7 +19,9 @@
     "db:seed": "npm run db:seed --workspace=@goki/database",
     "dev:server": "npm run dev --workspace=@goki/server",
     "dev:mobile": "npm run start --workspace=@goki/mobile",
-    "dev:web": "npm run web --workspace=@goki/mobile"
+    "dev:web": "npm run web --workspace=@goki/mobile",
+    "assets:install": "npm --prefix tools/asset-pipeline install",
+    "assets:build": "npm --prefix tools/asset-pipeline run build"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

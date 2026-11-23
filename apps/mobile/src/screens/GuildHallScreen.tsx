@@ -1,12 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useGame } from '../state/GameContext';
-import {
-  DEMON_BOSS_SPRITE_CONFIG,
-  GREATSWORD_SKELETON_SPRITE_CONFIG,
-} from '../components/battle/sprites/spriteManifest';
-import { SpriteAnimator } from '../components/battle/sprites/SpriteAnimator';
+import { getBossBustArt } from '../assets/rpgArtRegistry';
 import { RpgIcon } from '../components/icons/RpgIcon';
 import { COLORS, RARITY_COLORS, SURFACES } from '../theme';
 
@@ -275,24 +272,23 @@ export const GuildHallScreen: React.FC<GuildHallScreenProps> = ({ embedded = fal
       {raids.map((raid) => {
         const hpPct = Math.max(0, Math.min(100, (raid.currentHp / raid.maxHp) * 100));
         const isSlain = raid.currentHp <= 0;
-        const isVaelgor =
-          raid.id.toLowerCase().includes('vaelgor') ||
-          raid.bossName.toLowerCase().includes('vaelgor');
-        const bossSpriteConfig = isVaelgor
-          ? GREATSWORD_SKELETON_SPRITE_CONFIG
-          : DEMON_BOSS_SPRITE_CONFIG;
+        const bossBust = getBossBustArt(raid.bossName || raid.id);
 
         return (
           <View key={raid.id} style={styles.raidCard}>
             <View style={styles.bossHeaderRow}>
-              {/* 56x56 Boss Sprite Avatar Frame */}
+              {/* 56x56 Boss Bust Avatar Frame */}
               <View style={styles.bossAvatarFrame}>
-                <SpriteAnimator
-                  rig={isVaelgor ? 'greatsword_skeleton' : 'demon_boss'}
-                  config={bossSpriteConfig}
-                  state="idle"
-                  size={56}
-                />
+                {bossBust ? (
+                  <ExpoImage
+                    source={bossBust as any}
+                    style={{ width: '100%', height: '100%' }}
+                    contentFit="cover"
+                    contentPosition="top center"
+                  />
+                ) : (
+                  <RpgIcon name="raid" size={26} color={COLORS.gold} />
+                )}
               </View>
 
               <View style={styles.bossHeaderInfo}>
