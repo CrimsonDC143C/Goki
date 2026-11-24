@@ -298,6 +298,9 @@ function getCompactItemBadge(item: InventoryEntry): string {
   return item.weaponHandedness === 'TWO_HANDED' ? `${item.rarity} | 2H` : item.rarity;
 }
 
+const getItemInstanceKey = (item: InventoryEntry): string =>
+  item.inventoryItemId ?? item.slug;
+
 export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   onJumpToTalents,
   onOpenAppearance,
@@ -316,6 +319,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     nextWorkoutMultiplier,
     combatPenalties,
     equipmentLoadout,
+    equippedItemIds,
     derivedCombatStats,
     inventory,
     workoutMachine,
@@ -341,10 +345,13 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   const [isSatchelOpen, setIsSatchelOpen] = useState(true);
   const [satchelFilter, setSatchelFilter] = useState<SatchelFilter>('ALL');
   const [inventorySort, setInventorySort] = useState<InventorySort>('RARITY');
-  const [inspectedItemSlug, setInspectedItemSlug] = useState<string | null>(null);
+  const [inspectedItemKey, setInspectedItemKey] = useState<string | null>(null);
   const inspectedItem = useMemo(
-    () => (inspectedItemSlug ? inventory.find((i) => i.slug === inspectedItemSlug) ?? null : null),
-    [inventory, inspectedItemSlug]
+    () =>
+      inspectedItemKey
+        ? inventory.find((i) => getItemInstanceKey(i) === inspectedItemKey) ?? null
+        : null,
+    [inventory, inspectedItemKey]
   );
   const setInspectedItem = useCallback(
     (
@@ -354,22 +361,22 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
         | ((prev: InventoryEntry | null) => InventoryEntry | null)
     ) => {
       if (typeof action === 'function') {
-        setInspectedItemSlug((prevSlug) => {
-          const prevEntry = prevSlug
-            ? inventory.find((i) => i.slug === prevSlug) ?? null
+        setInspectedItemKey((prevKey) => {
+          const prevEntry = prevKey
+            ? inventory.find((i) => getItemInstanceKey(i) === prevKey) ?? null
             : null;
           const nextEntry = action(prevEntry);
-          return nextEntry?.slug ?? null;
+          return nextEntry ? getItemInstanceKey(nextEntry) : null;
         });
       } else {
-        setInspectedItemSlug(action?.slug ?? null);
+        setInspectedItemKey(action ? getItemInstanceKey(action) : null);
       }
     },
     [inventory]
   );
 
   useEffect(() => {
-    setInspectedItemSlug(null);
+    setInspectedItemKey(null);
   }, [activeCharacterId]);
   const [showCompare, setShowCompare] = useState<boolean>(false);
   const [gearFeedback, setGearFeedback] = useState<{
@@ -484,6 +491,27 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     return map;
   }, [inventory]);
 
+  const inventoryById = useMemo(() => {
+    const map = new Map<string, InventoryEntry>();
+    for (const item of inventory) {
+      map.set(getItemInstanceKey(item), item);
+    }
+    return map;
+  }, [inventory]);
+
+  const getEquippedItemForSlot = useCallback(
+    (slot: EquipmentSlot): InventoryEntry | null => {
+      const instId = equippedItemIds?.[slot];
+      if (instId) {
+        const byId = inventoryById.get(instId);
+        if (byId) return byId;
+      }
+      const slug = equipmentLoadout?.[slot];
+      return slug ? inventoryBySlug.get(slug) ?? null : null;
+    },
+    [equipmentLoadout, equippedItemIds, inventoryById, inventoryBySlug]
+  );
+
   const coreStatsBlock = useMemo(
     () => ({
       strengthLevel: stats.STRENGTH.level,
@@ -541,30 +569,29 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
     });
   }, [satchelFilter, inventorySort, unboundItems]);
 
-  const selectedSlotItem = selectedSlot
-    ? (() => {
-        const slug = equipmentLoadout[selectedSlot];
-        return slug ? inventoryBySlug.get(slug) ?? null : null;
-      })()
-    : null;
+  const selectedSlotItem = selectedSlot ? getEquippedItemForSlot(selectedSlot) : null;
 
   const compatibleSwapItems = useMemo(() => {
     if (!selectedSlot) return [];
+    const currentSlotInstanceId = equippedItemIds?.[selectedSlot] ?? null;
     return inventory.filter((item) => {
       if (!isEquippableInventoryEntry(item)) return false;
-      const slots = getCompatibleSlotsForItemType(item.itemType, item.weaponHandedness);
-      return slots.includes(selectedSlot) && equipmentLoadout[selectedSlot] !== item.slug;
+      const slots = getCompatibleSlotsForItemType(item.itemType, item.weaponHandedness) ?? [];
+      if (!slots.includes(selectedSlot)) return false;
+      if (currentSlotInstanceId) {
+        return getItemInstanceKey(item) !== currentSlotInstanceId;
+      }
+      return equipmentLoadout?.[selectedSlot] !== item.slug;
     });
-  }, [equipmentLoadout, inventory, selectedSlot]);
+  }, [equipmentLoadout, equippedItemIds, inventory, selectedSlot]);
 
   // Compute total equipped item power
   const totalItemPower = useMemo(() => {
     let power = 0;
-    for (const slotKey of Object.keys(equipmentLoadout) as EquipmentSlot[]) {
-      const slug = equipmentLoadout[slotKey];
-      if (slug) {
-        const item = inventoryBySlug.get(slug);
-        if (item?.statBonuses) {
+    for (const slotMeta of EQUIPMENT_SLOTS) {
+      const item = getEquippedItemForSlot(slotMeta.slot);
+      if (item) {
+        if (item.statBonuses) {
           power += (item.statBonuses.meleePower ?? 0) * 2;
           power += (item.statBonuses.armorRating ?? 0) * 1.5;
           power += (item.statBonuses.maxHp ?? 0) * 0.5;
@@ -577,9 +604,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
       }
     }
     return Math.round(power);
-  }, [equipmentLoadout, inventoryBySlug]);
+  }, [getEquippedItemForSlot]);
 
-  const handleEquipToSelectedSlot = (slug: string, slot: EquipmentSlot) => {
+  const handleEquipToSelectedSlot = (itemKey: string, slot: EquipmentSlot) => {
     if (!progressionUnlocked) {
       setGearFeedback({
         tone: 'error',
@@ -587,14 +614,14 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
       });
       return;
     }
-    const res = equipItemToSlot(slug, slot);
+    const res = equipItemToSlot(itemKey, slot);
     if (!res.ok) {
       setGearFeedback({ tone: 'error', text: res.error ?? 'Unable to equip item.' });
     } else {
-      const item = inventoryBySlug.get(slug);
+      const item = inventoryById.get(itemKey) ?? inventoryBySlug.get(itemKey);
       setGearFeedback({
         tone: 'info',
-        text: `Equipped ${item?.name ?? slug} in ${slot}.`,
+        text: `Equipped ${item?.name ?? itemKey} in ${slot}.`,
       });
     }
   };
@@ -607,7 +634,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
       });
       return;
     }
-    const res = toggleEquipItem(item.slug);
+    const res = toggleEquipItem(getItemInstanceKey(item));
     if (!res.ok) {
       setGearFeedback({ tone: 'error', text: res.error ?? 'Stat requirement not met.' });
     } else {
@@ -774,9 +801,11 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
   };
 
   const renderPaperdollSlot = (slot: EquipmentSlot, label: string, icon: string) => {
-    const equippedSlug = equipmentLoadout[slot];
-    const item = equippedSlug ? inventoryBySlug.get(equippedSlug) ?? null : null;
-    const isSelected = inspectedItem?.slug === item?.slug && item !== null;
+    const item = getEquippedItemForSlot(slot);
+    const isSelected =
+      inspectedItem !== null &&
+      item !== null &&
+      getItemInstanceKey(inspectedItem) === getItemInstanceKey(item);
     const rarityBorder = item
       ? RARITY_COLORS[item.rarity] ?? COLORS.borderHighlight
       : '#2A2F3D';
@@ -810,7 +839,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             itemTapResetTimerRef.current = setTimeout(() => {
               itemTappedRef.current = false;
             }, 60);
-            setInspectedItem((prev) => (prev?.slug === item.slug ? null : item));
+            setInspectedItem((prev) =>
+              prev && getItemInstanceKey(prev) === getItemInstanceKey(item) ? null : item
+            );
             setShowCompare(false);
           } else {
             setSelectedSlot(slot);
@@ -901,7 +932,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
               <Text style={styles.spoilsSubtext}>
                 {consolidatedSpoils.sessionCount} Offline Workout
                 {consolidatedSpoils.sessionCount === 1 ? '' : 's'} • +
-                {Object.values(consolidatedSpoils.totalXpGained).reduce((a, b) => a + (b ?? 0), 0)}{' '}
+                {Object.values(consolidatedSpoils.totalXpGained ?? {}).reduce((a, b) => a + (b ?? 0), 0)}{' '}
                 Total XP • {consolidatedSpoils.allLootDrops.length} Loot Drop
                 {consolidatedSpoils.allLootDrops.length === 1 ? '' : 's'}
               </Text>
@@ -1371,17 +1402,19 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
             {filteredSatchelItems.length === 0 ? (
               <Text style={styles.emptyBagText}>No unbound items in this category.</Text>
             ) : (
-              filteredSatchelItems.map((item) => {
+              filteredSatchelItems.map((item, idx) => {
                 const equippable = isEquippableInventoryEntry(item);
                 const rarityCol = RARITY_COLORS[item.rarity] ?? CRIMSON_ONI.ghostWhite;
                 const reqCheck = equippable
                   ? validateEquipmentRequirements(item, coreStatsBlock)
                   : { valid: true, unmetStats: [] as StatType[] };
-                const isInspecting = inspectedItem?.slug === item.slug;
+                const itemKey = getItemInstanceKey(item);
+                const isInspecting =
+                  inspectedItem !== null && getItemInstanceKey(inspectedItem) === itemKey;
 
                 return (
                   <Pressable
-                    key={item.slug}
+                    key={item.inventoryItemId ?? `${item.slug}_${idx}`}
                     style={[styles.bagItemRow, isInspecting && styles.bagItemRowInspecting]}
                     onPressIn={() => {
                       itemTappedRef.current = true;
@@ -1400,7 +1433,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                       itemTapResetTimerRef.current = setTimeout(() => {
                         itemTappedRef.current = false;
                       }, 60);
-                      setInspectedItem((prev) => (prev?.slug === item.slug ? null : item));
+                      setInspectedItem((prev) =>
+                        prev && getItemInstanceKey(prev) === itemKey ? null : item
+                      );
                       setShowCompare(false);
                     }}
                     testID={`inventory-item-${item.slug}`}
@@ -1486,12 +1521,11 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                 : { valid: true, unmetStats: [] as StatType[] };
 
               const matchingSlots = equippable
-                ? getCompatibleSlotsForItemType(item.itemType, item.weaponHandedness)
+                ? getCompatibleSlotsForItemType(item.itemType, item.weaponHandedness) ?? []
                 : [];
               const primarySlot = matchingSlots[0];
-              const equippedSlug = primarySlot ? equipmentLoadout[primarySlot] : null;
-              const equippedItem = equippedSlug ? inventoryBySlug.get(equippedSlug) ?? null : null;
-              const isCurrentlyEquipped = item.equipped;
+              const equippedItem = primarySlot ? getEquippedItemForSlot(primarySlot) : null;
+              const isCurrentlyEquipped = Boolean(item.equipped);
 
               return (
                 <View style={styles.tooltipInner}>
@@ -1756,9 +1790,15 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                             });
                             return;
                           }
-                          const slot = Object.keys(equipmentLoadout).find(
-                            (k) => equipmentLoadout[k as EquipmentSlot] === item.slug
-                          ) as EquipmentSlot | undefined;
+                          const itemKey = getItemInstanceKey(item);
+                          const slot =
+                            item.equippedSlot ??
+                            (Object.keys(equippedItemIds ?? {}) as EquipmentSlot[]).find(
+                              (k) => equippedItemIds?.[k] === itemKey
+                            ) ??
+                            (Object.keys(equipmentLoadout ?? {}) as EquipmentSlot[]).find(
+                              (k) => equipmentLoadout?.[k] === item.slug
+                            );
                           if (slot) {
                             unequipSlot(slot);
                             setGearFeedback({
@@ -1940,8 +1980,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                   <Text style={styles.inspectorEmptyNote}>
                     No gear currently equipped in this slot.
                     {selectedSlot === 'offHand' &&
-                    equipmentLoadout.mainHand &&
-                    inventoryBySlug.get(equipmentLoadout.mainHand)?.weaponHandedness ===
+                    getEquippedItemForSlot('mainHand')?.weaponHandedness ===
                       'TWO_HANDED'
                       ? ' (Main Hand holds a 2-Handed weapon; equipping an Off-Hand item will unequip it.)'
                       : ''}
@@ -1958,8 +1997,9 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                   No compatible unbound items in your satchel for this slot. Complete workouts or explore dungeons to obtain loot!
                 </Text>
               ) : (
-                compatibleSwapItems.map((candidate) => {
+                compatibleSwapItems.map((candidate, idx) => {
                   if (!selectedSlot) return null;
+                  const candidateKey = getItemInstanceKey(candidate);
                   const check = validateEquipmentRequirements(
                     candidate,
                     coreStatsBlock,
@@ -1967,7 +2007,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                   );
                   return (
                     <View
-                      key={candidate.slug}
+                      key={candidate.inventoryItemId ?? `${candidate.slug}_${idx}`}
                       style={[
                         styles.inspectorSwapRow,
                         {
@@ -2005,7 +2045,7 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                             styles.swapActionBtnLocked,
                         ]}
                         onPress={() =>
-                          handleEquipToSelectedSlot(candidate.slug, selectedSlot)
+                          handleEquipToSelectedSlot(candidateKey, selectedSlot)
                         }
                       >
                         <Text style={styles.inspectorSwapActionText}>

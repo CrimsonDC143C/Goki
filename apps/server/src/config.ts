@@ -13,6 +13,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().default('goki_jwt_super_secret_dev_secret_key_2026'),
   DIAGNOSTICS_WEBHOOK_URL: z.string().optional(),
   ADMIN_EMAILS: z.string().optional(),
+  DIAGNOSTICS_API_KEY: z.string().optional(),
   APP_LATEST_VERSION: z.string().default('0.2.0'),
   APP_MIN_REQUIRED_VERSION: z.string().default('0.1.0'),
   ANDROID_APK_DOWNLOAD_URL: z

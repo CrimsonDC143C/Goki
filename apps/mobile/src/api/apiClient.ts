@@ -4,6 +4,7 @@ import type {
   AffixReforgeMode,
   CharacterCustomizationConfig,
   CharacterRace,
+  EquipmentSlot,
   TurnBasedCombatEvent,
 } from '@goki/game-engine';
 import {
@@ -397,6 +398,34 @@ export async function fetchCharacterSheet(characterId: string): Promise<{
     return { ok: true, data };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network error fetching character sheet';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * Equips or unequips a character inventory item in an 8-slot gear slot
+ * (`POST /api/characters/:characterId/equip`).
+ */
+export async function equipCharacterItemApi(
+  characterId: string,
+  payload: { slot: EquipmentSlot; inventoryItemId: string | null }
+): Promise<{ ok: boolean; statusCode?: number; data?: any; error?: string }> {
+  try {
+    const res = await apiFetch(
+      `/api/characters/${characterId}/equip`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      5000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, statusCode: res.status, error: data.error || 'Failed to update equipment slot' };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error updating equipment slot';
     return { ok: false, error: message };
   }
 }

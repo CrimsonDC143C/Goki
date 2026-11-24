@@ -388,6 +388,70 @@ describe('@goki/server Diagnostics, Bug Reporting, & Exception Subsystem', () =>
     }
   });
 
+  it('allows x-diagnostics-key header access when DIAGNOSTICS_API_KEY matches and rejects invalid keys', async () => {
+    const app = await buildServerApp({ db: mockDb });
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevAdminEmails = process.env.ADMIN_EMAILS;
+    const prevDiagKey = process.env.DIAGNOSTICS_API_KEY;
+
+    try {
+      memoryReports.push({
+        id: 'bug_1',
+        title: 'Test Crash Report',
+        severity: 'ERROR',
+        category: 'CRASH_EXCEPTION',
+        status: 'OPEN',
+        createdAt: new Date(),
+      });
+      process.env.NODE_ENV = 'production';
+      process.env.ADMIN_EMAILS = 'admin@gokirpg.com';
+      process.env.DIAGNOSTICS_API_KEY = 'test-diag-secret-key-123';
+
+      const allowedGet = await app.inject({
+        method: 'GET',
+        url: '/api/diagnostics/reports',
+        headers: { 'x-diagnostics-key': 'test-diag-secret-key-123' },
+      });
+      expect(allowedGet.statusCode).toBe(200);
+
+      const allowedPatch = await app.inject({
+        method: 'PATCH',
+        url: '/api/diagnostics/reports/bug_1',
+        headers: { 'x-diagnostics-key': 'test-diag-secret-key-123' },
+        payload: { status: 'INVESTIGATING' },
+      });
+      expect(allowedPatch.statusCode).toBe(200);
+
+      const wrongKeyGet = await app.inject({
+        method: 'GET',
+        url: '/api/diagnostics/reports',
+        headers: { 'x-diagnostics-key': 'wrong-key' },
+      });
+      expect(wrongKeyGet.statusCode).toBe(401);
+
+      delete process.env.DIAGNOSTICS_API_KEY;
+      const unsetKeyGet = await app.inject({
+        method: 'GET',
+        url: '/api/diagnostics/reports',
+        headers: { 'x-diagnostics-key': 'any-key' },
+      });
+      expect(unsetKeyGet.statusCode).toBe(401);
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevAdminEmails === undefined) {
+        delete process.env.ADMIN_EMAILS;
+      } else {
+        process.env.ADMIN_EMAILS = prevAdminEmails;
+      }
+      if (prevDiagKey === undefined) {
+        delete process.env.DIAGNOSTICS_API_KEY;
+      } else {
+        process.env.DIAGNOSTICS_API_KEY = prevDiagKey;
+      }
+      await app.close();
+    }
+  });
+
   it('forwards diagnostic alerts via webhook formatting when webhook is configured', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     global.fetch = fetchMock;

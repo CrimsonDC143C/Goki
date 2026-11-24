@@ -81,7 +81,14 @@ export function createEmptyEquipmentLoadout(): EquipmentLoadoutMap {
 }
 
 export function isEquippableItemType(itemType: EquipItemType): boolean {
-  return itemType !== 'MATERIAL' && itemType !== 'CONSUMABLE';
+  const raw = String(itemType ?? '').toUpperCase();
+  return (
+    Boolean(raw) &&
+    raw !== 'MATERIAL' &&
+    raw !== 'CONSUMABLE' &&
+    raw !== 'CRAFTING_MATERIAL' &&
+    raw !== 'QUEST_ITEM'
+  );
 }
 
 export function getCompatibleSlotsForItemType(
@@ -106,6 +113,7 @@ export function getCompatibleSlotsForItemType(
       return ['accessory1', 'accessory2'];
     case 'MATERIAL':
     case 'CONSUMABLE':
+    default:
       return [];
   }
 }

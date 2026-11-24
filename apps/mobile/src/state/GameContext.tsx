@@ -199,6 +199,7 @@ import {
   completeGuildQuestRunApi,
   completeOnboardingApi,
   craftRecipeApi,
+  equipCharacterItemApi,
   fetchAdventurersGuildQuestsApi,
   reforgeGearApi,
   respecTalentsApi,
@@ -370,6 +371,7 @@ interface GameContextValue {
   unlockedTalentRanks: Record<string, number>;
   aggregatedTalents: AggregatedTalentModifiers;
   equipmentLoadout: EquipmentLoadoutMap;
+  equippedItemIds: EquipmentLoadoutMap;
   equipmentBonuses: EquipmentStatBonuses;
   derivedCombatStats: DerivedCombatAttributes;
   fatigueState: FatigueStateSnapshot;
@@ -503,9 +505,9 @@ interface GameContextValue {
     channelToRaidId?: string;
   }) => { evaluation: WorkoutEvaluationResult; injectedBuffs: DungeonWorkoutBuff[]; raidEnergy: number };
   unlockTalentNode: (nodeId: string) => { ok: boolean; error?: string };
-  toggleEquipItem: (slug: string) => { ok: boolean; error?: string };
+  toggleEquipItem: (itemIdOrSlug: string) => { ok: boolean; error?: string };
   equipItemToSlot: (
-    slug: string,
+    itemIdOrSlug: string,
     targetSlot?: EquipmentSlot
   ) => { ok: boolean; error?: string; slot?: EquipmentSlot };
   unequipSlot: (slot: EquipmentSlot) => void;
@@ -1175,6 +1177,188 @@ function sanitizeEquipmentLoadout(candidate: unknown): EquipmentLoadoutMap | nul
 }
 
 /**
+ * Ensures every equippable inventory item has a unique non-empty `inventoryItemId`
+ * so duplicate drops of the same item slug (e.g. two Malakor Signet Rings) can be
+ * equipped, unequipped, inspected, and sold independently.
+ */
+function ensureInventoryInstanceIds(items: InventoryEntry[]): InventoryEntry[] {
+  const seenIds = new Set<string>();
+  let changed = false;
+
+  const normalized = items.map((entry, idx) => {
+    if (!isEquippableInventoryEntry(entry)) {
+      if (entry.inventoryItemId) {
+        seenIds.add(entry.inventoryItemId);
+      }
+      return entry;
+    }
+
+    const rawId =
+      typeof entry.inventoryItemId === 'string' && entry.inventoryItemId.trim().length > 0
+        ? entry.inventoryItemId.trim()
+        : null;
+
+    if (rawId && !seenIds.has(rawId)) {
+      seenIds.add(rawId);
+      return entry;
+    }
+
+    changed = true;
+    let generatedId = `local_item_${entry.slug}_${idx}_${Date.now().toString(36)}_${Math.random()
+      .toString(36)
+      .slice(2, 6)}`;
+    while (seenIds.has(generatedId)) {
+      generatedId = `${generatedId}_${Math.random().toString(36).slice(2, 4)}`;
+    }
+    seenIds.add(generatedId);
+    return { ...entry, inventoryItemId: generatedId };
+  });
+
+  return changed ? normalized : items;
+}
+
+/**
+ * Extracts an 8-slot map of `inventoryItemId | null` from either a persisted `equippedItemIds`
+ * map or a Prisma/server `equipmentLoadout` record (which includes `<slot>ItemId` FKs and nested relations).
+ */
+function extractEquippedItemIdsFromLoadout(candidate: unknown): EquipmentLoadoutMap | null {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const obj = candidate as Record<string, any>;
+  let hasSlotKey = false;
+  const mapped: EquipmentLoadoutMap = { ...EMPTY_EQUIPMENT_LOADOUT };
+
+  for (const slot of EQUIPMENT_SLOT_KEYS) {
+    const fkField = `${slot}ItemId`;
+    if (fkField in obj && obj[fkField] !== undefined) {
+      hasSlotKey = true;
+      const fkVal = obj[fkField];
+      mapped[slot] = typeof fkVal === 'string' && fkVal.trim().length > 0 ? fkVal : null;
+      continue;
+    }
+    if (slot in obj && obj[slot] !== undefined) {
+      hasSlotKey = true;
+      const val = obj[slot];
+      if (typeof val === 'string' && val.trim().length > 0) {
+        mapped[slot] = val;
+      } else if (val && typeof val === 'object') {
+        const idVal = val.id ?? val.inventoryItemId ?? null;
+        mapped[slot] = typeof idVal === 'string' && idVal.trim().length > 0 ? idVal : null;
+      } else {
+        mapped[slot] = null;
+      }
+    }
+  }
+
+  return hasSlotKey ? mapped : null;
+}
+
+/**
+ * Resolves a validated 8-slot `equippedItemIds` map against normalized `items`, migrating
+ * legacy slug-only loadouts cleanly and preventing the same item instance from occupying two slots.
+ */
+function resolveEquippedItemIds(
+  items: InventoryEntry[],
+  explicitIds: EquipmentLoadoutMap | null,
+  legacySlugLoadout: EquipmentLoadoutMap | null
+): EquipmentLoadoutMap {
+  const byId = new Map<string, InventoryEntry>();
+  for (const item of items) {
+    if (item.inventoryItemId) {
+      byId.set(item.inventoryItemId, item);
+    }
+  }
+
+  const resolved: EquipmentLoadoutMap = { ...EMPTY_EQUIPMENT_LOADOUT };
+  const usedIds = new Set<string>();
+
+  for (const slot of EQUIPMENT_SLOT_KEYS) {
+    const explicitId = explicitIds?.[slot];
+    if (explicitId && byId.has(explicitId) && !usedIds.has(explicitId)) {
+      resolved[slot] = explicitId;
+      usedIds.add(explicitId);
+    }
+  }
+
+  for (const slot of EQUIPMENT_SLOT_KEYS) {
+    if (resolved[slot]) continue;
+    const legacySlug = legacySlugLoadout?.[slot];
+    if (!legacySlug) continue;
+    const match = items.find(
+      (item) =>
+        item.slug === legacySlug &&
+        Boolean(item.inventoryItemId) &&
+        !usedIds.has(item.inventoryItemId!)
+    );
+    if (match?.inventoryItemId) {
+      resolved[slot] = match.inventoryItemId;
+      usedIds.add(match.inventoryItemId);
+    }
+  }
+
+  return resolved;
+}
+
+/**
+ * Derives the 8-slot slug map (`equipmentLoadout`) from `equippedItemIds` and `items`
+ * so character rig rendering and combat snapshots always reflect the equipped item instances.
+ */
+function deriveSlugLoadoutFromIds(
+  items: InventoryEntry[],
+  idLoadout: EquipmentLoadoutMap
+): EquipmentLoadoutMap {
+  const byId = new Map<string, InventoryEntry>();
+  for (const item of items) {
+    if (item.inventoryItemId) {
+      byId.set(item.inventoryItemId, item);
+    }
+  }
+
+  const next: EquipmentLoadoutMap = { ...EMPTY_EQUIPMENT_LOADOUT };
+  for (const slot of EQUIPMENT_SLOT_KEYS) {
+    const idVal = idLoadout[slot];
+    if (idVal) {
+      const entry = byId.get(idVal);
+      next[slot] = entry ? entry.slug : null;
+    } else {
+      next[slot] = null;
+    }
+  }
+  return next;
+}
+
+/**
+ * Merges server inventory items into an existing inventory array.
+ * Equippable items deduplicate by `inventoryItemId` so multiple copies with the same slug are preserved.
+ * Stackable non-equippable items deduplicate by `slug`.
+ */
+function mergeMissingServerInventoryItems(
+  baseItems: InventoryEntry[],
+  serverItems: InventoryEntry[]
+): InventoryEntry[] {
+  if (serverItems.length === 0) return baseItems;
+  const existingIds = new Set(
+    baseItems.map((i) => i.inventoryItemId).filter((id): id is string => Boolean(id))
+  );
+  const existingNonEquipSlugs = new Set(
+    baseItems.filter((i) => !isEquippableInventoryEntry(i)).map((i) => i.slug)
+  );
+
+  let next = baseItems;
+  for (const srvItem of serverItems) {
+    if (isEquippableInventoryEntry(srvItem)) {
+      const srvId = srvItem.inventoryItemId;
+      if (srvId && existingIds.has(srvId)) continue;
+      next = [...next, srvItem];
+      if (srvId) existingIds.add(srvId);
+    } else if (!existingNonEquipSlugs.has(srvItem.slug)) {
+      next = [...next, srvItem];
+      existingNonEquipSlugs.add(srvItem.slug);
+    }
+  }
+  return next;
+}
+
+/**
  * Maps server relational `inventoryItems` into client `InventoryEntry[]`.
  */
 function mapServerInventoryItems(serverItems: unknown): InventoryEntry[] | null {
@@ -1309,27 +1493,32 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [equipmentLoadout, setEquipmentLoadout] = useState<EquipmentLoadoutMap>(() => ({
     ...EMPTY_EQUIPMENT_LOADOUT,
   }));
+  const [equippedItemIds, setEquippedItemIds] = useState<EquipmentLoadoutMap>(() => ({
+    ...EMPTY_EQUIPMENT_LOADOUT,
+  }));
 
   const [rawInventory, setRawInventory] = useState<InventoryEntry[]>([]);
 
   const inventory = useMemo<InventoryEntry[]>(() => {
-    const slotBySlug = new Map<string, EquipmentSlot>();
-    for (const [slotKey, slugVal] of Object.entries(equipmentLoadout) as Array<
+    const slotByInstanceId = new Map<string, EquipmentSlot>();
+    for (const [slotKey, idVal] of Object.entries(equippedItemIds ?? EMPTY_EQUIPMENT_LOADOUT) as Array<
       [EquipmentSlot, string | null]
     >) {
-      if (slugVal) {
-        slotBySlug.set(slugVal, slotKey);
+      if (idVal) {
+        slotByInstanceId.set(idVal, slotKey);
       }
     }
     return rawInventory.map((entry) => {
-      const slot = slotBySlug.get(entry.slug) ?? null;
+      const slot = entry.inventoryItemId
+        ? (slotByInstanceId.get(entry.inventoryItemId) ?? null)
+        : null;
       return {
         ...entry,
         equipped: slot !== null,
         equippedSlot: slot,
       };
     });
-  }, [rawInventory, equipmentLoadout]);
+  }, [rawInventory, equippedItemIds]);
 
   const [activeGathering, setActiveGathering] = useState<ActiveGatheringState | null>(null);
   const [lastGatheringDrop, setLastGatheringDrop] = useState<LootDrop[] | null>(null);
@@ -1477,6 +1666,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   rawInventoryRef.current = rawInventory;
   const equipmentLoadoutRef = useRef(equipmentLoadout);
   equipmentLoadoutRef.current = equipmentLoadout;
+  const equippedItemIdsRef = useRef(equippedItemIds);
+  equippedItemIdsRef.current = equippedItemIds;
   const unlockedTalentRanksRef = useRef(unlockedTalentRanks);
   unlockedTalentRanksRef.current = unlockedTalentRanks;
 
@@ -1852,7 +2043,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (typeof cp.adventurerReputation === 'number') setAdventurerReputation(cp.adventurerReputation);
         if (typeof cp.gold === 'number') setGold(cp.gold);
         if (cp.stats) setStats((prev) => ({ ...prev, ...cp.stats }));
-        const hydratedInv = Array.isArray(cp.inventory) ? cp.inventory : [];
+        const rawHydratedInv = Array.isArray(cp.inventory) ? cp.inventory : [];
+        const hydratedInv = ensureInventoryInstanceIds(rawHydratedInv);
         rawInventoryRef.current = hydratedInv;
         setRawInventory(hydratedInv);
         const hydratedTalents = cp.unlockedTalentRanks && typeof cp.unlockedTalentRanks === 'object' ? cp.unlockedTalentRanks : {};
@@ -1872,13 +2064,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           : [];
         completedGuildQuestSlugsRef.current = hydratedCompletedQuests;
         setCompletedGuildQuestSlugs(hydratedCompletedQuests);
-        const hydratedLoadout = sanitizeEquipmentLoadout(cp.equipmentLoadout) ?? { ...EMPTY_EQUIPMENT_LOADOUT };
-        const validInvSlugs = new Set(hydratedInv.map((i) => i.slug));
-        for (const slot of EQUIPMENT_SLOT_KEYS) {
-          if (hydratedLoadout[slot] && !validInvSlugs.has(hydratedLoadout[slot]!)) {
-            hydratedLoadout[slot] = null;
-          }
-        }
+        const hydratedIds = resolveEquippedItemIds(
+          hydratedInv,
+          extractEquippedItemIdsFromLoadout(cp.equippedItemIds),
+          sanitizeEquipmentLoadout(cp.equipmentLoadout)
+        );
+        const hydratedLoadout = deriveSlugLoadoutFromIds(hydratedInv, hydratedIds);
+        equippedItemIdsRef.current = hydratedIds;
+        setEquippedItemIds(hydratedIds);
         equipmentLoadoutRef.current = hydratedLoadout;
         setEquipmentLoadout(hydratedLoadout);
         setRemoteCharacterWorkoutsCount(cp.workoutsLoggedCount ?? 0);
@@ -2383,22 +2576,27 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       completedGuildQuestSlugsRef.current = resolvedCompletedQuests;
       setCompletedGuildQuestSlugs(resolvedCompletedQuests);
 
+      const serverLoadoutRaw = fullSheet?.character?.equipmentLoadout ?? char.equipmentLoadout;
       const serverLoadout = sanitizeEquipmentLoadout(fullSheet?.character?.equipmentLoadout);
       const incomingLoadout = sanitizeEquipmentLoadout(char.equipmentLoadout);
       const localLoadout = sanitizeEquipmentLoadout(existingLocal?.equipmentLoadout);
 
-      let resolvedEquipmentLoadout: EquipmentLoadoutMap = { ...EMPTY_EQUIPMENT_LOADOUT };
+      const serverIds = extractEquippedItemIdsFromLoadout(serverLoadoutRaw);
+      const charExplicitIds = extractEquippedItemIdsFromLoadout(char.equippedItemIds);
+      const localExplicitIds = extractEquippedItemIdsFromLoadout(existingLocal?.equippedItemIds);
+
+      let preferredSlugLoadout: EquipmentLoadoutMap | null = null;
       if (serverLoadout) {
         const hasNonNullServerSlot = Object.values(serverLoadout).some((v) => v !== null);
         if (!hasNonNullServerSlot && (incomingLoadout || localLoadout)) {
-          resolvedEquipmentLoadout = incomingLoadout ?? localLoadout ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+          preferredSlugLoadout = incomingLoadout ?? localLoadout ?? null;
         } else {
-          resolvedEquipmentLoadout = serverLoadout;
+          preferredSlugLoadout = serverLoadout;
         }
       } else if (incomingLoadout) {
-        resolvedEquipmentLoadout = incomingLoadout;
+        preferredSlugLoadout = incomingLoadout;
       } else if (localLoadout) {
-        resolvedEquipmentLoadout = localLoadout;
+        preferredSlugLoadout = localLoadout;
       }
 
       const serverMappedItems = mapServerInventoryItems(
@@ -2413,28 +2611,32 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resolvedInventory = serverMappedItems;
       }
 
-      // If server also returned inventory items, merge any missing items into resolvedInventory
+      // If server also returned inventory items, merge any missing items (deduplicating equippables by instance ID)
       if (serverMappedItems && serverMappedItems.length > 0 && resolvedInventory !== serverMappedItems) {
-        const existingSlugs = new Set(resolvedInventory.map((i) => i.slug));
-        for (const srvItem of serverMappedItems) {
-          if (!existingSlugs.has(srvItem.slug)) {
-            resolvedInventory = [...resolvedInventory, srvItem];
-            existingSlugs.add(srvItem.slug);
-          }
-        }
+        resolvedInventory = mergeMissingServerInventoryItems(resolvedInventory, serverMappedItems);
       }
 
-      // Ensure no phantom equipped item persists if the item is not in this character's inventory
-      const inventorySlugSet = new Set(resolvedInventory.map((i) => i.slug));
-      const validatedLoadout: EquipmentLoadoutMap = { ...resolvedEquipmentLoadout };
-      for (const slot of EQUIPMENT_SLOT_KEYS) {
-        const equippedSlug = validatedLoadout[slot];
-        if (equippedSlug && !inventorySlugSet.has(equippedSlug)) {
-          validatedLoadout[slot] = null;
-        }
-      }
-      resolvedEquipmentLoadout = validatedLoadout;
+      resolvedInventory = ensureInventoryInstanceIds(resolvedInventory);
 
+      const hasNonNullServerId = Boolean(
+        serverIds && Object.values(serverIds).some((v) => v !== null)
+      );
+      const preferredExplicitIds = hasNonNullServerId
+        ? serverIds
+        : (charExplicitIds ?? localExplicitIds ?? serverIds);
+
+      const resolvedEquippedIds = resolveEquippedItemIds(
+        resolvedInventory,
+        preferredExplicitIds,
+        preferredSlugLoadout
+      );
+      const resolvedEquipmentLoadout = deriveSlugLoadoutFromIds(
+        resolvedInventory,
+        resolvedEquippedIds
+      );
+
+      equippedItemIdsRef.current = resolvedEquippedIds;
+      setEquippedItemIds(resolvedEquippedIds);
       equipmentLoadoutRef.current = resolvedEquipmentLoadout;
       setEquipmentLoadout(resolvedEquipmentLoadout);
       rawInventoryRef.current = resolvedInventory;
@@ -2493,6 +2695,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         beltLoadout: resolvedBeltLoadout,
         completedGuildQuestSlugs: resolvedCompletedQuests,
         equipmentLoadout: resolvedEquipmentLoadout,
+        equippedItemIds: resolvedEquippedIds,
         workoutsLoggedCount: effectiveWorkoutsCount,
         completedBountySlugs: resolvedCompletedBounties,
         consistencyStreak: resolvedStreak,
@@ -2528,6 +2731,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     rawInventoryRef.current = [];
     setRawInventory([]);
     const emptyLoadout = { ...EMPTY_EQUIPMENT_LOADOUT };
+    equippedItemIdsRef.current = { ...EMPTY_EQUIPMENT_LOADOUT };
+    setEquippedItemIds({ ...EMPTY_EQUIPMENT_LOADOUT });
     equipmentLoadoutRef.current = emptyLoadout;
     setEquipmentLoadout(emptyLoadout);
     unlockedTalentRanksRef.current = {};
@@ -2642,18 +2847,24 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
               : serverInventoryItems;
         let resolvedCharInventory: InventoryEntry[] = baseLocalInventory;
         if (serverInventoryItems.length > 0 && resolvedCharInventory !== serverInventoryItems) {
-          const existingSlugs = new Set(resolvedCharInventory.map((i) => i.slug));
-          for (const srvItem of serverInventoryItems) {
-            if (!existingSlugs.has(srvItem.slug)) {
-              resolvedCharInventory = [...resolvedCharInventory, srvItem];
-              existingSlugs.add(srvItem.slug);
-            }
-          }
+          resolvedCharInventory = mergeMissingServerInventoryItems(
+            resolvedCharInventory,
+            serverInventoryItems
+          );
         }
+        resolvedCharInventory = ensureInventoryInstanceIds(resolvedCharInventory);
 
-        const resolvedCharLoadout: EquipmentLoadoutMap =
+        const resolvedCharEquippedIds = resolveEquippedItemIds(
+          resolvedCharInventory,
+          extractEquippedItemIdsFromLoadout(localChar?.equippedItemIds) ??
+            extractEquippedItemIdsFromLoadout(c.equipmentLoadout),
           sanitizeEquipmentLoadout(localChar?.equipmentLoadout) ??
-          sanitizeEquipmentLoadout(c.equipmentLoadout) ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+            sanitizeEquipmentLoadout(c.equipmentLoadout)
+        );
+        const resolvedCharLoadout: EquipmentLoadoutMap = deriveSlugLoadoutFromIds(
+          resolvedCharInventory,
+          resolvedCharEquippedIds
+        );
 
         const charHasPending = hasPendingUnsyncedForCharacter(c.id);
         const extractedCharStats = extractNormalizedStats(c);
@@ -2703,6 +2914,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             ])
           ),
           equipmentLoadout: resolvedCharLoadout,
+          equippedItemIds: resolvedCharEquippedIds,
           workoutsLoggedCount: resolvedWorkoutCount,
           completedBountySlugs: Array.from(completedBountySet),
           consistencyStreak: localChar?.consistencyStreak ?? c.consistencyStreak ?? resolvedWorkoutCount,
@@ -3311,6 +3523,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         equipmentLoadout:
           sanitizeEquipmentLoadout(latestSource.equipmentLoadout) ??
           sanitizeEquipmentLoadout(target.equipmentLoadout) ?? { ...EMPTY_EQUIPMENT_LOADOUT },
+        equippedItemIds:
+          extractEquippedItemIdsFromLoadout(latestSource.equippedItemIds) ??
+          extractEquippedItemIdsFromLoadout(target.equippedItemIds) ?? { ...EMPTY_EQUIPMENT_LOADOUT },
         deletedAt: new Date().toISOString(),
         daysRemaining: 30,
       };
@@ -3387,6 +3602,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ...target,
         inventory: Array.isArray(target.inventory) ? target.inventory : [],
         equipmentLoadout: sanitizeEquipmentLoadout(target.equipmentLoadout) ?? { ...EMPTY_EQUIPMENT_LOADOUT },
+        equippedItemIds:
+          extractEquippedItemIdsFromLoadout(target.equippedItemIds) ?? { ...EMPTY_EQUIPMENT_LOADOUT },
         deletedAt: null,
         daysRemaining: undefined,
       };
@@ -3669,6 +3886,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           next[idx] = { ...next[idx]!, quantity: next[idx]!.quantity + d.quantity };
         } else {
           next.push({
+            inventoryItemId: isEquippable
+              ? `local_item_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+              : undefined,
+            isLocked: false,
             slug: rolledDrop.itemSlug,
             baseSlug: rolledDrop.baseSlug ?? rolledDrop.itemSlug,
             name: rolledDrop.itemName,
@@ -5511,15 +5732,27 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const equipItemToSlot = useCallback(
-    (slug: string, targetSlot?: EquipmentSlot) => {
-      const target = rawInventory.find((i) => i.slug === slug);
+    (itemIdOrSlug: string, targetSlot?: EquipmentSlot) => {
+      const currentRawInv = rawInventoryRef.current;
+      const currentIds = equippedItemIdsRef.current ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+      const equippedIdSet = new Set(
+        Object.values(currentIds).filter((v): v is string => Boolean(v))
+      );
+
+      let target =
+        currentRawInv.find((i) => i.inventoryItemId === itemIdOrSlug) ??
+        currentRawInv.find(
+          (i) => i.slug === itemIdOrSlug && (!i.inventoryItemId || !equippedIdSet.has(i.inventoryItemId))
+        ) ??
+        currentRawInv.find((i) => i.slug === itemIdOrSlug);
+
       if (!target) return { ok: false, error: 'Item not found in inventory.' };
 
       const compatibleSlots = getCompatibleSlotsForItemType(
         target.itemType,
         target.weaponHandedness
       );
-      if (compatibleSlots.length === 0) {
+      if (!Array.isArray(compatibleSlots) || compatibleSlots.length === 0) {
         return { ok: false, error: `${target.name} cannot be equipped.` };
       }
 
@@ -5527,9 +5760,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!resolvedSlot) {
         if (target.itemType === 'ACCESSORY') {
           resolvedSlot =
-            equipmentLoadout.accessory1 === null
+            currentIds.accessory1 === null
               ? 'accessory1'
-              : equipmentLoadout.accessory2 === null
+              : currentIds.accessory2 === null
                 ? 'accessory2'
                 : 'accessory1';
         } else {
@@ -5551,23 +5784,57 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { ok: false, error: check.error };
       }
 
-      const currentLoadout = equipmentLoadoutRef.current || equipmentLoadout;
-      const nextLoadout: EquipmentLoadoutMap = { ...currentLoadout };
-      // Remove item from any other slot if already equipped (e.g., swapping accessory1 -> accessory2)
-      for (const k of Object.keys(nextLoadout) as EquipmentSlot[]) {
-        if (nextLoadout[k] === slug) {
-          nextLoadout[k] = null;
+      // Guarantee a unique instance ID before equipping so duplicate rings never collide
+      let workingInv = currentRawInv;
+      let targetInstanceId = target.inventoryItemId;
+      if (!targetInstanceId) {
+        targetInstanceId = `local_item_${target.slug}_${Date.now().toString(36)}_${Math.random()
+          .toString(36)
+          .slice(2, 6)}`;
+        workingInv = currentRawInv.map((entry) =>
+          entry === target ? { ...entry, inventoryItemId: targetInstanceId } : entry
+        );
+        rawInventoryRef.current = workingInv;
+        setRawInventory(workingInv);
+      }
+
+      const nextIds: EquipmentLoadoutMap = { ...currentIds };
+      const clearedSlots: EquipmentSlot[] = [];
+
+      // Remove this exact item instance from any other slot (e.g. moving Ring A from accessory1 -> accessory2)
+      for (const k of EQUIPMENT_SLOT_KEYS) {
+        if (k !== resolvedSlot && nextIds[k] === targetInstanceId) {
+          nextIds[k] = null;
+          clearedSlots.push(k);
         }
       }
-      nextLoadout[resolvedSlot] = slug;
 
+      // Enforce 2H weapon <-> offHand mutual exclusion
+      if (resolvedSlot === 'mainHand' && target.weaponHandedness === 'TWO_HANDED' && nextIds.offHand) {
+        nextIds.offHand = null;
+        clearedSlots.push('offHand');
+      } else if (resolvedSlot === 'offHand' && nextIds.mainHand) {
+        const mainHandItem = workingInv.find((i) => i.inventoryItemId === nextIds.mainHand);
+        if (mainHandItem?.weaponHandedness === 'TWO_HANDED') {
+          nextIds.mainHand = null;
+          clearedSlots.push('mainHand');
+        }
+      }
+
+      nextIds[resolvedSlot] = targetInstanceId;
+      const nextLoadout = deriveSlugLoadoutFromIds(workingInv, nextIds);
+
+      equippedItemIdsRef.current = nextIds;
+      setEquippedItemIds(nextIds);
       equipmentLoadoutRef.current = nextLoadout;
       setEquipmentLoadout(nextLoadout);
 
       if (currentProfileRef.current) {
         const updatedProfile: PersistedCharacterProfile = {
           ...currentProfileRef.current,
+          inventory: workingInv,
           equipmentLoadout: nextLoadout,
+          equippedItemIds: nextIds,
           lastSyncedAtMs: Date.now(),
         };
         currentProfileRef.current = updatedProfile;
@@ -5580,17 +5847,41 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           characterProfile: updatedProfile,
           availableCharacters: nextAvail,
         });
+      }
+
+      const remoteCharId = remoteCharacterIdRef.current;
+      if (
+        serverOnline &&
+        isAuthenticated &&
+        remoteCharId &&
+        !remoteCharId.startsWith('local_') &&
+        targetInstanceId &&
+        !targetInstanceId.startsWith('local_item_')
+      ) {
+        void (async () => {
+          for (const cleared of clearedSlots) {
+            await equipCharacterItemApi(remoteCharId, { slot: cleared, inventoryItemId: null });
+          }
+          await equipCharacterItemApi(remoteCharId, {
+            slot: resolvedSlot,
+            inventoryItemId: targetInstanceId,
+          });
+        })().catch(() => {});
       }
 
       return { ok: true, slot: resolvedSlot };
     },
-    [equipmentLoadout, persistBundleSnapshot, rawInventory, stats]
+    [isAuthenticated, persistBundleSnapshot, serverOnline, stats]
   );
 
   const unequipSlot = useCallback(
     (slot: EquipmentSlot) => {
-      const currentLoadout = equipmentLoadoutRef.current || equipmentLoadout;
-      const nextLoadout: EquipmentLoadoutMap = { ...currentLoadout, [slot]: null };
+      const currentIds = equippedItemIdsRef.current ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+      const nextIds: EquipmentLoadoutMap = { ...currentIds, [slot]: null };
+      const nextLoadout = deriveSlugLoadoutFromIds(rawInventoryRef.current, nextIds);
+
+      equippedItemIdsRef.current = nextIds;
+      setEquippedItemIds(nextIds);
       equipmentLoadoutRef.current = nextLoadout;
       setEquipmentLoadout(nextLoadout);
 
@@ -5598,6 +5889,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const updatedProfile: PersistedCharacterProfile = {
           ...currentProfileRef.current,
           equipmentLoadout: nextLoadout,
+          equippedItemIds: nextIds,
           lastSyncedAtMs: Date.now(),
         };
         currentProfileRef.current = updatedProfile;
@@ -5611,24 +5903,50 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           availableCharacters: nextAvail,
         });
       }
+
+      const remoteCharId = remoteCharacterIdRef.current;
+      if (
+        serverOnline &&
+        isAuthenticated &&
+        remoteCharId &&
+        !remoteCharId.startsWith('local_')
+      ) {
+        equipCharacterItemApi(remoteCharId, { slot, inventoryItemId: null }).catch(() => {});
+      }
     },
-    [equipmentLoadout, persistBundleSnapshot]
+    [isAuthenticated, persistBundleSnapshot, serverOnline]
   );
 
   const toggleEquipItem = useCallback(
-    (slug: string) => {
-      const existingSlot = (Object.entries(equipmentLoadout) as Array<
+    (itemIdOrSlug: string) => {
+      const currentIds = equippedItemIdsRef.current ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+      const existingById = (Object.entries(currentIds) as Array<
         [EquipmentSlot, string | null]
-      >).find(([, s]) => s === slug)?.[0];
+      >).find(([, id]) => id === itemIdOrSlug)?.[0];
 
-      if (existingSlot) {
-        unequipSlot(existingSlot);
+      if (existingById) {
+        unequipSlot(existingById);
         return { ok: true };
       }
-      const res = equipItemToSlot(slug);
+
+      const hasInstanceMatch = rawInventoryRef.current.some(
+        (i) => i.inventoryItemId === itemIdOrSlug
+      );
+      if (!hasInstanceMatch) {
+        const currentLoadout = equipmentLoadoutRef.current ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+        const existingBySlug = (Object.entries(currentLoadout) as Array<
+          [EquipmentSlot, string | null]
+        >).find(([, s]) => s === itemIdOrSlug)?.[0];
+        if (existingBySlug) {
+          unequipSlot(existingBySlug);
+          return { ok: true };
+        }
+      }
+
+      const res = equipItemToSlot(itemIdOrSlug);
       return { ok: res.ok, error: res.error };
     },
-    [equipItemToSlot, equipmentLoadout, unequipSlot]
+    [equipItemToSlot, unequipSlot]
   );
 
   const consumeInventoryItem = useCallback(
@@ -5766,10 +6084,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (data: any) => {
       const mapped = mapServerInventoryItems(data?.inventoryItems);
       let nextInv = rawInventoryRef.current;
+      let nextIds = equippedItemIdsRef.current;
+      let nextLoadout = equipmentLoadoutRef.current;
       if (mapped) {
-        nextInv = mapped;
-        rawInventoryRef.current = mapped;
-        setRawInventory(mapped);
+        nextInv = ensureInventoryInstanceIds(mapped);
+        rawInventoryRef.current = nextInv;
+        setRawInventory(nextInv);
+        nextIds = resolveEquippedItemIds(nextInv, nextIds, nextLoadout);
+        nextLoadout = deriveSlugLoadoutFromIds(nextInv, nextIds);
+        equippedItemIdsRef.current = nextIds;
+        setEquippedItemIds(nextIds);
+        equipmentLoadoutRef.current = nextLoadout;
+        setEquipmentLoadout(nextLoadout);
       }
       let nextGold = goldRef.current;
       if (typeof data?.remainingGold === 'number') {
@@ -5791,6 +6117,8 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       persistCurrentProfileUpdates({
         inventory: nextInv,
+        equipmentLoadout: nextLoadout,
+        equippedItemIds: nextIds,
         gold: nextGold,
         beltLoadout: nextBelt,
       });
@@ -6018,7 +6346,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { ok: false, error: 'Gear item not found in inventory.' };
       }
       const target = rawInventoryRef.current[targetIdx]!;
-      const oldSlug = target.slug;
       const clientSeed = `upg_${Date.now()}`;
 
       const remoteCharId = remoteCharacterIdRef.current;
@@ -6108,14 +6435,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      const nextLoadout: EquipmentLoadoutMap = { ...(equipmentLoadoutRef.current || equipmentLoadout) };
-      let loadoutChanged = false;
-      for (const slot of EQUIPMENT_SLOT_KEYS) {
-        if (nextLoadout[slot] === oldSlug && upgRes.lootDrop.itemSlug !== oldSlug) {
-          nextLoadout[slot] = upgRes.lootDrop.itemSlug;
-          loadoutChanged = true;
-        }
-      }
+      const currentIds = equippedItemIdsRef.current ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+      const nextLoadout = deriveSlugLoadoutFromIds(nextInventory, currentIds);
+      const loadoutChanged = EQUIPMENT_SLOT_KEYS.some(
+        (slot) => nextLoadout[slot] !== (equipmentLoadoutRef.current ?? equipmentLoadout)[slot]
+      );
       if (loadoutChanged) {
         equipmentLoadoutRef.current = nextLoadout;
         setEquipmentLoadout(nextLoadout);
@@ -6158,7 +6482,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { ok: false, error: 'Gear item not found in inventory.' };
       }
       const target = rawInventoryRef.current[targetIdx]!;
-      const oldSlug = target.slug;
       const clientSeed = `reforge_${Date.now()}`;
 
       const remoteCharId = remoteCharacterIdRef.current;
@@ -6249,17 +6572,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      const nextLoadout: EquipmentLoadoutMap = { ...(equipmentLoadoutRef.current || equipmentLoadout) };
-      let loadoutChanged = false;
-      for (const slot of EQUIPMENT_SLOT_KEYS) {
-        if (nextLoadout[slot] === oldSlug && refRes.lootDrop.itemSlug !== oldSlug) {
-          nextLoadout[slot] = refRes.lootDrop.itemSlug;
-          loadoutChanged = true;
-        }
-      }
-      if (loadoutChanged) {
-        equipmentLoadoutRef.current = nextLoadout;
-        setEquipmentLoadout(nextLoadout);
+      const currentIdsReforge = equippedItemIdsRef.current ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+      const nextLoadoutReforge = deriveSlugLoadoutFromIds(nextInventory, currentIdsReforge);
+      const reforgeLoadoutChanged = EQUIPMENT_SLOT_KEYS.some(
+        (slot) => nextLoadoutReforge[slot] !== (equipmentLoadoutRef.current ?? equipmentLoadout)[slot]
+      );
+      if (reforgeLoadoutChanged) {
+        equipmentLoadoutRef.current = nextLoadoutReforge;
+        setEquipmentLoadout(nextLoadoutReforge);
       }
 
       rawInventoryRef.current = nextInventory;
@@ -6269,7 +6589,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       persistCurrentProfileUpdates({
         inventory: nextInventory,
         gold: refRes.remainingGold,
-        ...(loadoutChanged ? { equipmentLoadout: nextLoadout } : {}),
+        ...(reforgeLoadoutChanged ? { equipmentLoadout: nextLoadoutReforge } : {}),
       });
 
       return {
@@ -6383,8 +6703,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (target.isLocked) {
         return { ok: false, error: `${target.name} is locked and cannot be sold.` };
       }
-      const currentLoadout = equipmentLoadoutRef.current || equipmentLoadout;
-      const isEquipped = Object.values(currentLoadout).some((s) => s === target.slug);
+      const currentIds = equippedItemIdsRef.current ?? { ...EMPTY_EQUIPMENT_LOADOUT };
+      const isEquipped = target.inventoryItemId
+        ? Object.values(currentIds).some((id) => id === target.inventoryItemId)
+        : Object.values(equipmentLoadoutRef.current || equipmentLoadout).some(
+            (s) => s === target.slug
+          );
       if (isEquipped) {
         return { ok: false, error: `Unequip ${target.name} before selling.` };
       }
@@ -8471,6 +8795,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     unlockedTalentRanks,
     aggregatedTalents,
     equipmentLoadout,
+    equippedItemIds,
     equipmentBonuses,
     derivedCombatStats,
     fatigueState: projectedFatigue,

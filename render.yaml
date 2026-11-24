@@ -26,6 +26,8 @@ services:
         sync: false
       - key: ADMIN_EMAILS
         sync: false
+      - key: DIAGNOSTICS_API_KEY
+        sync: false
       - key: APP_LATEST_VERSION
         value: "0.2.0"
       - key: APP_MIN_REQUIRED_VERSION

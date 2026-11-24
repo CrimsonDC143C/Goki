@@ -1464,7 +1464,13 @@ export function aggregateEquippedItemModifiers(
       if (p.SPR) prim.SPR = (prim.SPR ?? 0) + p.SPR;
     }
 
-    if (it.uniquePassive && 'passiveModifiers' in it.uniquePassive && it.uniquePassive.passiveModifiers) {
+    if (
+      it.uniquePassive &&
+      typeof it.uniquePassive === 'object' &&
+      'passiveModifiers' in it.uniquePassive &&
+      it.uniquePassive.passiveModifiers &&
+      typeof it.uniquePassive.passiveModifiers === 'object'
+    ) {
       const mods = it.uniquePassive.passiveModifiers as Partial<CombatModifiers>;
       for (const [k, v] of Object.entries(mods)) {
         if (typeof v === 'number') {

@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { PrismaClient } from '@goki/database';
 import { FastifyReply, FastifyRequest } from 'fastify';
 
@@ -87,6 +88,51 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
       error: 'Forbidden: Developer Sanctum admin access required',
     });
   }
+}
+
+/**
+ * Constant-time verification for the optional `x-diagnostics-key` header against `DIAGNOSTICS_API_KEY`.
+ */
+export function hasValidDiagnosticsApiKey(request: FastifyRequest): boolean {
+  const configured = (process.env.DIAGNOSTICS_API_KEY ?? '').trim();
+  const headerVal = request.headers['x-diagnostics-key'];
+  if (!configured || typeof headerVal !== 'string') {
+    return false;
+  }
+
+  const provided = headerVal.trim();
+  if (!provided) {
+    return false;
+  }
+
+  const expectedDigest = createHash('sha256').update(configured).digest();
+  const providedDigest = createHash('sha256').update(provided).digest();
+  return timingSafeEqual(expectedDigest, providedDigest);
+}
+
+/**
+ * Fastify preHandler hook for diagnostics triage routes (`GET`/`PATCH /api/diagnostics/reports`).
+ * Accepts either a valid `x-diagnostics-key` header OR an authenticated admin Bearer JWT.
+ */
+export async function requireDiagnosticsAccess(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  if (hasValidDiagnosticsApiKey(request)) {
+    return;
+  }
+
+  if (request.headers['x-diagnostics-key'] !== undefined && !request.headers.authorization) {
+    return reply.status(401).send({
+      error: 'Unauthorized: Invalid diagnostics API key',
+    });
+  }
+
+  await requireAuth(request, reply);
+  if (reply.sent) {
+    return;
+  }
+  await requireAdmin(request, reply);
 }
 
 /**

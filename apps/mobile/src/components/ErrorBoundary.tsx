@@ -181,7 +181,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (hasError) {
       return (
         <View style={styles.errorContainer}>
-          <ScrollView contentContainerStyle={styles.errorContent}>
+          <ScrollView
+            style={styles.errorScroll}
+            contentContainerStyle={styles.errorContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             {/* Header Badge */}
             <View style={styles.headerRow}>
               <Text style={styles.skullIcon}>💀</Text>
@@ -347,9 +352,6 @@ const styles = StyleSheet.create({
   errorContainer: {
     flex: 1,
     backgroundColor: '#0E0D10',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
     paddingTop:
       Platform.OS === 'web'
         ? 24
@@ -358,10 +360,18 @@ const styles = StyleSheet.create({
         : (StatusBar.currentHeight ?? 28) + 16,
     paddingBottom: 28,
   },
+  errorScroll: {
+    flex: 1,
+    width: '100%',
+  },
   errorContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
     maxWidth: 620,
     width: '100%',
-    paddingVertical: 24,
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 20,
     gap: 16,
   },
   headerRow: {
@@ -386,6 +396,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#FEE2E2',
     letterSpacing: 0.5,
+    flexShrink: 1,
   },
   safetyBox: {
     backgroundColor: '#14201A',
@@ -407,11 +418,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: '#86EFAC',
+    flexShrink: 1,
   },
   safetyBody: {
     fontSize: 12,
     color: '#D1FAE5',
     lineHeight: 18,
+    flexShrink: 1,
   },
   errorBox: {
     backgroundColor: '#1E1417',
@@ -431,6 +444,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     color: '#FECDD3',
+    flexShrink: 1,
   },
   noteBox: {
     gap: 6,
@@ -439,6 +453,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#D1D5DB',
     fontWeight: '600',
+    flexShrink: 1,
   },
   noteInput: {
     backgroundColor: '#1B191E',
@@ -497,6 +512,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     paddingVertical: 14,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -505,6 +521,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.5,
+    textAlign: 'center',
   },
   btnDisabled: {
     opacity: 0.6,
@@ -515,6 +532,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     paddingVertical: 14,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -522,6 +540,7 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     fontSize: 14,
     fontWeight: '800',
+    textAlign: 'center',
   },
   modalBackdrop: {
     flex: 1,
@@ -565,11 +584,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#F9FAFB',
     fontWeight: '900',
+    flexShrink: 1,
   },
   modalBody: {
     fontSize: 13,
     color: '#D1D5DB',
     lineHeight: 18,
+    flexShrink: 1,
   },
   modalErrorBox: {
     backgroundColor: '#2B1A1E',
@@ -585,6 +606,7 @@ const styles = StyleSheet.create({
   },
   modalButtonRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'flex-end',
     gap: 10,
     marginTop: 6,

@@ -20,6 +20,7 @@
     "dev:server": "npm run dev --workspace=@goki/server",
     "dev:mobile": "npm run start --workspace=@goki/mobile",
     "dev:web": "npm run web --workspace=@goki/mobile",
+    "bugs:latest": "node scripts/fetch-bug-reports.mjs",
     "assets:install": "npm --prefix tools/asset-pipeline install",
     "assets:build": "npm --prefix tools/asset-pipeline run build"
   },
