@@ -1335,22 +1335,36 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
           {/* Sort By Controls Bar */}
           <View style={styles.sortBarRow}>
             <Text style={styles.sortBarLabel}>Sort By:</Text>
-            {(['RARITY', 'TYPE', 'QUANTITY'] as const).map((mode) => (
-              <Pressable
-                key={mode}
-                style={[styles.sortChip, inventorySort === mode && styles.sortChipActive]}
-                onPress={() => setInventorySort(mode)}
-              >
-                <Text
-                  style={[
-                    styles.sortChipText,
-                    inventorySort === mode && styles.sortChipTextActive,
-                  ]}
+            {([
+              { mode: 'RARITY' as const, label: 'Rarity', icon: 'sparkles' as const },
+              { mode: 'TYPE' as const, label: 'Type', icon: 'anvil' as const },
+              { mode: 'QUANTITY' as const, label: 'Quantity', icon: 'backpack' as const },
+            ]).map(({ mode, label, icon }) => {
+              const active = inventorySort === mode;
+              return (
+                <Pressable
+                  key={mode}
+                  style={[styles.sortChip, active && styles.sortChipActive]}
+                  onPress={() => setInventorySort(mode)}
                 >
-                  {mode === 'RARITY' ? '💎 Rarity' : mode === 'TYPE' ? '🏷️ Type' : '📦 Quantity'}
-                </Text>
-              </Pressable>
-            ))}
+                  <View style={styles.sortChipInner}>
+                    <RpgIcon
+                      name={icon}
+                      size={11}
+                      color={active ? CRIMSON_ONI.agedGoldBright : CRIMSON_ONI.ashGray}
+                    />
+                    <Text
+                      style={[
+                        styles.sortChipText,
+                        active && styles.sortChipTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
           </View>
 
           <View style={styles.bagCard}>
@@ -1413,7 +1427,14 @@ export const CharacterProfileScreen: React.FC<CharacterProfileScreenProps> = ({
                         {item.name}
                       </Text>
                       <Text style={styles.bagItemMeta} numberOfLines={1}>
-                        [{item.rarity}]{item.tier ? ` • Tier ${item.tier}` : ''} • {item.itemType}
+                        [{item.rarity}]{item.tier ? ` • Tier ${item.tier}` : ''} •{' '}
+                        {String(item.itemType) === 'CRAFTING_MATERIAL'
+                          ? 'Material'
+                          : String(item.itemType)
+                              .toLowerCase()
+                              .split('_')
+                              .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : ''))
+                              .join(' ')}
                         {item.weaponHandedness === 'TWO_HANDED' ? ' • 2H' : ''}
                         {item.uniquePassive ? ' • ★ Unique' : ''}
                       </Text>
@@ -2453,9 +2474,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   sectionHint: {
-    color: CRIMSON_ONI.ashGray,
+    color: '#CBD5E1',
     fontSize: 11,
     marginTop: 2,
+    textShadowColor: 'rgba(0, 0, 0, 0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   sectionHeaderInline: {
     flexDirection: 'row',
@@ -3049,8 +3073,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CRIMSON_ONI.border,
     borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  sortChipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   sortChipActive: {
     backgroundColor: CRIMSON_ONI.agedGoldDim,

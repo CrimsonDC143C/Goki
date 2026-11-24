@@ -542,19 +542,27 @@ export function registerNpcHubRoutes(app: FastifyInstance, db: PrismaClient): vo
           }
 
           if (character.onboardingCompletedAt) {
+            const existingInventory =
+              typeof (tx as any).inventoryItem?.findMany === 'function'
+                ? await tx.inventoryItem.findMany({
+                    where: { characterId },
+                    include: { item: true },
+                  })
+                : undefined;
             return {
               ok: true as const,
               onboardingCompletedAt: character.onboardingCompletedAt,
               welcomeGiftGranted: false,
+              gold: character.gold,
+              remainingGold: character.gold,
+              beltLoadout: Array.isArray(character.beltLoadout)
+                ? (character.beltLoadout as Array<string | null>)
+                : [null, null, null, null],
+              ...(existingInventory ? { inventoryItems: existingInventory } : {}),
             };
           }
 
           const completedAt = new Date();
-          const updated = await tx.character.update({
-            where: { id: characterId },
-            data: { onboardingCompletedAt: completedAt },
-          });
-
           await depositLootToInventory(tx, characterId, {
             itemSlug: 'sunleaf_healing_draught',
             itemName: 'Sunleaf Healing Draught',
@@ -562,10 +570,40 @@ export function registerNpcHubRoutes(app: FastifyInstance, db: PrismaClient): vo
             quantity: 1,
           });
 
+          const currentBelt: Array<string | null> = Array.isArray(character.beltLoadout)
+            ? [...(character.beltLoadout as Array<string | null>), null, null, null, null].slice(0, 4)
+            : [null, null, null, null];
+          if (!currentBelt.includes('sunleaf_healing_draught')) {
+            const emptyIdx = currentBelt.findIndex((slot) => !slot);
+            if (emptyIdx >= 0) {
+              currentBelt[emptyIdx] = 'sunleaf_healing_draught';
+            }
+          }
+
+          const updated = await tx.character.update({
+            where: { id: characterId },
+            data: {
+              onboardingCompletedAt: completedAt,
+              beltLoadout: currentBelt as any,
+            },
+          });
+
+          const inventoryItems =
+            typeof (tx as any).inventoryItem?.findMany === 'function'
+              ? await tx.inventoryItem.findMany({
+                  where: { characterId },
+                  include: { item: true },
+                })
+              : undefined;
+
           return {
             ok: true as const,
             onboardingCompletedAt: updated.onboardingCompletedAt ?? completedAt,
             welcomeGiftGranted: true,
+            gold: updated.gold,
+            remainingGold: updated.gold,
+            beltLoadout: currentBelt,
+            ...(inventoryItems ? { inventoryItems } : {}),
           };
         },
         `onboarding:${characterId}`

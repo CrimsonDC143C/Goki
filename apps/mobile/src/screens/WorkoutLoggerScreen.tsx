@@ -1955,43 +1955,41 @@ export const WorkoutLoggerScreen: React.FC<WorkoutLoggerScreenProps> = ({
   // ==========================================================================
   return (
     <View style={styles.root}>
-      {/* 1. Top Workout Header */}
-      <View style={styles.topBar}>
-        <View style={styles.topBarLeftGroup}>
-          <Pressable style={styles.backBtn} onPress={handleBackPress}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-              <RpgIcon name="chevron-left" size={14} color="#D1D5DB" />
-              <Text style={styles.backBtnText}>Back</Text>
-            </View>
-          </Pressable>
+      {/* 1. Top Workout Header (hidden on Discipline Selector when embedded inside TrainHubScreen to avoid triple header & duplicate History button) */}
+      {!(!activeCategory && phase === 'Idle' && Boolean(onOpenHistory)) ? (
+        <View style={styles.topBar}>
+          <View style={styles.topBarLeftGroup}>
+            <Pressable style={styles.backBtn} onPress={handleBackPress}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                <RpgIcon name="chevron-left" size={14} color="#D1D5DB" />
+                <Text style={styles.backBtnText}>Back</Text>
+              </View>
+            </Pressable>
 
-          <TouchableOpacity
-            style={styles.topBarHistoryBtn}
-            onPress={() => {
-              if (onOpenHistory) {
-                onOpenHistory();
-              } else {
-                setShowTrainingHistory(true);
-              }
-            }}
-            testID="online-history-top-btn"
-            activeOpacity={0.7}
-          >
+            {!onOpenHistory ? (
+              <TouchableOpacity
+                style={styles.topBarHistoryBtn}
+                onPress={() => setShowTrainingHistory(true)}
+                testID="online-history-top-btn"
+                activeOpacity={0.7}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <RpgIcon name="history" size={13} color="#FDE68A" />
+                  <Text style={styles.topBarHistoryText}>History</Text>
+                </View>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <View style={styles.sessionTimerBadge}>
+            <Text style={styles.sessionClock}>{formatDuration(sessionElapsedSec)}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <RpgIcon name="history" size={13} color="#FDE68A" />
-              <Text style={styles.topBarHistoryText}>History</Text>
+              <RpgIcon name="combat" size={10} color={COLORS.gold} />
+              <Text style={styles.sessionSubRaid}>Online Raid</Text>
             </View>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.sessionTimerBadge}>
-          <Text style={styles.sessionClock}>{formatDuration(sessionElapsedSec)}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <RpgIcon name="combat" size={10} color={COLORS.gold} />
-            <Text style={styles.sessionSubRaid}>Online Raid</Text>
           </View>
         </View>
-      </View>
+      ) : null}
 
       {/* 2. Pinned Rest Timer (Floating Banner above bottom edge / top when minimized) */}
       {restTargetEndTimeMs && restTimerPinned ? (

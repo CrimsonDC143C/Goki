@@ -637,7 +637,7 @@ export function resolveCombatEnemyArtId(isBoss?: boolean, nameOrId?: string | nu
   if (s.includes('orc') || s.includes('brute') || s.includes('raider') || s.includes('marauder')) return 'orc';
   if (s.includes('knight') || s.includes('paladin') || s.includes('deserter') || s.includes('guardian') || s.includes('warden')) return 'knight';
   if (s.includes('swordsman') || s.includes('duelist') || s.includes('blade') || s.includes('assassin') || s.includes('warrior')) return 'swordsman';
-  if (s.includes('archer') || s.includes('ranger') || s.includes('bow') || s.includes('hunter') || s.includes('stalker')) return 'archer';
+  if (s.includes('archer') || s.includes('ranger') || s.includes('bow') || s.includes('hunter') || s.includes('stalker') || s.includes('scout') || s.includes('ghoul')) return 'archer';
   return 'skeleton';
 }
 

@@ -57,7 +57,7 @@ const SUB_OPTIONS: ReadonlyArray<SegmentedOption<ArtisanSubView>> = [
 const WORKBENCH_TABS: ReadonlyArray<SegmentedOption<WorkbenchTab>> = [
   {
     key: 'POTIONS',
-    label: 'Potions & Refining',
+    label: 'Potions',
     icon: 'prof-alchemy',
     testID: 'artisan-wb-potions',
   },
@@ -69,7 +69,7 @@ const WORKBENCH_TABS: ReadonlyArray<SegmentedOption<WorkbenchTab>> = [
   },
   {
     key: 'REFORGE',
-    label: 'Upgrade & Reforge',
+    label: 'Upgrade',
     icon: 'sparkles',
     testID: 'artisan-wb-reforge',
   },
@@ -183,7 +183,30 @@ export const ArtisanHubScreen: React.FC = () => {
         {subView === 'GATHER' ? (
           <GatheringNodeScreen />
         ) : (
-          <ScrollView contentContainerStyle={styles.craftScroll}>
+          <View style={{ flex: 1 }}>
+            {feedback ? (
+              <View style={styles.stickyFeedbackWrap}>
+                <View
+                  style={[
+                    styles.feedbackBanner,
+                    feedback.ok ? styles.feedbackSuccess : styles.feedbackError,
+                    { marginTop: 0 },
+                  ]}
+                >
+                  <RpgIcon
+                    name={feedback.ok ? 'check' : 'lock'}
+                    size={14}
+                    color={feedback.ok ? COLORS.success : COLORS.danger}
+                  />
+                  <Text style={styles.feedbackText}>{feedback.text}</Text>
+                  <TouchableOpacity onPress={() => setFeedback(null)} hitSlop={8}>
+                    <RpgIcon name="close" size={14} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
+
+            <ScrollView contentContainerStyle={styles.craftScroll}>
             <SlateSection
               level={1}
               eyebrow="FORGE & APOTHECARY"
@@ -196,13 +219,9 @@ export const ArtisanHubScreen: React.FC = () => {
                 </View>
               }
             >
-              {/* Material Satchel Strip */}
+              {/* Material Satchel Chips (wrapped so all materials stay visible without edge clipping) */}
               <Text style={styles.satchelLabel}>Material Satchel</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.satchelStrip}
-              >
+              <View style={styles.satchelWrapGrid}>
                 {CRAFTING_MATERIAL_CATALOG.map((mat) => {
                   const owned = itemCounts[mat.slug] ?? 0;
                   const rarityColor = RARITY_COLORS[mat.rarity] ?? COLORS.textSecondary;
@@ -215,7 +234,7 @@ export const ArtisanHubScreen: React.FC = () => {
                       <Text
                         style={[
                           styles.satchelCount,
-                          owned === 0 && { color: COLORS.textMuted },
+                          owned === 0 && { color: COLORS.textSecondary },
                         ]}
                       >
                         {owned}
@@ -223,7 +242,7 @@ export const ArtisanHubScreen: React.FC = () => {
                     </View>
                   );
                 })}
-              </ScrollView>
+              </View>
 
               <HairlineDivider spacing={SPACING.sm} />
 
@@ -235,22 +254,6 @@ export const ArtisanHubScreen: React.FC = () => {
                   setFeedback(null);
                 }}
               />
-
-              {feedback ? (
-                <View
-                  style={[
-                    styles.feedbackBanner,
-                    feedback.ok ? styles.feedbackSuccess : styles.feedbackError,
-                  ]}
-                >
-                  <RpgIcon
-                    name={feedback.ok ? 'check' : 'lock'}
-                    size={14}
-                    color={feedback.ok ? COLORS.success : COLORS.danger}
-                  />
-                  <Text style={styles.feedbackText}>{feedback.text}</Text>
-                </View>
-              ) : null}
             </SlateSection>
 
             {/* Recipe List (Potions & Refining | Forge Gear) */}
@@ -310,12 +313,12 @@ export const ArtisanHubScreen: React.FC = () => {
                         <RpgIcon
                           name={workbenchTab === 'FORGE' ? 'anvil' : 'prof-alchemy'}
                           size={13}
-                          color={canCraft ? SURFACES.canvas : COLORS.textMuted}
+                          color={canCraft ? SURFACES.canvas : COLORS.textSecondary}
                         />
                         <Text
                           style={[
                             styles.craftBtnText,
-                            !canCraft && { color: COLORS.textMuted },
+                            !canCraft && { color: COLORS.textSecondary },
                           ]}
                         >
                           {isBusy ? '...' : 'Craft'}
@@ -616,7 +619,8 @@ export const ArtisanHubScreen: React.FC = () => {
                   );
                 })
               ))}
-          </ScrollView>
+            </ScrollView>
+          </View>
         )}
       </View>
 
@@ -687,6 +691,18 @@ const styles = StyleSheet.create({
   satchelLabel: {
     ...TYPOGRAPHY.eyebrow,
     marginBottom: 6,
+  },
+  stickyFeedbackWrap: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.sm,
+    backgroundColor: SURFACES.canvas,
+    zIndex: 10,
+  },
+  satchelWrapGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingVertical: 2,
   },
   satchelStrip: {
     gap: 6,
@@ -904,7 +920,10 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
   },
   btnDisabled: {
-    opacity: 0.45,
+    backgroundColor: SURFACES.layer3,
+    borderWidth: 1,
+    borderColor: SURFACES.hairlineStrong,
+    opacity: 0.85,
   },
   emptyBox: {
     alignItems: 'center',

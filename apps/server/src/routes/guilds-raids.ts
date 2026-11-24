@@ -2,6 +2,8 @@ import { PrismaClient } from '@goki/database';
 import {
   MS_PER_HOUR,
   aggregateTalentModifiers,
+  getCurrentSeasonKey,
+  getSeasonWindowBounds,
   isAdventurerRankSufficient,
 } from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
@@ -361,6 +363,7 @@ export function registerGuildAndRaidRoutes(
       include: {
         gymClan: true,
         contributions: {
+          where: { character: { deletedAt: null } },
           orderBy: { totalContributionScore: 'desc' },
           include: { character: true },
         },
@@ -546,6 +549,45 @@ export function registerGuildAndRaidRoutes(
             lastAttackAt: new Date(),
           },
         });
+
+        // Credit Gym Clan seasonal raid points so Leaderboards stay in sync with live Raid Strikes
+        if (
+          typeof (tx as any).gymClanMember?.findMany === 'function' &&
+          typeof (tx as any).gymClanSeason?.upsert === 'function'
+        ) {
+          const seasonKey = getCurrentSeasonKey();
+          const { startsAt, endsAt } = getSeasonWindowBounds(seasonKey);
+          const raidPointsDelta = Math.max(1, Math.floor(combatDamage / 1000));
+          const memberships = await tx.gymClanMember.findMany({
+            where: { characterId },
+            select: { gymClanId: true },
+          });
+          const targetClanIds = Array.from(
+            new Set([
+              ...memberships.map((m) => m.gymClanId),
+              ...(raid.gymClanId ? [raid.gymClanId] : []),
+            ])
+          );
+          for (const clanId of targetClanIds) {
+            await tx.gymClanSeason.upsert({
+              where: { gymClanId_seasonKey: { gymClanId: clanId, seasonKey } },
+              update: {
+                raidPoints: { increment: raidPointsDelta },
+                totalSeasonPoints: { increment: raidPointsDelta },
+              },
+              create: {
+                gymClanId: clanId,
+                seasonKey,
+                startsAt,
+                endsAt,
+                workoutPoints: 0,
+                raidPoints: raidPointsDelta,
+                arenaPoints: 0,
+                totalSeasonPoints: raidPointsDelta,
+              },
+            });
+          }
+        }
 
         return {
           ok: true as const,

@@ -119,12 +119,24 @@ export const TraderShopModal: React.FC<TraderShopModalProps> = ({
     [inventory]
   );
 
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = setTimeout(() => {
+      setFeedback(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [feedback]);
+
   const handleBuy = async (offer: TraderShopOffer) => {
     setBusyKey(offer.offerId);
     const res = await buyTraderOffer(offer.offerId, 1, rotationDateKey);
     setBusyKey(null);
     if (res.ok) {
-      setFeedback({ ok: true, text: res.message ?? `Bought ${offer.itemName}.` });
+      const msg =
+        res.message && res.message !== 'Purchase complete!'
+          ? res.message
+          : `Bought ${offer.itemName} for ${offer.buyPriceGold}g!`;
+      setFeedback({ ok: true, text: msg });
     } else {
       setFeedback({ ok: false, text: res.error ?? 'Could not complete purchase.' });
     }
@@ -255,12 +267,12 @@ export const TraderShopModal: React.FC<TraderShopModalProps> = ({
                         <RpgIcon
                           name="coin"
                           size={12}
-                          color={canAfford ? SURFACES.canvas : COLORS.textMuted}
+                          color={canAfford ? SURFACES.canvas : COLORS.textSecondary}
                         />
                         <Text
                           style={[
                             styles.buyBtnText,
-                            !canAfford && { color: COLORS.textMuted },
+                            !canAfford && { color: COLORS.textSecondary },
                           ]}
                         >
                           {isBusy ? '...' : `Buy ${offer.buyPriceGold}g`}
@@ -288,6 +300,7 @@ export const TraderShopModal: React.FC<TraderShopModalProps> = ({
                 const itemKey = item.inventoryItemId ?? item.slug;
                 const rarityColor = RARITY_COLORS[item.rarity] ?? COLORS.textSecondary;
                 const unitPrice = calculateTraderSellValue({
+                  baseGoldValue: item.goldValue,
                   itemSlug: item.baseSlug ?? item.slug,
                   tier: item.tier,
                   rarity: item.rarity,
@@ -375,6 +388,7 @@ const styles = StyleSheet.create({
     borderColor: SURFACES.hairlineStrong,
     maxWidth: 560,
     width: '100%',
+    height: '82%',
     maxHeight: '88%',
     alignSelf: 'center',
     gap: SPACING.sm,
@@ -549,7 +563,10 @@ const styles = StyleSheet.create({
     color: SURFACES.canvas,
   },
   btnDisabled: {
-    opacity: 0.45,
+    backgroundColor: SURFACES.layer3,
+    borderWidth: 1,
+    borderColor: SURFACES.hairlineStrong,
+    opacity: 0.85,
   },
   emptyBox: {
     alignItems: 'center',

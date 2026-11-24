@@ -24,6 +24,7 @@ import {
 
 export interface CombatLoadoutSelectorProps {
   compact?: boolean;
+  defaultCollapsed?: boolean;
   onJumpToTalents?: () => void;
 }
 
@@ -43,6 +44,7 @@ interface SkillCatalogItem {
 
 export const CombatLoadoutSelector: React.FC<CombatLoadoutSelectorProps> = ({
   compact = false,
+  defaultCollapsed = false,
   onJumpToTalents,
 }) => {
   const {
@@ -55,6 +57,7 @@ export const CombatLoadoutSelector: React.FC<CombatLoadoutSelectorProps> = ({
     equipBeltConsumableSlot,
   } = useGame();
 
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [pickingSkillSlot, setPickingSkillSlot] = useState<number | null>(null);
   const [pickingBeltSlot, setPickingBeltSlot] = useState<number | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -140,9 +143,30 @@ export const CombatLoadoutSelector: React.FC<CombatLoadoutSelectorProps> = ({
           ? `${equippedSkillCount}/4 Active Skills • ${equippedBeltCount}/4 Belt Slots`
           : 'Configure up to 4 unlocked Talent Active Skills and 4 Belt Consumables for Guild Quests.'
       }
+      rightAction={
+        compact ? (
+          <TouchableOpacity
+            style={styles.collapseToggleBtn}
+            onPress={() => setCollapsed((prev) => !prev)}
+            activeOpacity={0.78}
+            testID="combat-loadout-collapse-toggle"
+          >
+            <Text style={styles.collapseToggleText}>
+              {collapsed ? 'Configure' : 'Hide'}
+            </Text>
+            <RpgIcon
+              name={collapsed ? 'chevron-down' : 'chevron-up'}
+              size={12}
+              color={COLORS.gold}
+            />
+          </TouchableOpacity>
+        ) : undefined
+      }
       style={compact ? styles.compactSection : undefined}
     >
-      {statusError ? (
+      {!collapsed ? (
+        <>
+          {statusError ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{statusError}</Text>
           <Pressable onPress={() => setStatusError(null)} hitSlop={8}>
@@ -250,6 +274,8 @@ export const CombatLoadoutSelector: React.FC<CombatLoadoutSelectorProps> = ({
           );
         })}
       </View>
+        </>
+      ) : null}
 
       {/* Active Skill Picker Bottom Sheet */}
       <DisclosureBottomSheet
@@ -386,6 +412,22 @@ export const CombatLoadoutSelector: React.FC<CombatLoadoutSelectorProps> = ({
 const styles = StyleSheet.create({
   compactSection: {
     marginBottom: SPACING.md,
+  },
+  collapseToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: RADII.pill,
+    backgroundColor: SURFACES.layer2,
+    borderWidth: 1,
+    borderColor: SURFACES.goldHairline,
+  },
+  collapseToggleText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.gold,
   },
   errorBanner: {
     flexDirection: 'row',

@@ -195,6 +195,7 @@ import {
 } from '../api';
 import {
   buyTraderOfferApi,
+  claimSoloExpeditionApi,
   completeGuildQuestRunApi,
   completeOnboardingApi,
   craftRecipeApi,
@@ -248,6 +249,7 @@ export interface InventoryEntry {
   description?: string;
   rarity: LootDrop['rarity'];
   quantity: number;
+  goldValue?: number;
   itemType: EquipItemType;
   weaponHandedness?: 'ONE_HANDED' | 'TWO_HANDED';
   requiredStrength?: number;
@@ -305,8 +307,10 @@ export interface ActiveDungeonRunState {
   startedAtMs: number;
   resolvesAtMs: number;
   activeWorkoutBuffs: DungeonWorkoutBuff[];
-  status: 'ACTIVE_WINDOW' | 'COMPLETED';
+  status: 'ACTIVE_WINDOW' | 'REPLAYING' | 'COMPLETED';
   replay: DungeonCombatReplayResult | null;
+  goldShare?: number;
+  spoilsClaimed?: boolean;
 }
 
 export interface RaidBossState {
@@ -518,6 +522,7 @@ interface GameContextValue {
   syncGatheringTicks: () => Promise<void>;
   startDungeonExpedition: (selectedPartyIds: string[], dungeonSlug?: string) => { ok: boolean; error?: string };
   resolveActiveDungeonNow: () => void;
+  claimExpeditionSpoils: () => Promise<void>;
   dismissCompletedDungeonReplay: () => void;
   lockDailyRaidStrike: (raidId: string) => { ok: boolean; damage?: number; error?: string };
   resolveWeeklyRaidRewards: (raidId: string) => void;
@@ -986,12 +991,12 @@ const DEFAULT_GUILD_BOUNTIES: GuildBountyItem[] = [
   {
     slug: 'trial_of_iron',
     title: 'Rank-Up Trial: Copper -> Iron',
-    description: 'Log 3 workouts & clear a 24h Dungeon Expedition to advance to IRON Rank.',
+    description: 'Log 1 workout to unlock the Iron Promotion Trial and advance to IRON Rank.',
     isRankUpTrial: true,
     requiredRank: 'COPPER',
     unlocksRank: 'IRON',
-    goldReward: 350,
-    reputationReward: 250,
+    goldReward: 250,
+    reputationReward: 180,
     completed: false,
   },
   {
@@ -1191,6 +1196,12 @@ function mapServerInventoryItems(serverItems: unknown): InventoryEntry[] | null 
       description: itemObj?.description ?? knownMeta?.description,
       rarity: meta.rarity ?? itemObj?.rarity ?? 'COMMON',
       quantity: typeof raw.quantity === 'number' && raw.quantity > 0 ? raw.quantity : 1,
+      goldValue:
+        typeof itemObj?.goldValue === 'number'
+          ? itemObj.goldValue
+          : typeof meta.goldValue === 'number'
+            ? meta.goldValue
+            : undefined,
       itemType: itemObj?.itemType ?? knownMeta?.itemType ?? 'MATERIAL',
       weaponHandedness: itemObj?.weaponHandedness ?? knownMeta?.weaponHandedness,
       requiredStrength: itemObj?.requiredStrength ?? knownMeta?.requiredStrength ?? 0,
@@ -4516,16 +4527,25 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isSyncingGuildRunsRef.current = true;
     try {
       const grouped = new Map<string, QueuedOfflineGuildQuestRun[]>();
-      const fallbackCharId = activeCharacterIdRef.current ?? remoteCharacterIdRef.current;
+      const fallbackCharId =
+        (remoteCharacterIdRef.current && !remoteCharacterIdRef.current.startsWith('local_')
+          ? remoteCharacterIdRef.current
+          : null) ??
+        (activeCharacterIdRef.current && !activeCharacterIdRef.current.startsWith('local_')
+          ? activeCharacterIdRef.current
+          : null);
       for (const run of queue) {
-        const targetCharId = run.characterId ?? fallbackCharId;
+        const targetCharId =
+          run.characterId && !run.characterId.startsWith('local_')
+            ? run.characterId
+            : fallbackCharId;
         if (!targetCharId || targetCharId.startsWith('local_')) continue;
         const list = grouped.get(targetCharId) ?? [];
         list.push(run);
         grouped.set(targetCharId, list);
       }
 
-      const syncedIds = new Set<string>();
+      const clearedIds = new Set<string>();
       for (const [charId, runs] of grouped.entries()) {
         const res = await syncOfflineGuildQuestRunsApi({
           characterId: charId,
@@ -4534,14 +4554,23 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (res.ok) {
           setServerOnline(true);
           for (const r of runs) {
-            syncedIds.add(r.clientRunId);
+            clearedIds.add(r.clientRunId);
+          }
+        } else if (
+          res.statusCode === 400 ||
+          res.statusCode === 403 ||
+          res.statusCode === 404
+        ) {
+          // Prune unrecoverable runs (e.g. from deleted heroes or invalid payloads)
+          for (const r of runs) {
+            clearedIds.add(r.clientRunId);
           }
         }
       }
 
-      if (syncedIds.size > 0) {
+      if (clearedIds.size > 0) {
         const remaining = queuedOfflineGuildRunsRef.current.filter(
-          (r) => !syncedIds.has(r.clientRunId)
+          (r) => !clearedIds.has(r.clientRunId)
         );
         queuedOfflineGuildRunsRef.current = remaining;
         setQueuedOfflineGuildRuns(remaining);
@@ -5752,9 +5781,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         goldRef.current = nextGold;
         setGold(nextGold);
       }
+      let nextBelt = beltLoadoutRef.current;
+      if (Array.isArray(data?.beltLoadout)) {
+        nextBelt = [...data.beltLoadout, null, null, null, null]
+          .slice(0, 4)
+          .map((s) => (typeof s === 'string' && s.length > 0 ? s : null));
+        beltLoadoutRef.current = nextBelt;
+        setBeltLoadout(nextBelt);
+      }
       persistCurrentProfileUpdates({
         inventory: nextInv,
         gold: nextGold,
+        beltLoadout: nextBelt,
       });
     },
     [persistCurrentProfileUpdates]
@@ -5793,11 +5831,34 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ) {
       const res = await completeOnboardingApi(remoteCharId);
       if (res.ok && res.data) {
+        const granted = Boolean(res.data.welcomeGiftGranted ?? !alreadyCompleted);
         applyServerEconomySnapshot(res.data);
-        persistCurrentProfileUpdates({ guideOnboardingCompleted: true });
+        if (granted && !Array.isArray(res.data.inventoryItems)) {
+          addDropsToInventory([
+            {
+              itemSlug: 'sunleaf_healing_draught',
+              itemName: 'Sunleaf Healing Draught',
+              rarity: 'COMMON',
+              quantity: 1,
+            },
+          ]);
+        }
+        if (granted && !beltLoadoutRef.current.includes('sunleaf_healing_draught')) {
+          const nextBelt = [...beltLoadoutRef.current];
+          const emptyIdx = nextBelt.findIndex((s) => !s);
+          if (emptyIdx >= 0) {
+            nextBelt[emptyIdx] = 'sunleaf_healing_draught';
+            beltLoadoutRef.current = nextBelt;
+            setBeltLoadout(nextBelt);
+          }
+        }
+        persistCurrentProfileUpdates({
+          guideOnboardingCompleted: true,
+          beltLoadout: beltLoadoutRef.current,
+        });
         return {
           ok: true,
-          welcomeGiftGranted: Boolean(res.data.welcomeGiftGranted ?? !alreadyCompleted),
+          welcomeGiftGranted: granted,
         };
       }
     }
@@ -5812,9 +5873,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           quantity: 1,
         },
       ]);
+      if (!beltLoadoutRef.current.includes('sunleaf_healing_draught')) {
+        const nextBelt = [...beltLoadoutRef.current];
+        const emptyIdx = nextBelt.findIndex((s) => !s);
+        if (emptyIdx >= 0) {
+          nextBelt[emptyIdx] = 'sunleaf_healing_draught';
+          beltLoadoutRef.current = nextBelt;
+          setBeltLoadout(nextBelt);
+        }
+      }
       welcomeGiftGranted = true;
     }
-    persistCurrentProfileUpdates({ guideOnboardingCompleted: true });
+    persistCurrentProfileUpdates({
+      guideOnboardingCompleted: true,
+      beltLoadout: beltLoadoutRef.current,
+    });
     return { ok: true, welcomeGiftGranted };
   }, [
     addDropsToInventory,
@@ -6693,8 +6766,13 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           strengthLevel: stats.STRENGTH.level,
           enduranceLevel: stats.ENDURANCE.level,
           agilityLevel: stats.AGILITY.level,
+          dexLevel: stats.DEXTERITY.level,
+          conLevel: stats.CONSTITUTION.level,
+          wisLevel: stats.WISDOM.level,
+          sprLevel: stats.SPIRIT.level,
         },
         equipmentBonuses,
+        equipmentPrimaryStatBonuses: aggregatedEquipment.primaryStatBonuses,
         unlockedTalentRanks,
         systemicFatigueStacks: projectedFatigue.systemicFatigueStacks,
       };
@@ -6723,6 +6801,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [
       activeDungeonRun,
       adventurerRank,
+      aggregatedEquipment.primaryStatBonuses,
       characterName,
       equipmentBonuses,
       projectedFatigue.systemicFatigueStacks,
@@ -6732,24 +6811,77 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const resolveActiveDungeonNow = useCallback(() => {
-    if (!activeDungeonRun || activeDungeonRun.status === 'COMPLETED') return;
+    const currentRun = activeDungeonRunRef.current;
+    if (!currentRun || currentRun.status !== 'ACTIVE_WINDOW') return;
 
     const replay = simulateDungeonRun({
-      dungeon: activeDungeonRun.dungeon,
-      party: activeDungeonRun.party,
-      workoutBuffs: activeDungeonRun.activeWorkoutBuffs,
-      seed: activeDungeonRun.runId,
+      dungeon: currentRun.dungeon,
+      party: currentRun.party,
+      workoutBuffs: currentRun.activeWorkoutBuffs,
+      seed: currentRun.runId,
       tickIntervalMs: 250,
     });
 
-    const nextStats = statsRef.current;
-    statsRef.current = nextStats;
-    setStats(nextStats);
-
     const goldShare =
       replay.roomsCleared > 0 && replay.totalGoldEarned > 0
-        ? Math.round(replay.totalGoldEarned / activeDungeonRun.party.length)
+        ? Math.round(replay.totalGoldEarned / currentRun.party.length)
         : 0;
+
+    const nextRun: ActiveDungeonRunState = {
+      ...currentRun,
+      status: 'REPLAYING',
+      replay,
+      goldShare,
+      spoilsClaimed: false,
+    };
+    activeDungeonRunRef.current = nextRun;
+    setActiveDungeonRun(nextRun);
+  }, []);
+
+  const claimExpeditionSpoils = useCallback(async () => {
+    const currentRun = activeDungeonRunRef.current;
+    if (!currentRun || !currentRun.replay || currentRun.spoilsClaimed) return;
+
+    const replay = currentRun.replay;
+    const goldShare =
+      currentRun.goldShare ??
+      (replay.roomsCleared > 0 && replay.totalGoldEarned > 0
+        ? Math.round(replay.totalGoldEarned / currentRun.party.length)
+        : 0);
+
+    const claimedRun: ActiveDungeonRunState = {
+      ...currentRun,
+      status: 'COMPLETED',
+      spoilsClaimed: true,
+    };
+    activeDungeonRunRef.current = claimedRun;
+    setActiveDungeonRun(claimedRun);
+    setActivityState('IDLE');
+
+    const remoteCharId = remoteCharacterIdRef.current;
+    const companionIds = currentRun.party
+      .filter((member) => member.characterId !== 'player_hero')
+      .map((member) => member.characterId);
+
+    if (
+      serverOnline &&
+      isAuthenticated &&
+      remoteCharId &&
+      !remoteCharId.startsWith('local_')
+    ) {
+      const res = await claimSoloExpeditionApi(currentRun.dungeon.dungeonSlug, {
+        characterId: remoteCharId,
+        clientRunId: currentRun.runId,
+        companionIds,
+        activeWorkoutBuffs: currentRun.activeWorkoutBuffs,
+      });
+      if (res.ok && res.data) {
+        applyServerEconomySnapshot(res.data);
+        return;
+      }
+    }
+
+    // Offline fallback: apply gold and spoils locally
     const nextGold = goldRef.current + goldShare;
     goldRef.current = nextGold;
     setGold(nextGold);
@@ -6761,7 +6893,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (currentProfileRef.current) {
       const updatedProfile: PersistedCharacterProfile = {
         ...currentProfileRef.current,
-        stats: nextStats,
+        stats: statsRef.current,
         gold: nextGold,
         inventory: rawInventoryRef.current,
         lastSyncedAtMs: Date.now(),
@@ -6777,19 +6909,23 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         availableCharacters: nextAvail,
       });
     }
-
-    setActiveDungeonRun({
-      ...activeDungeonRun,
-      status: 'COMPLETED',
-      replay,
-    });
-    setActivityState('IDLE');
-  }, [activeDungeonRun, addDropsToInventory, persistBundleSnapshot]);
+  }, [
+    addDropsToInventory,
+    applyServerEconomySnapshot,
+    isAuthenticated,
+    persistBundleSnapshot,
+    serverOnline,
+  ]);
 
   const dismissCompletedDungeonReplay = useCallback(() => {
+    const currentRun = activeDungeonRunRef.current;
+    if (currentRun && currentRun.replay && !currentRun.spoilsClaimed) {
+      void claimExpeditionSpoils();
+    }
+    activeDungeonRunRef.current = null;
     setActiveDungeonRun(null);
     setActivityState('IDLE');
-  }, []);
+  }, [claimExpeditionSpoils]);
 
   const lockDailyRaidStrike = useCallback(
     (raidId: string) => {
@@ -6811,32 +6947,63 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
       const support = Math.round(stats.ENDURANCE.level * 1_600);
 
+      const activeCharId = activeCharacterIdRef.current;
+      const remoteCharId = remoteCharacterIdRef.current;
+      const resolvedCharId = remoteCharId ?? activeCharId ?? 'player_hero';
+      const heroDisplayName = characterName || 'Adventurer';
+
       setRaids((prev) =>
         prev.map((r) => {
           if (r.id !== raidId) return r;
+          const matchesHero = (pid: string) =>
+            pid === 'player_hero' ||
+            (Boolean(activeCharId) && pid === activeCharId) ||
+            (Boolean(remoteCharId) && pid === remoteCharId);
+          const alreadyListed = r.participants.some((p) => matchesHero(p.characterId));
+          const updatedParticipants = alreadyListed
+            ? r.participants.map((p) =>
+                matchesHero(p.characterId)
+                  ? {
+                      ...p,
+                      name: heroDisplayName,
+                      combatDamageDealt: p.combatDamageDealt + damage,
+                      supportScore: p.supportScore + support,
+                    }
+                  : p
+              )
+            : [
+                ...r.participants,
+                {
+                  characterId: resolvedCharId,
+                  name: heroDisplayName,
+                  combatDamageDealt: damage,
+                  workoutEnergyDamage: 0,
+                  supportScore: support,
+                },
+              ];
+
+          updatedParticipants.sort(
+            (a, b) =>
+              b.combatDamageDealt +
+              b.workoutEnergyDamage +
+              b.supportScore -
+              (a.combatDamageDealt + a.workoutEnergyDamage + a.supportScore)
+          );
+
           return {
             ...r,
             currentHp: Math.max(0, r.currentHp - damage),
             dailyAttackUsedToday: true,
-            participants: r.participants.map((p) =>
-              p.characterId === 'player_hero'
-                ? {
-                    ...p,
-                    combatDamageDealt: p.combatDamageDealt + damage,
-                    supportScore: p.supportScore + support,
-                  }
-                : p
-            ),
+            participants: updatedParticipants,
           };
         })
       );
 
       // If online, dispatch attack to backend to trigger DB sync & live WebSocket broadcast
-      const charId = remoteCharacterIdRef.current;
-      if (serverOnline && charId) {
+      if (serverOnline && remoteCharId && !remoteCharId.startsWith('local_')) {
         apiFetch(`/api/raids/${raidId}/attack`, {
           method: 'POST',
-          body: JSON.stringify({ characterId: charId }),
+          body: JSON.stringify({ characterId: remoteCharId }),
         }).catch(() => {
           // Graceful offline fallback
         });
@@ -6844,13 +7011,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return { ok: true, damage };
     },
-    [aggregatedTalents, raids, serverOnline, stats]
+    [aggregatedTalents, characterName, raids, serverOnline, stats]
   );
 
   const resolveWeeklyRaidRewards = useCallback(
     (raidId: string) => {
       const target = raids.find((r) => r.id === raidId);
       if (!target || target.lastResolution) return;
+      if (target.currentHp > 0 && Date.now() < target.endsAtMs) return;
 
       const resolution = calculateRaidRewards({
         raidInstanceId: target.id,
@@ -6936,10 +7104,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!bounty) return { ok: false, error: 'Bounty not found.' };
         if (bounty.completed) return { ok: false, error: 'Already completed.' };
 
-        if (bounty.slug === 'trial_of_iron' && workoutsLoggedCount < 3) {
+        if (bounty.slug === 'trial_of_iron' && workoutsLoggedCount < 1) {
           return {
             ok: false,
-            error: `Log at least 3 total workouts first (currently ${workoutsLoggedCount}/3).`,
+            error: `Log at least 1 workout first (currently ${workoutsLoggedCount}/1).`,
           };
         }
 
@@ -6948,7 +7116,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const totalLvl =
           (currentStats.STRENGTH?.level ?? 1) +
           (currentStats.ENDURANCE?.level ?? 1) +
-          (currentStats.AGILITY?.level ?? 1);
+          (currentStats.AGILITY?.level ?? 1) +
+          (currentStats.DEXTERITY?.level ?? 1) +
+          (currentStats.CONSTITUTION?.level ?? 1) +
+          (currentStats.WISDOM?.level ?? 1) +
+          (currentStats.SPIRIT?.level ?? 1);
         if (bounty.slug === 'trial_of_bronze') {
           if (currentRank === 'COPPER') {
             return { ok: false, error: 'Complete the Iron Rank-Up Trial first.' };
@@ -8412,6 +8584,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     syncGatheringTicks,
     startDungeonExpedition,
     resolveActiveDungeonNow,
+    claimExpeditionSpoils,
     dismissCompletedDungeonReplay,
     lockDailyRaidStrike,
     resolveWeeklyRaidRewards,

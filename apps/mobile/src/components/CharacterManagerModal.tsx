@@ -774,8 +774,8 @@ export const CharacterManagerModal: React.FC<CharacterManagerModalProps> = ({
         {/* Unmuscled Level-1 & Pure Cosmetic Note */}
         <View style={styles.cosmeticNoteBox}>
           <Text style={styles.cosmeticNoteText}>
-            💡 <Text style={{ fontWeight: '800', color: COLORS.gold }}>All heroes begin unmuscled at Level 1.</Text>{' '}
-            Races and identity traits are purely cosmetic. Physique hypertrophy, Oni horns, Kitsune tails (1–9), and energy auras unlock organically as you train your 7 stats.
+            💡 <Text style={{ fontWeight: '800', color: COLORS.gold }}>All combat rigs start at Baseline Tier 0.</Text>{' '}
+            Races and identity traits are purely cosmetic. Physique morphs, Oni horns, Kitsune tails (1–9), and energy auras unlock organically as you train your 7 stats.
           </Text>
         </View>
 

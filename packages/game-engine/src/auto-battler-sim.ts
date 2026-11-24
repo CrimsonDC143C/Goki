@@ -670,9 +670,18 @@ export function simulateDungeonRun(input: SimulateDungeonInput): DungeonCombatRe
       break;
     }
 
+    const roomTypeLabel =
+      room.roomType === 'HAZARD_EVENT'
+        ? 'Hazard'
+        : room.roomType === 'MOB_ENCOUNTER'
+          ? 'Combat'
+          : room.roomType === 'LOOT_CHEST'
+            ? 'Treasure'
+            : 'Boss';
+
     pushEvent(room.roomNumber, {
       type: 'ROOM_ENTER',
-      message: `Entered Room ${room.roomNumber}: ${room.roomName} [${room.roomType}].`,
+      message: `Entered Room ${room.roomNumber}: ${room.roomName} (${roomTypeLabel}).`,
     });
 
     // Apply Sanctuary Mist between-room heal (for Room 2+) & reset opening-strike flags + Juggernaut room shields

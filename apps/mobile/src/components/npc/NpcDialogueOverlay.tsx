@@ -140,7 +140,7 @@ export const NpcDialogueOverlay: React.FC<NpcDialogueOverlayProps> = ({
                   <View
                     style={[
                       StyleSheet.absoluteFill,
-                      { backgroundColor: sceneArt.scrimColors[1], opacity: 0.82 },
+                      { backgroundColor: '#0B0F18', opacity: 0.9 },
                     ]}
                   />
                 </>
@@ -164,7 +164,7 @@ export const NpcDialogueOverlay: React.FC<NpcDialogueOverlayProps> = ({
             </View>
 
             <View style={styles.identityCol}>
-              <Text style={[styles.npcRoleEyebrow, { color: meta.accentColor }]} numberOfLines={1}>
+              <Text style={[styles.npcRoleEyebrow, { color: meta.accentColor }]} numberOfLines={2}>
                 {resolvedTitle}
               </Text>
               <Text style={styles.npcName} numberOfLines={1}>
@@ -283,14 +283,14 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: SURFACES.scrim,
+    backgroundColor: 'rgba(4, 7, 13, 0.84)',
   },
   card: {
-    backgroundColor: SURFACES.layer2,
+    backgroundColor: '#0E131E',
     borderRadius: RADII.xl,
     padding: SPACING.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: SURFACES.hairlineStrong,
+    borderWidth: 1,
+    borderColor: SURFACES.hairlineStrong,
     maxWidth: 520,
     width: '100%',
     alignSelf: 'center',

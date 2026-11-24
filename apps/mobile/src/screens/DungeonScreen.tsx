@@ -17,6 +17,7 @@ export const DungeonScreen: React.FC = () => {
     isLiveSyncConnected,
     startDungeonExpedition,
     resolveActiveDungeonNow,
+    claimExpeditionSpoils,
     dismissCompletedDungeonReplay,
   } = useGame();
 
@@ -198,10 +199,16 @@ export const DungeonScreen: React.FC = () => {
         <Pressable
           style={[
             styles.launchBtn,
-            (activeDungeonRun?.status === 'ACTIVE_WINDOW' || !isSelectedUnlocked) &&
+            (activeDungeonRun?.status === 'ACTIVE_WINDOW' ||
+              activeDungeonRun?.status === 'REPLAYING' ||
+              !isSelectedUnlocked) &&
               styles.btnDisabled,
           ]}
-          disabled={activeDungeonRun?.status === 'ACTIVE_WINDOW' || !isSelectedUnlocked}
+          disabled={
+            activeDungeonRun?.status === 'ACTIVE_WINDOW' ||
+            activeDungeonRun?.status === 'REPLAYING' ||
+            !isSelectedUnlocked
+          }
           onPress={() => {
             const res = startDungeonExpedition(selectedAllies, selectedDungeon.dungeonSlug);
             if (!res.ok) setErrorMsg(res.error ?? null);
@@ -212,7 +219,8 @@ export const DungeonScreen: React.FC = () => {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <RpgIcon
               name={
-                activeDungeonRun?.status === 'ACTIVE_WINDOW'
+                activeDungeonRun?.status === 'ACTIVE_WINDOW' ||
+                activeDungeonRun?.status === 'REPLAYING'
                   ? 'watch'
                   : !isSelectedUnlocked
                   ? 'lock'
@@ -220,7 +228,9 @@ export const DungeonScreen: React.FC = () => {
               }
               size={15}
               color={
-                activeDungeonRun?.status === 'ACTIVE_WINDOW' || !isSelectedUnlocked
+                activeDungeonRun?.status === 'ACTIVE_WINDOW' ||
+                activeDungeonRun?.status === 'REPLAYING' ||
+                !isSelectedUnlocked
                   ? COLORS.textMuted
                   : '#0B0E14'
               }
@@ -228,17 +238,21 @@ export const DungeonScreen: React.FC = () => {
             <Text
               style={[
                 styles.launchBtnText,
-                (activeDungeonRun?.status === 'ACTIVE_WINDOW' || !isSelectedUnlocked) &&
+                (activeDungeonRun?.status === 'ACTIVE_WINDOW' ||
+                  activeDungeonRun?.status === 'REPLAYING' ||
+                  !isSelectedUnlocked) &&
                   styles.btnDisabledText,
               ]}
             >
               {activeDungeonRun?.status === 'ACTIVE_WINDOW'
                 ? '24-Hour Expedition Window Active'
-                : !isSelectedUnlocked
-                  ? `Locked — Requires ${selectedDungeon.requiredRank} Adventurer Rank`
-                  : `Lock In 24-Hour Run (${1 + selectedAllies.length} Player${
-                      selectedAllies.length > 0 ? 's' : ' Solo'
-                    })`}
+                : activeDungeonRun?.status === 'REPLAYING'
+                  ? 'Auto-Battler Replay In Progress...'
+                  : !isSelectedUnlocked
+                    ? `Locked — Requires ${selectedDungeon.requiredRank} Adventurer Rank`
+                    : `Lock In 24-Hour Run (${1 + selectedAllies.length} Player${
+                        selectedAllies.length > 0 ? 's' : ' Solo'
+                      })`}
             </Text>
           </View>
         </Pressable>
@@ -251,6 +265,8 @@ export const DungeonScreen: React.FC = () => {
           replay={activeDungeonRun.replay}
           activeWorkoutBuffs={activeDungeonRun.activeWorkoutBuffs}
           party={activeDungeonRun.party}
+          playerGoldShare={activeDungeonRun.goldShare}
+          onClaimSpoils={claimExpeditionSpoils}
           onDismiss={dismissCompletedDungeonReplay}
         />
       )}

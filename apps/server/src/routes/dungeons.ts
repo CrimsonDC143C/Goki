@@ -1,5 +1,11 @@
 import { PrismaClient } from '@goki/database';
-import { MS_PER_HOUR } from '@goki/game-engine';
+import {
+  CombatantCharacterInput,
+  DEFAULT_DUNGEON_CATALOG,
+  DungeonWorkoutBuff,
+  MS_PER_HOUR,
+  simulateDungeonRun,
+} from '@goki/game-engine';
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { env } from '../config';
@@ -7,9 +13,57 @@ import { assertCharacterActiveAndOwned, requireAuth } from '../middleware/auth';
 import { GameTimerScheduler } from '../queues/bullmq-workers';
 import {
   buildCharacterCombatSnapshot,
+  depositLootToInventory,
   resolveDungeonRunOperation,
+  withDbTransaction,
 } from '../services/game-operations';
 import { WebSocketManager, websocketManager } from '../services/websocket-manager';
+
+const AI_EXPEDITION_COMPANIONS: Readonly<Record<string, CombatantCharacterInput>> = {
+  ally_lyra: {
+    characterId: 'ally_lyra',
+    name: 'Lyra (Guild Warden)',
+    coreStats: { strengthLevel: 4, enduranceLevel: 9, agilityLevel: 6 },
+    equipmentBonuses: { maxHp: 75, maxStamina: 40, armorRating: 14 },
+    unlockedTalentRanks: {
+      war_deep_lungs: 3,
+      war_renewal_aura: 2,
+      war_second_wind_hymn: 1,
+      out_trailblazer: 2,
+    },
+  },
+  ally_kaelen: {
+    characterId: 'ally_kaelen',
+    name: 'Kaelen (Guild Assassin)',
+    coreStats: { strengthLevel: 6, enduranceLevel: 5, agilityLevel: 10 },
+    equipmentBonuses: { meleePower: 26, critChance: 0.08, attackSpeedPct: 0.12 },
+    unlockedTalentRanks: {
+      ass_shadowstep_reflexes: 3,
+      ass_ambush_lethality: 2,
+      ass_phantom_strike: 1,
+    },
+  },
+  ally_torin: {
+    characterId: 'ally_torin',
+    name: 'Torin (Guild Vanguard)',
+    coreStats: { strengthLevel: 10, enduranceLevel: 7, agilityLevel: 4 },
+    equipmentBonuses: { meleePower: 30, armorRating: 20 },
+    unlockedTalentRanks: {
+      van_heavy_handed: 3,
+      van_sundering_strikes: 2,
+      van_colossus_cleave: 1,
+    },
+  },
+};
+
+const claimedClientExpeditions = new Set<string>();
+
+const claimClientExpeditionSchema = z.object({
+  characterId: z.string().min(1),
+  clientRunId: z.string().min(1).max(160),
+  companionIds: z.array(z.string()).max(4).optional().default([]),
+  activeWorkoutBuffs: z.array(z.any()).optional().default([]),
+});
 
 const createRunSchema = z.object({
   leaderCharacterId: z.string(),
@@ -332,4 +386,105 @@ export function registerDungeonRoutes(
 
     return reply.send({ replay });
   });
+
+  // Authoritatively simulate and persist solo/AI-companion 24h Expedition spoils to DB
+  app.post(
+    '/api/dungeons/:dungeonSlug/claim-expedition',
+    { preHandler: [requireAuth] },
+    async (request, reply) => {
+      const { dungeonSlug } = z.object({ dungeonSlug: z.string().min(1) }).parse(request.params);
+      const body = claimClientExpeditionSchema.parse(request.body ?? {});
+      await assertCharacterActiveAndOwned(db, body.characterId, request.user.userId);
+
+      const dungeonDef =
+        DEFAULT_DUNGEON_CATALOG.find((d) => d.dungeonSlug === dungeonSlug) ??
+        DEFAULT_DUNGEON_CATALOG[0];
+      if (!dungeonDef) {
+        return reply.status(404).send({ error: `Dungeon '${dungeonSlug}' not found.` });
+      }
+
+      const dedupeKey = `${body.characterId}:${body.clientRunId}`;
+      const txResult = await withDbTransaction(
+        db,
+        async (tx) => {
+          const character = await tx.character.findUnique({ where: { id: body.characterId } });
+          if (!character) {
+            return { ok: false as const, statusCode: 404, error: 'Character not found.' };
+          }
+
+          const heroSnapshot = await buildCharacterCombatSnapshot(tx, body.characterId);
+          const companionParty = body.companionIds
+            .map((cid) => AI_EXPEDITION_COMPANIONS[cid])
+            .filter((c): c is CombatantCharacterInput => Boolean(c))
+            .slice(0, 4);
+          const party: CombatantCharacterInput[] = [heroSnapshot, ...companionParty];
+
+          const replay = simulateDungeonRun({
+            dungeon: dungeonDef,
+            party,
+            workoutBuffs: (body.activeWorkoutBuffs as DungeonWorkoutBuff[]) ?? [],
+            seed: body.clientRunId,
+            tickIntervalMs: 250,
+          });
+
+          const goldAwarded =
+            replay.roomsCleared > 0 && replay.totalGoldEarned > 0
+              ? Math.round(replay.totalGoldEarned / party.length)
+              : 0;
+
+          if (claimedClientExpeditions.has(dedupeKey)) {
+            const existingInventory = await tx.inventoryItem.findMany({
+              where: { characterId: body.characterId },
+              include: { item: true },
+            });
+            return {
+              ok: true as const,
+              alreadyClaimed: true,
+              replay,
+              goldAwarded: 0,
+              remainingGold: character.gold,
+              inventoryItems: existingInventory,
+            };
+          }
+
+          claimedClientExpeditions.add(dedupeKey);
+
+          if (replay.roomsCleared > 0 && replay.lootDrops.length > 0) {
+            for (const drop of replay.lootDrops) {
+              await depositLootToInventory(tx, body.characterId, drop);
+            }
+          }
+
+          const updatedChar = await tx.character.update({
+            where: { id: body.characterId },
+            data: {
+              ...(goldAwarded > 0 ? { gold: { increment: goldAwarded } } : {}),
+              activityState: 'IDLE',
+            },
+          });
+
+          const inventoryItems = await tx.inventoryItem.findMany({
+            where: { characterId: body.characterId },
+            include: { item: true },
+          });
+
+          return {
+            ok: true as const,
+            alreadyClaimed: false,
+            replay,
+            goldAwarded,
+            remainingGold: updatedChar.gold,
+            inventoryItems,
+          };
+        },
+        `expedition-claim:${dedupeKey}`
+      );
+
+      if (!txResult.ok) {
+        return reply.status(txResult.statusCode).send({ error: txResult.error });
+      }
+
+      return reply.send(txResult);
+    }
+  );
 }

@@ -271,14 +271,14 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
       <View style={styles.selectedStatSummaryCard}>
         <View style={styles.selectedStatSummaryRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.selectedStatSummaryTitle} numberOfLines={1}>
+            <Text style={styles.selectedStatSummaryTitle} numberOfLines={2}>
               <Text style={{ color: statColor(selectedStat), fontWeight: '900' }}>
                 {selectedStat}
               </Text>{' '}
-              Lv.{currentStatObj.level} — {currentStatObj.xp}/{nextReq} XP —{' '}
+              Lv.{currentStatObj.level} • {currentStatObj.xp}/{nextReq} XP •{' '}
               <Text style={{ color: COLORS.gold, fontWeight: '900' }}>
-                {currentStatObj.pointsAvailable} Talent Pt
-                {currentStatObj.pointsAvailable === 1 ? '' : 's'} Available
+                {currentStatObj.pointsAvailable} pt
+                {currentStatObj.pointsAvailable === 1 ? '' : 's'}
               </Text>
             </Text>
             <View style={styles.selectedStatXpTrack}>
@@ -364,7 +364,7 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
         </View>
       )}
 
-      <CombatLoadoutSelector compact />
+      <CombatLoadoutSelector compact defaultCollapsed />
 
       {/* 2. Archetype Sub-Tabs & Active Tree Header */}
       <View style={styles.treeSectionHeader}>
@@ -738,37 +738,48 @@ export const TalentBuilderScreen: React.FC<TalentBuilderScreenProps> = ({
                     )}
                   </View>
 
-                  <Pressable
-                    style={[
-                      styles.spendPointBtn,
-                      (!validation.valid || !progressionUnlocked || isMaxed) &&
-                        styles.spendPointBtnDisabled,
-                      isMaxed && styles.spendPointBtnMaxed,
-                    ]}
-                    onPress={() => handleSpendPoint(activeSelectedNode.id)}
-                    disabled={!validation.valid || !progressionUnlocked || isMaxed}
-                    testID="talent-spend-point-btn"
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                      <RpgIcon
-                        name={!progressionUnlocked ? 'lock' : isMaxed ? 'trophy' : 'sparkles'}
-                        size={13}
-                        color={isMaxed ? COLORS.gold : !progressionUnlocked ? COLORS.textMuted : '#111620'}
-                      />
-                      <Text
+                  {(() => {
+                    const isSpendDisabled = !validation.valid || !progressionUnlocked || isMaxed;
+                    return (
+                      <Pressable
                         style={[
-                          styles.spendPointBtnText,
-                          isMaxed && styles.spendPointBtnTextMaxed,
+                          styles.spendPointBtn,
+                          isSpendDisabled && styles.spendPointBtnDisabled,
+                          isMaxed && styles.spendPointBtnMaxed,
                         ]}
+                        onPress={() => handleSpendPoint(activeSelectedNode.id)}
+                        disabled={isSpendDisabled}
+                        testID="talent-spend-point-btn"
                       >
-                        {!progressionUnlocked
-                          ? 'Workout Focus'
-                          : isMaxed
-                          ? 'MAXED'
-                          : `Spend ${activeSelectedNode.pointCostPerRank} Pt (+1)`}
-                      </Text>
-                    </View>
-                  </Pressable>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                          <RpgIcon
+                            name={!progressionUnlocked ? 'lock' : isMaxed ? 'trophy' : 'sparkles'}
+                            size={13}
+                            color={
+                              isMaxed
+                                ? COLORS.gold
+                                : isSpendDisabled
+                                  ? COLORS.textSecondary
+                                  : '#111620'
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.spendPointBtnText,
+                              isSpendDisabled && !isMaxed && styles.spendPointBtnTextDisabled,
+                              isMaxed && styles.spendPointBtnTextMaxed,
+                            ]}
+                          >
+                            {!progressionUnlocked
+                              ? 'Workout Focus'
+                              : isMaxed
+                              ? 'MAXED'
+                              : `Spend ${activeSelectedNode.pointCostPerRank} Pt (+1)`}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })()}
                 </View>
               </>
             );
@@ -1227,7 +1238,9 @@ const styles = StyleSheet.create({
   },
   spendPointBtnDisabled: {
     backgroundColor: COLORS.bgElevated,
-    opacity: 0.6,
+    borderWidth: 1,
+    borderColor: CRIMSON_ONI.border,
+    opacity: 0.85,
   },
   spendPointBtnMaxed: {
     backgroundColor: '#1E3A2B',
@@ -1239,6 +1252,9 @@ const styles = StyleSheet.create({
     color: CRIMSON_ONI.charcoalDeep,
     fontSize: 11,
     fontWeight: '900',
+  },
+  spendPointBtnTextDisabled: {
+    color: COLORS.textSecondary,
   },
   spendPointBtnTextMaxed: {
     color: '#6EE7B7',

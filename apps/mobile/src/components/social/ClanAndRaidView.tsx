@@ -51,8 +51,8 @@ export const ClanAndRaidView: React.FC<ClanAndRaidViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [submitName, setSubmitName] = useState('');
   const [submitCity, setSubmitCity] = useState('');
-  const [submitLat, setSubmitLat] = useState('37.7749');
-  const [submitLon, setSubmitLon] = useState('-122.4194');
+  const [submitLat, setSubmitLat] = useState('');
+  const [submitLon, setSubmitLon] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmitVenue = () => {
@@ -61,8 +61,12 @@ export const ClanAndRaidView: React.FC<ClanAndRaidViewProps> = ({
       setFormError('Enter a gym name (at least 2 characters).');
       return;
     }
-    const parsedLat = Number(submitLat);
-    const parsedLon = Number(submitLon);
+    if (!submitLat.trim() || !submitLon.trim()) {
+      setFormError('Enter both Latitude and Longitude coordinates.');
+      return;
+    }
+    const parsedLat = Number(submitLat.trim());
+    const parsedLon = Number(submitLon.trim());
     if (!Number.isFinite(parsedLat) || parsedLat < -90 || parsedLat > 90) {
       setFormError('Latitude must be between -90 and 90.');
       return;
@@ -280,24 +284,30 @@ export const ClanAndRaidView: React.FC<ClanAndRaidViewProps> = ({
             />
           </View>
           <View style={styles.formRow}>
-            <TextInput
-              style={styles.inputFlex}
-              value={submitLat}
-              onChangeText={setSubmitLat}
-              placeholder="Latitude"
-              placeholderTextColor={COLORS.textMuted}
-              keyboardType="numeric"
-              testID="gym-submit-lat-input"
-            />
-            <TextInput
-              style={styles.inputFlex}
-              value={submitLon}
-              onChangeText={setSubmitLon}
-              placeholder="Longitude"
-              placeholderTextColor={COLORS.textMuted}
-              keyboardType="numeric"
-              testID="gym-submit-lon-input"
-            />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.fieldLabel}>Latitude</Text>
+              <TextInput
+                style={styles.inputFlex}
+                value={submitLat}
+                onChangeText={setSubmitLat}
+                placeholder="e.g. 37.7749"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="numeric"
+                testID="gym-submit-lat-input"
+              />
+            </View>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={styles.fieldLabel}>Longitude</Text>
+              <TextInput
+                style={styles.inputFlex}
+                value={submitLon}
+                onChangeText={setSubmitLon}
+                placeholder="e.g. -122.4194"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="numeric"
+                testID="gym-submit-lon-input"
+              />
+            </View>
           </View>
           {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
           <TouchableOpacity
@@ -533,6 +543,12 @@ const styles = StyleSheet.create({
   subFormHeading: {
     ...TYPOGRAPHY.eyebrow,
     marginBottom: SPACING.sm,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    letterSpacing: 0.3,
   },
   formGrid: {
     gap: SPACING.sm,

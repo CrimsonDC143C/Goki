@@ -468,8 +468,11 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
 
               <View style={styles.metricCell}>
                 <Text style={styles.metricLabel}>YIELD PER STEP</Text>
-                <Text style={styles.metricPrimaryValue}>
-                  {tickCalc.yieldPerTick}x {primaryItemName.split(' ')[0]}
+                <Text style={styles.metricPrimaryValue} numberOfLines={2}>
+                  {tickCalc.yieldPerTick}x{' '}
+                  {primaryItemName
+                    .replace(/^Rich\s+/i, '')
+                    .replace(/\s+(Cluster|Bundle)$/i, '')}
                 </Text>
                 <Text style={styles.metricSub}>+{tickCalc.xpPerTick} XP per step</Text>
               </View>
@@ -492,10 +495,26 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
                   />
                 )}
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.summaryText}>
-                    🗡️ You will complete <Text style={styles.summaryHighlight}>{projection.totalSteps} steps</Text> over{' '}
-                    <Text style={styles.summaryHighlight}>{formatDurationSummary(effectiveDurationMs)}</Text>.
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <RpgIcon
+                      name={
+                        selectedNode.professionType === 'MINING'
+                          ? 'prof-mining'
+                          : selectedNode.professionType === 'FORAGING'
+                            ? 'prof-foraging'
+                            : selectedNode.professionType === 'SMELTING'
+                              ? 'prof-smelting'
+                              : 'prof-alchemy'
+                      }
+                      size={14}
+                      color={COLORS.gold}
+                    />
+                    <Text style={[styles.summaryText, { flex: 1 }]}>
+                      You will complete{' '}
+                      <Text style={styles.summaryHighlight}>{projection.totalSteps} steps</Text> over{' '}
+                      <Text style={styles.summaryHighlight}>{formatDurationSummary(effectiveDurationMs)}</Text>.
+                    </Text>
+                  </View>
                   <Text style={styles.summaryYieldSub}>
                     Projected Gain: ~{projection.totalYield}x {primaryItemName} • {projection.totalSteps * tickCalc.xpPerTick} XP
                   </Text>
@@ -792,12 +811,29 @@ export const GatheringNodeScreen: React.FC<GatheringNodeScreenProps> = ({
               return (
                 <View key={item.slug} style={styles.satchelRow}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                    {iconSrc && (
+                    {iconSrc ? (
                       <ExpoImage
                         source={iconSrc as any}
                         style={styles.satchelItemIcon}
                         contentFit="cover"
                       />
+                    ) : (
+                      <View
+                        style={[
+                          styles.satchelItemIcon,
+                          {
+                            backgroundColor: SURFACES.layer2,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          },
+                        ]}
+                      >
+                        <RpgIcon
+                          name={item.itemType === 'CONSUMABLE' ? 'prof-alchemy' : 'anvil'}
+                          size={15}
+                          color={RARITY_COLORS[item.rarity] ?? COLORS.gold}
+                        />
+                      </View>
                     )}
                     <Text style={[styles.satchelName, { color: RARITY_COLORS[item.rarity] ?? CRIMSON_ONI.ghostWhite }]}>
                       {item.name}

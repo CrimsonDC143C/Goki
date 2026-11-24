@@ -1,5 +1,8 @@
 import { PrismaClient } from '@goki/database';
 import {
+  BASE_EQUIPPABLE_ITEM_BY_SLUG,
+  COMBAT_CONSUMABLE_BY_SLUG,
+  CRAFTING_MATERIAL_BY_SLUG,
   CharacterCustomizationConfig,
   CharacterRace,
   CombatantCharacterInput,
@@ -83,14 +86,43 @@ export async function depositLootToInventory(
 
   let item = await db.item.findUnique({ where: { slug: drop.itemSlug } });
   if (!item) {
+    const matDef = CRAFTING_MATERIAL_BY_SLUG[drop.itemSlug];
+    const consumableDef = COMBAT_CONSUMABLE_BY_SLUG[drop.itemSlug];
+    const baseEquipDef = BASE_EQUIPPABLE_ITEM_BY_SLUG[drop.baseSlug ?? drop.itemSlug];
+    const fallbackGoldByRarity: Record<string, number> = {
+      COMMON: 15,
+      UNCOMMON: 35,
+      RARE: 85,
+      EPIC: 180,
+      LEGENDARY: 380,
+      MYTHIC: 700,
+    };
+    const resolvedItemType = consumableDef
+      ? 'CONSUMABLE'
+      : baseEquipDef
+        ? (baseEquipDef.itemType as any)
+        : 'CRAFTING_MATERIAL';
+    const resolvedGoldValue =
+      matDef?.goldValue ??
+      consumableDef?.goldValue ??
+      baseEquipDef?.baseGoldValue ??
+      fallbackGoldByRarity[drop.rarity] ??
+      15;
+    const resolvedStackable = !baseEquipDef;
+
     item = await db.item.create({
       data: {
         slug: drop.itemSlug,
         name: drop.itemName,
-        description: `Reward item: ${drop.itemName}`,
-        itemType: 'CRAFTING_MATERIAL',
+        description:
+          matDef?.description ??
+          consumableDef?.description ??
+          baseEquipDef?.description ??
+          `Reward item: ${drop.itemName}`,
+        itemType: resolvedItemType,
         rarity: drop.rarity,
-        stackable: true,
+        goldValue: resolvedGoldValue,
+        stackable: resolvedStackable,
         statBonuses: {},
       },
     });

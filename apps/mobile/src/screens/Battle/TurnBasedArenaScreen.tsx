@@ -37,6 +37,7 @@ import {
   type RigAnimationState,
 } from '../../components/character';
 import { RpgIcon } from '../../components/icons/RpgIcon';
+import { useGame } from '../../state/GameContext';
 import { COLORS, RADII, SPACING, SURFACES, TYPOGRAPHY } from '../../theme';
 
 export interface TurnBasedArenaCoopSession {
@@ -172,6 +173,7 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
   onComplete,
   onRetreat,
 }) => {
+  const { beltLoadout: equippedBeltSlugs } = useGame();
   const [state, setState] = useState<TurnBasedCombatState>(
     coopSession?.serverState ?? initialState
   );
@@ -610,13 +612,19 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
                       {isSelected ? '◎ ' : ''}
                       {enemy.name}
                     </Text>
-                    <View style={styles.hpBarTrack}>
-                      <View style={[styles.hpBarFillEnemy, { width: `${hpPct}%` }]} />
-                    </View>
-                    <Text style={styles.hpBarValue}>
-                      {enemy.hp}/{enemy.maxHp}
-                      {enemy.shield > 0 ? ` (+${enemy.shield})` : ''}
-                    </Text>
+                    {enemy.alive ? (
+                      <>
+                        <View style={styles.hpBarTrack}>
+                          <View style={[styles.hpBarFillEnemy, { width: `${hpPct}%` }]} />
+                        </View>
+                        <Text style={styles.hpBarValue}>
+                          {enemy.hp}/{enemy.maxHp}
+                          {enemy.shield > 0 ? ` (+${enemy.shield})` : ''}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={styles.defeatedBadgeText}>DEFEATED</Text>
+                    )}
                     {enemy.statuses.length > 0 ? (
                       <View style={styles.statusRow}>
                         {enemy.statuses.slice(0, 3).map((st, sIdx) => (
@@ -696,12 +704,26 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
         ) : null}
 
         {state.status === 'IN_PROGRESS' ? (
-          isPlayerTurn && heroUnit ? (
+          heroUnit ? (
             <View style={styles.commandsWrap}>
+              {!isPlayerTurn ? (
+                <View style={styles.aiTurnBanner} testID="arena-waiting-turn-banner">
+                  <RpgIcon name="sparkles" size={14} color={COLORS.gold} />
+                  <Text style={styles.aiTurnText}>
+                    {activeUnit
+                      ? coopSession && state.phase === 'AWAITING_PLAYER_ACTION'
+                        ? `Awaiting ${activeUnit.name}'s command...`
+                        : `${activeUnit.name} is acting...`
+                      : 'Resolving turn order...'}
+                  </Text>
+                </View>
+              ) : null}
+
               {/* Core Actions: Basic Attack + Guard/Parry */}
-              <View style={styles.coreActionsRow}>
+              <View style={[styles.coreActionsRow, !isPlayerTurn && styles.deckTurnLocked]}>
                 <TouchableOpacity
                   style={[styles.coreBtn, styles.attackBtn]}
+                  disabled={!isPlayerTurn}
                   onPress={() =>
                     dispatchCombatAction({
                       type: 'BASIC_ATTACK',
@@ -718,6 +740,7 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
 
                 <TouchableOpacity
                   style={[styles.coreBtn, styles.guardBtn]}
+                  disabled={!isPlayerTurn}
                   onPress={() =>
                     dispatchCombatAction({
                       type: 'GUARD',
@@ -734,7 +757,7 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
 
               {/* 4 Equipped Active Skills */}
               <Text style={styles.deckSectionLabel}>ACTIVE TALENT SKILLS</Text>
-              <View style={styles.grid4}>
+              <View style={[styles.grid4, !isPlayerTurn && styles.deckTurnLocked]}>
                 {[0, 1, 2, 3].map((idx) => {
                   const skill = heroUnit.equippedSkills[idx];
                   if (!skill) {
@@ -751,7 +774,7 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
                   const cd = heroUnit.skillCooldowns[skill.skillId] ?? 0;
                   const pool = skill.resourceType === 'MANA' ? heroUnit.mana : heroUnit.stamina;
                   const insufficient = pool < skill.resourceCost;
-                  const disabled = cd > 0 || insufficient;
+                  const disabled = !isPlayerTurn || cd > 0 || insufficient;
                   const isMana = skill.resourceType === 'MANA';
 
                   return (
@@ -796,12 +819,13 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
 
               {/* 4 Belt Consumables */}
               <Text style={styles.deckSectionLabel}>BELT CONSUMABLES</Text>
-              <View style={styles.grid4}>
+              <View style={[styles.grid4, !isPlayerTurn && styles.deckTurnLocked]}>
                 {[0, 1, 2, 3].map((idx) => {
                   const belt = heroUnit.beltSlots[idx];
-                  const def = belt?.itemSlug ? COMBAT_CONSUMABLE_BY_SLUG[belt.itemSlug] : undefined;
-                  const charges = belt?.charges ?? 0;
-                  const disabled = !def || charges <= 0;
+                  const resolvedSlug = belt?.itemSlug ?? equippedBeltSlugs[idx] ?? null;
+                  const def = resolvedSlug ? COMBAT_CONSUMABLE_BY_SLUG[resolvedSlug] : undefined;
+                  const charges = belt?.itemSlug ? (belt.charges ?? 0) : 0;
+                  const disabled = !isPlayerTurn || !def || charges <= 0;
 
                   return (
                     <TouchableOpacity
@@ -822,11 +846,17 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
                       activeOpacity={0.8}
                       testID={`arena-belt-btn-${idx}`}
                     >
-                      <Text style={styles.slotActionTitle} numberOfLines={1}>
+                      <Text
+                        style={[
+                          styles.slotActionTitle,
+                          !def && styles.slotActionEmptyText,
+                        ]}
+                        numberOfLines={1}
+                      >
                         {def ? def.name : 'Empty Belt'}
                       </Text>
                       <Text style={styles.slotActionMeta}>
-                        {def ? `${charges} left` : '—'}
+                        {def ? (charges > 0 ? `${charges} left` : 'Out of stock') : '—'}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -836,13 +866,7 @@ export const TurnBasedArenaScreen: React.FC<TurnBasedArenaScreenProps> = ({
           ) : (
             <View style={styles.aiTurnBanner} testID="arena-waiting-turn-banner">
               <RpgIcon name="sparkles" size={16} color={COLORS.gold} />
-              <Text style={styles.aiTurnText}>
-                {activeUnit
-                  ? coopSession && state.phase === 'AWAITING_PLAYER_ACTION'
-                    ? `Awaiting ${activeUnit.name}'s command...`
-                    : `${activeUnit.name} is acting...`
-                  : 'Resolving turn order...'}
-              </Text>
+              <Text style={styles.aiTurnText}>Resolving turn order...</Text>
             </View>
           )
         ) : state.status === 'VICTORY' ? (
@@ -1059,7 +1083,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(59, 24, 27, 0.72)',
   },
   unitStageCardDefeated: {
-    opacity: 0.38,
+    opacity: 0.45,
+    backgroundColor: 'rgba(12, 16, 24, 0.85)',
+  },
+  defeatedBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    letterSpacing: 0.8,
   },
   rigWrap: {
     alignItems: 'center',
@@ -1192,8 +1223,8 @@ const styles = StyleSheet.create({
   },
   deckContent: {
     padding: SPACING.md,
-    gap: SPACING.sm,
-    paddingBottom: SPACING.xl,
+    gap: SPACING.xs + 2,
+    paddingBottom: 96,
   },
   errorBanner: {
     backgroundColor: COLORS.strengthDim,
@@ -1273,11 +1304,14 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: SPACING.sm,
   },
+  deckTurnLocked: {
+    opacity: 0.55,
+  },
   slotActionBtn: {
     width: '48%',
     borderRadius: RADII.md,
     paddingHorizontal: SPACING.sm,
-    paddingVertical: 9,
+    paddingVertical: 7,
     borderWidth: 1,
     gap: 2,
   },
@@ -1291,8 +1325,8 @@ const styles = StyleSheet.create({
   },
   slotActionDisabled: {
     backgroundColor: SURFACES.layer1,
-    borderColor: SURFACES.hairline,
-    opacity: 0.48,
+    borderColor: SURFACES.hairlineStrong,
+    opacity: 0.72,
   },
   slotActionTitle: {
     fontSize: 12,
@@ -1302,7 +1336,7 @@ const styles = StyleSheet.create({
   slotActionEmptyText: {
     fontSize: 11,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: COLORS.textSecondary,
   },
   slotActionMeta: {
     fontSize: 10,
@@ -1316,9 +1350,9 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
     backgroundColor: SURFACES.layer1,
     borderRadius: RADII.md,
-    paddingVertical: SPACING.lg,
+    paddingVertical: SPACING.sm,
     borderWidth: 1,
-    borderColor: SURFACES.hairline,
+    borderColor: SURFACES.goldHairline,
   },
   aiTurnText: {
     fontSize: 13,

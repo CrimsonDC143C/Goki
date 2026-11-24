@@ -601,7 +601,16 @@ export const ReanimatedCombatantSprite: React.FC<ReanimatedCombatantSpriteProps>
             contentFit="contain"
             contentPosition="bottom center"
           />
-          {hitFlash ? <View style={styles.hitFlashTint} /> : null}
+          {hitFlash ? (
+            <ExpoImage
+              source={source as any}
+              style={styles.hitFlashSilhouette}
+              contentFit="contain"
+              contentPosition="bottom center"
+              tintColor="#FFFFFF"
+              pointerEvents="none"
+            />
+          ) : null}
         </ArenaAnimatedView>
 
         {/* Guard Spirit Aegis Barrier */}
@@ -713,14 +722,13 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  hitFlashTint: {
+  hitFlashSilhouette: {
     position: 'absolute',
     top: 0,
     right: 0,
     bottom: 0,
     left: 0,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.42)',
+    opacity: 0.52,
   },
   guardArcWrap: {
     position: 'absolute',

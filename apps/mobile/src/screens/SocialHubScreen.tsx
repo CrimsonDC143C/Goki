@@ -342,10 +342,14 @@ export const SocialHubScreen: React.FC = () => {
   const [busyAction, setBusyAction] = useState(false);
 
   const homeClanLabel = `${OPEN_WORLD_HOME_CLAN_NAME} [${OPEN_WORLD_HOME_CLAN_TAG}]`;
-  const homeSeasonPoints = Math.max(
-    150,
-    workoutsLoggedCount * 50 + Math.round(guildReputation / 5) + arenaWins * 35
-  );
+  const [serverHomeSeasonPoints, setServerHomeSeasonPoints] = useState<number | null>(null);
+  const homeSeasonPoints =
+    serverHomeSeasonPoints !== null
+      ? serverHomeSeasonPoints
+      : Math.max(
+          0,
+          workoutsLoggedCount * 50 + arenaWins * 35
+        );
 
   const buildLocalLeaderboards = useCallback(
     (category: SocialLeaderboardCategory): SocialLeaderboardEntryDto[] => {
@@ -514,6 +518,9 @@ export const SocialHubScreen: React.FC = () => {
 
       if (overviewRes.ok && overviewRes.data) {
         setActiveGymClan(overviewRes.data.gymClan);
+        if (typeof (overviewRes.data as any)?.homeClan?.seasonPoints === 'number') {
+          setServerHomeSeasonPoints((overviewRes.data as any).homeClan.seasonPoints);
+        }
         if (overviewRes.data.gymClan) {
           setGuildName(`${overviewRes.data.gymClan.name} [${overviewRes.data.gymClan.tag}]`);
         }
@@ -563,6 +570,16 @@ export const SocialHubScreen: React.FC = () => {
           if (res.ok && res.data) {
             setLeaderboardSeasonKey(res.data.seasonKey);
             setLeaderboardEntries(res.data.entries);
+            if (leaderboardCategory === 'GYM_CLANS') {
+              const homeEntry = res.data.entries.find(
+                (e) =>
+                  e.tag === OPEN_WORLD_HOME_CLAN_TAG ||
+                  e.name.includes(OPEN_WORLD_HOME_CLAN_NAME)
+              );
+              if (homeEntry && typeof homeEntry.totalPoints === 'number') {
+                setServerHomeSeasonPoints(homeEntry.totalPoints);
+              }
+            }
             return;
           }
         }
@@ -1317,7 +1334,7 @@ export const SocialHubScreen: React.FC = () => {
             testID="social-npc-warden-btn"
           >
             <RpgIcon name="banners" size={13} color="#26A69A" />
-            <Text style={styles.wardenBtnText}>Warden Torin</Text>
+            <Text style={styles.wardenBtnText}>Torin</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.quartermasterBtn}
@@ -1326,7 +1343,7 @@ export const SocialHubScreen: React.FC = () => {
             testID="social-npc-quartermaster-btn"
           >
             <RpgIcon name="social" size={13} color="#A855F7" />
-            <Text style={styles.quartermasterBtnText}>Commander Veyra</Text>
+            <Text style={styles.quartermasterBtnText}>Veyra</Text>
           </TouchableOpacity>
         </View>
       </HubSceneHeaderSlot>

@@ -190,6 +190,7 @@ These core decisions guide every milestone below:
   - [x] Verified `246` bundled static + compiled mobile assets (`251` total files in `apps/mobile/assets/`, `16.63 MB`, strictly under the `600`-asset target and Expo EAS `2,000`-asset cap); retired deprecated `CHARACTER_APPEARANCES` + `20` legacy character PNGs (`10.57 MB`), `40` legacy `512×512` item PNGs (`19.13 MB`), `35` legacy `100×100` enemy pixel sprite sheets (`0.07 MB`) + dead `SpriteAnimator`/`spriteManifest` files, `7` legacy static Whitewood PNGs (`7.48 MB`), and `scripts/generate-layer-icons.mjs` + `scripts/resize-image.ps1`.
   - [x] Passed full automated verification gate: `npm run assets:build` (`164/164` WebPs), `npm run typecheck` (`4/4` workspaces), `npm run build` (`3/3` workspaces, `tools/asset-pipeline` isolated), `npm run test` (`282/282` unit/integration tests), and `npm run test:e2e` (`8/8` Playwright E2E specs).
   - [x] Verified `runtimeVersion: "0.1.0"` OTA compatibility in `apps/mobile/app.json` and `apps/mobile/package.json` (Reanimated 4 Path B, zero native binary rebuilds required); ready for user-confirmed `eas update` OTA release cut.
+- [x] **Post-M6 Visual QA Remediation & Hardening (OTA `0.1.0`):** Audited the 6.5-minute end-to-end mobile walkthrough and resolved all 22 P0–P2 sync, economy, combat hit-flash, HP parity, raid leaderboard, layout, and contrast defects across `@goki/game-engine`, `@goki/server`, and `@goki/mobile`; added `temp video refs/` to `.gitignore` and published OTA `0.1.0` updates.
 
 ---
 

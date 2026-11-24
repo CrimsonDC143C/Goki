@@ -17,12 +17,41 @@ const RANK_LADDER = [
   'MYTHIC',
 ] as const;
 
+const MILESTONE_POOL_LABELS: Record<string, string> = {
+  BRONZE_CACHE: 'Bronze Cache',
+  SILVER_CACHE: 'Silver Cache',
+  GOLD_CACHE: 'Gold Cache',
+  MYTHIC_CACHE: 'Mythic Cache',
+  NONE: 'No Milestone Pool',
+};
+
+function formatMilestonePool(pool: string): string {
+  return (
+    MILESTONE_POOL_LABELS[pool] ??
+    pool
+      .toLowerCase()
+      .split('_')
+      .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : ''))
+      .join(' ')
+  );
+}
+
+function formatRemainingRaidTime(endsAtMs: number): string {
+  const diffMs = Math.max(0, endsAtMs - Date.now());
+  const totalHours = Math.ceil(diffMs / 3600000);
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (days > 0) return `${days}d ${hours}h`;
+  return `${Math.max(1, hours)}h`;
+}
+
 export interface GuildHallScreenProps {
   embedded?: boolean;
 }
 
 export const GuildHallScreen: React.FC<GuildHallScreenProps> = ({ embedded = false }) => {
   const {
+    activeCharacterId,
     characterName,
     stats,
     adventurerRank,
@@ -44,7 +73,11 @@ export const GuildHallScreen: React.FC<GuildHallScreenProps> = ({ embedded = fal
   const combinedStatLevel =
     (stats?.STRENGTH?.level ?? 1) +
     (stats?.ENDURANCE?.level ?? 1) +
-    (stats?.AGILITY?.level ?? 1);
+    (stats?.AGILITY?.level ?? 1) +
+    (stats?.DEXTERITY?.level ?? 1) +
+    (stats?.CONSTITUTION?.level ?? 1) +
+    (stats?.WISDOM?.level ?? 1) +
+    (stats?.SPIRIT?.level ?? 1);
 
   const getBountyProgress = (slug: string, completed: boolean) => {
     if (completed) {
@@ -58,14 +91,14 @@ export const GuildHallScreen: React.FC<GuildHallScreenProps> = ({ embedded = fal
     }
 
     if (slug === 'trial_of_iron') {
-      const doneWorkouts = Math.min(3, workoutsLoggedCount);
-      const isReady = workoutsLoggedCount >= 3;
-      const pct = Math.round((doneWorkouts / 3) * 100);
+      const doneWorkouts = Math.min(1, workoutsLoggedCount);
+      const isReady = workoutsLoggedCount >= 1;
+      const pct = Math.round((doneWorkouts / 1) * 100);
       return {
         isReady,
         progressPct: pct,
-        pills: [`${doneWorkouts}/3 Workouts`],
-        buttonLabel: isReady ? 'Claim' : `${doneWorkouts}/3`,
+        pills: [`${doneWorkouts}/1 Workout`],
+        buttonLabel: isReady ? 'Claim' : `${doneWorkouts}/1`,
         buttonState: isReady ? ('READY' as const) : ('LOCKED' as const),
       };
     }
@@ -322,7 +355,9 @@ export const GuildHallScreen: React.FC<GuildHallScreenProps> = ({ embedded = fal
               {raid.participants.map((p) => {
                 const total =
                   p.combatDamageDealt + p.workoutEnergyDamage + p.supportScore;
-                const isPlayerHero = p.characterId === 'player_hero';
+                const isPlayerHero =
+                  p.characterId === 'player_hero' ||
+                  (Boolean(activeCharacterId) && p.characterId === activeCharacterId);
                 const displayName = isPlayerHero
                   ? `${characterName || 'Hero'} (You)`
                   : p.name;
@@ -373,37 +408,53 @@ export const GuildHallScreen: React.FC<GuildHallScreenProps> = ({ embedded = fal
                 </Text>
               </Pressable>
 
-              <Pressable
-                style={[
-                  styles.rolloverBtn,
-                  Boolean(raid.lastResolution) && styles.strikeBtnDone,
-                ]}
-                disabled={Boolean(raid.lastResolution)}
-                onPress={() => resolveWeeklyRaidRewards(raid.id)}
-              >
-                <Text
-                  style={[
-                    styles.rolloverBtnText,
-                    Boolean(raid.lastResolution) && styles.strikeBtnTextDone,
-                  ]}
-                >
-                  {raid.lastResolution ? '✓ Rollover Claimed' : '🎁 Preview/Claim 7d Rollover'}
-                </Text>
-              </Pressable>
+              {(() => {
+                const canClaimRollover =
+                  !raid.lastResolution &&
+                  (raid.currentHp <= 0 || Date.now() >= raid.endsAtMs);
+                const rolloverDisabled = Boolean(raid.lastResolution) || !canClaimRollover;
+                return (
+                  <Pressable
+                    style={[
+                      styles.rolloverBtn,
+                      rolloverDisabled && styles.strikeBtnDone,
+                    ]}
+                    disabled={rolloverDisabled}
+                    onPress={() => resolveWeeklyRaidRewards(raid.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.rolloverBtnText,
+                        rolloverDisabled && styles.strikeBtnTextDone,
+                      ]}
+                    >
+                      {raid.lastResolution
+                        ? '✓ Rollover Claimed'
+                        : canClaimRollover
+                          ? '🎁 Claim 7d Rollover'
+                          : `⏳ Rollover in ${formatRemainingRaidTime(raid.endsAtMs)}`}
+                    </Text>
+                  </Pressable>
+                );
+              })()}
             </View>
 
             {raid.lastResolution && (
               <View style={styles.resolutionBox}>
                 <Text style={styles.resolutionTitle}>
-                  Weekly Rollover: Pool [{raid.lastResolution.unlockedMilestonePool}] • Kill
-                  Multiplier {raid.lastResolution.killBonusMultiplier}x
+                  Weekly Rollover: {formatMilestonePool(raid.lastResolution.unlockedMilestonePool)}{' '}
+                  • Kill Multiplier {raid.lastResolution.killBonusMultiplier}x
                 </Text>
                 {raid.lastResolution.participantRewards
-                  .filter((r) => r.characterId === 'player_hero')
+                  .filter(
+                    (r) =>
+                      r.characterId === 'player_hero' ||
+                      (Boolean(activeCharacterId) && r.characterId === activeCharacterId)
+                  )
                   .map((my) => (
                     <View key={my.characterId}>
                       <Text style={styles.myRewardLine}>
-                        Your Tier: [{my.rewardTier}] ({my.contributionPercentage}% contribution) → +
+                        Your Tier: {my.rewardTier} ({my.contributionPercentage}% contribution) → +
                         {my.goldAwarded} Gold, +{my.guildReputationAwarded} Guild Rep
                       </Text>
                       {my.lootDrops.map((d) => (

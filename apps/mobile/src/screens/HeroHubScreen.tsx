@@ -160,14 +160,14 @@ function MorphTierSelector<TValue extends string | number>({
                   style={[
                     styles.morphTierLabel,
                     selected && { color: COLORS.gold },
-                    !unlocked && { color: COLORS.textMuted },
+                    !unlocked && { color: COLORS.textSecondary },
                   ]}
                   numberOfLines={1}
                 >
                   {opt.label}
                 </Text>
                 {!unlocked ? (
-                  <RpgIcon name="lock" size={12} color={COLORS.textMuted} />
+                  <RpgIcon name="lock" size={12} color={COLORS.textSecondary} />
                 ) : selected ? (
                   <RpgIcon name="check" size={12} color={COLORS.gold} />
                 ) : null}
@@ -1063,7 +1063,7 @@ export const HeroHubScreen: React.FC<HeroHubScreenProps> = ({
         sceneSlotId="hero_sanctum"
         pageExpressions={['happy', 'focused']}
         dialoguePages={[
-          `Welcome back, ${characterName || 'Adventurer'}. Your Hero hub unites gear loadouts, cosmetic appearances, and all 10 stat-bound talent trees in one place.`,
+          `Welcome back, ${characterName || 'Adventurer'}. Your Hero hub unites gear loadouts, cosmetic appearances, and all 10 talent trees across your 7 stats in one place.`,
           'Every real-world workout grants holistic stat XP and talent points. Allocate points under Talents or head to Train whenever you are ready to log sets.',
         ]}
         actionChips={[
@@ -1347,7 +1347,9 @@ const styles = StyleSheet.create({
     borderColor: SURFACES.goldHairline,
   },
   morphTierBtnLocked: {
-    opacity: 0.55,
+    opacity: 0.82,
+    backgroundColor: SURFACES.layer1,
+    borderColor: SURFACES.hairlineStrong,
   },
   morphTierTopRow: {
     flexDirection: 'row',
@@ -1363,7 +1365,7 @@ const styles = StyleSheet.create({
   },
   morphTierReq: {
     fontSize: 10,
-    color: COLORS.textMuted,
+    color: COLORS.textSecondary,
   },
   presetRigThumb: {
     width: 50,

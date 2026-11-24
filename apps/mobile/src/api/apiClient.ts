@@ -808,6 +808,49 @@ export async function completeOnboardingApi(characterId: string): Promise<{
 }
 
 /**
+ * Authoritatively simulates and persists a solo/AI-companion 24h Dungeon Expedition claim
+ * (`POST /api/dungeons/:dungeonSlug/claim-expedition`).
+ */
+export async function claimSoloExpeditionApi(
+  dungeonSlug: string,
+  payload: {
+    characterId: string;
+    clientRunId: string;
+    companionIds: string[];
+    activeWorkoutBuffs?: unknown[];
+  }
+): Promise<{
+  ok: boolean;
+  statusCode?: number;
+  data?: any;
+  error?: string;
+}> {
+  try {
+    const res = await apiFetch(
+      `/api/dungeons/${encodeURIComponent(dungeonSlug)}/claim-expedition`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      10000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        statusCode: res.status,
+        error: data.error || 'Failed to claim expedition spoils',
+      };
+    }
+    return { ok: true, statusCode: res.status, data };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Network error claiming expedition spoils';
+    return { ok: false, error: message };
+  }
+}
+
+/**
  * Clears the stored JWT authentication token.
  */
 export async function logoutAccount(): Promise<void> {

@@ -512,23 +512,35 @@ export const AdventureHubScreen: React.FC = () => {
 
   const npcActionChips = useMemo<NpcActionChip[]>(() => {
     if (npcMode === 'BRIEFING' && resolvedBriefingQuest) {
-      return [
-        {
+      const q = resolvedBriefingQuest;
+      const rankUnlocked = isGuildQuestUnlockedForRank(q, adventurerRank);
+      const reqWorkouts = q.trialRequirements?.workoutsLogged;
+      const reqStatLvl = q.trialRequirements?.totalStatLevel;
+      const workoutsMet =
+        typeof reqWorkouts !== 'number' || workoutsLoggedCount >= reqWorkouts;
+      const statsMet =
+        typeof reqStatLvl !== 'number' || totalStatLevel >= reqStatLvl;
+      const briefingUnlocked = rankUnlocked && workoutsMet && statsMet;
+
+      const chips: NpcActionChip[] = [];
+      if (briefingUnlocked) {
+        chips.push({
           id: 'enter-arena',
           label: 'Enter Turn-Based Arena',
           icon: 'combat',
           variant: 'primary',
           testID: 'npc-chip-enter-arena',
-          onPress: () => handleLaunchQuest(resolvedBriefingQuest.questSlug),
-        },
-        {
-          id: 'back-desk',
-          label: 'Back to Guild Desk',
-          icon: 'chat',
-          variant: 'subtle',
-          onPress: () => setNpcMode('DESK'),
-        },
-      ];
+          onPress: () => handleLaunchQuest(q.questSlug),
+        });
+      }
+      chips.push({
+        id: 'back-desk',
+        label: 'Back to Guild Desk',
+        icon: 'chat',
+        variant: briefingUnlocked ? 'subtle' : 'primary',
+        onPress: () => setNpcMode('DESK'),
+      });
+      return chips;
     }
 
     if (npcMode === 'DEBRIEF') {
@@ -588,10 +600,13 @@ export const AdventureHubScreen: React.FC = () => {
       },
     ];
   }, [
+    adventurerRank,
     claimGuildFieldRations,
     guildQuests,
     npcMode,
     resolvedBriefingQuest,
+    totalStatLevel,
+    workoutsLoggedCount,
   ]);
 
   const renderQuestCard = (q: GuildQuestDefinition) => {
@@ -610,7 +625,7 @@ export const AdventureHubScreen: React.FC = () => {
     if (!rankUnlocked) {
       gateReason = `Requires ${q.requiredRank} Rank`;
     } else if (!workoutsMet && typeof reqWorkouts === 'number') {
-      gateReason = `Log ${reqWorkouts} workouts (${workoutsLoggedCount}/${reqWorkouts})`;
+      gateReason = `Log ${reqWorkouts} workout${reqWorkouts === 1 ? '' : 's'} (${workoutsLoggedCount}/${reqWorkouts})`;
     } else if (!statsMet && typeof reqStatLvl === 'number') {
       gateReason = `Total Stat Lv ${reqStatLvl} (${totalStatLevel}/${reqStatLvl})`;
     }
@@ -867,8 +882,8 @@ export const AdventureHubScreen: React.FC = () => {
               </View>
             </SlateSection>
 
-            {/* Compact Combat Loadout Pre-Quest Staging */}
-            <CombatLoadoutSelector compact />
+            {/* Compact Combat Loadout Pre-Quest Staging (collapsed by default to keep quests above the fold) */}
+            <CombatLoadoutSelector compact defaultCollapsed />
 
             {/* Real-Time Company Co-op Quest Room */}
             <SlateSection
@@ -1340,9 +1355,9 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   embarkBtnDisabled: {
-    backgroundColor: SURFACES.layer1,
+    backgroundColor: SURFACES.layer2,
     borderWidth: 1,
-    borderColor: SURFACES.hairline,
+    borderColor: SURFACES.hairlineStrong,
   },
   embarkBtnText: {
     fontSize: 12,
@@ -1350,7 +1365,7 @@ const styles = StyleSheet.create({
     color: SURFACES.canvas,
   },
   embarkBtnTextDisabled: {
-    color: COLORS.textMuted,
+    color: COLORS.textSecondary,
   },
   coopCard: {
     gap: SPACING.sm,

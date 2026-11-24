@@ -59,7 +59,7 @@ npm run dev:mobile
 ```bash
 npm run db:validate   # Validate Prisma schema
 npm run typecheck     # Strict TypeScript check across all 4 workspaces
-npm test              # Run Vitest unit & API tests (22 test files, 188 passing tests across game-engine & server)
+npm test              # Run Vitest unit & API tests (30 test files, 282 passing tests across game-engine & server)
 npm run test:e2e      # Run Playwright full-stack E2E tests (auth, offline logging, background sync)
 ```
 
@@ -97,7 +97,7 @@ Goki incorporates a dual-layer, zero-interrupted-sets auto-update subsystem desi
   * As soon as the workout session finishes or returns to `Idle`, the staged update is automatically applied.
 * **Force Binary Upgrade Guard:**
   * When breaking schema or native library changes occur, setting `APP_MIN_REQUIRED_VERSION` on the backend activates a blocking modal directing athletes to download the latest APK build via direct link.
-* **Manual Trigger:** Athletes and testers can tap `🔄 Check Updates` with live version badge `v0.1.0` directly from the `CharacterProfileScreen` badge strip.
+* **Manual Trigger:** Athletes and testers can tap `🔄 Check Updates` with live version badge `v0.2.0` directly from the `CharacterProfileScreen` badge strip.
 * **Publishing Updates:**
   * **OTA Updates:** `npx eas update --channel preview` or `npx eas update --channel production`
   * **Full APK Builds:** `npx eas build -p android --profile preview`

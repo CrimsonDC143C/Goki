@@ -36,3 +36,7 @@ Thumbs.db
 
 # Art pipeline raw assets (local generation staging; compiled WebPs are committed)
 art-pipeline/raw/
+
+# Temporary QA media & video recordings
+temp video refs/
+

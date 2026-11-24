@@ -55,7 +55,19 @@ export interface AutoBattlerArenaProps {
   dungeon: DungeonDefinition;
   replay?: DungeonCombatReplayResult | null;
   activeWorkoutBuffs?: readonly DungeonWorkoutBuff[];
-  party?: ReadonlyArray<{ characterId: string; name: string }>;
+  party?: ReadonlyArray<{
+    characterId: string;
+    name: string;
+    coreStats?: {
+      strengthLevel?: number;
+      enduranceLevel?: number;
+      conLevel?: number;
+      constitutionLevel?: number;
+    };
+    equipmentBonuses?: { maxHp?: number };
+  }>;
+  playerGoldShare?: number;
+  onClaimSpoils?: () => void | Promise<void>;
   onDismiss?: () => void;
 }
 
@@ -105,17 +117,20 @@ export function getHeroStagePosition(
   viewportWidth: number
 ): HeroStagePosition {
   if (heroIndex === 0) {
-    const scale = 2.25;
+    const scale = 2.15;
     const cellSize = Math.round(100 * scale);
     const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM;
-    const leftPx = Math.max(10, Math.round(viewportWidth * 0.15));
-    return { leftPx, baselineBottom, scale, cellSize, zIndex: 14 };
+    const leftPx = Math.max(24, Math.round(viewportWidth * 0.21));
+    return { leftPx, baselineBottom, scale, cellSize, zIndex: 15 };
   }
-  const scale = 2.0;
+  const scale = 1.88;
   const cellSize = Math.round(100 * scale);
-  const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM + (heroIndex % 2 === 1 ? 7 : 2);
-  const leftPx = Math.round(viewportWidth * 0.05) - (heroIndex - 1) * 22;
-  return { leftPx, baselineBottom, scale, cellSize, zIndex: 13 - heroIndex };
+  const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM + (heroIndex % 2 === 1 ? 14 : 4);
+  const leftPx = Math.max(
+    -26,
+    Math.round(viewportWidth * 0.08) - (heroIndex - 1) * Math.round(viewportWidth * 0.11)
+  );
+  return { leftPx, baselineBottom, scale, cellSize, zIndex: 14 - heroIndex };
 }
 
 export interface EnemyStagePosition {
@@ -132,24 +147,27 @@ export function getEnemyStagePosition(
   isBoss?: boolean
 ): EnemyStagePosition {
   if (isBoss) {
-    const scale = 2.65;
+    const scale = 2.6;
     const cellSize = Math.round(100 * scale);
     const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM;
-    const rightPx = Math.max(4, Math.round(viewportWidth * 0.05));
+    const rightPx = Math.max(4, Math.round(viewportWidth * 0.04));
     return { rightPx, baselineBottom, scale, cellSize, zIndex: 13 };
   }
   if (enemyIndex === 0) {
-    const scale = 2.25;
+    const scale = 2.15;
     const cellSize = Math.round(100 * scale);
     const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM;
-    const rightPx = Math.max(12, Math.round(viewportWidth * 0.13));
-    return { rightPx, baselineBottom, scale, cellSize, zIndex: 13 };
+    const rightPx = Math.max(24, Math.round(viewportWidth * 0.2));
+    return { rightPx, baselineBottom, scale, cellSize, zIndex: 14 };
   }
-  const scale = 2.05;
+  const scale = 1.92;
   const cellSize = Math.round(100 * scale);
-  const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM + (enemyIndex % 2 === 1 ? 7 : 2);
-  const rightPx = Math.round(viewportWidth * 0.01) - (enemyIndex - 1) * 20 - 12;
-  return { rightPx, baselineBottom, scale, cellSize, zIndex: 12 - enemyIndex };
+  const baselineBottom = WHITEWOOD_GROUND_BASELINE_BOTTOM + (enemyIndex % 2 === 1 ? 14 : 4);
+  const rightPx = Math.max(
+    -22,
+    Math.round(viewportWidth * 0.04) - (enemyIndex - 1) * Math.round(viewportWidth * 0.09)
+  );
+  return { rightPx, baselineBottom, scale, cellSize, zIndex: 13 - enemyIndex };
 }
 
 function getReplayEventStepDurationMs(
@@ -200,9 +218,11 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
   replay,
   activeWorkoutBuffs = [],
   party,
+  playerGoldShare,
+  onClaimSpoils,
   onDismiss,
 }) => {
-  const { race, customizationConfig, equipmentLoadout } = useGame();
+  const { race, customizationConfig, equipmentLoadout, derivedCombatStats } = useGame();
   const [viewportWidth, setViewportWidth] = useState<number>(380);
   const arenaPreset = useMemo(
     () =>
@@ -432,19 +452,34 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
     if (!replay) {
       const heroes: UnitLiveVisualState[] =
         party && party.length > 0
-          ? party.map((p) => ({
-              id: p.characterId,
-              name: p.name,
-              maxHp: 100,
-              hp: 100,
-              shieldHp: 0,
-            }))
+          ? party.map((p, idx) => {
+              const estHp =
+                idx === 0 && p.characterId === 'player_hero'
+                  ? derivedCombatStats.maxHp
+                  : Math.max(
+                      100,
+                      Math.round(
+                        220 +
+                          (p.coreStats?.enduranceLevel ?? 1) * 28 +
+                          (p.coreStats?.strengthLevel ?? 1) * 10 +
+                          (p.coreStats?.conLevel ?? p.coreStats?.constitutionLevel ?? 0) * 15 +
+                          (p.equipmentBonuses?.maxHp ?? 0)
+                      )
+                    );
+              return {
+                id: p.characterId,
+                name: p.name,
+                maxHp: estHp,
+                hp: estHp,
+                shieldHp: 0,
+              };
+            })
           : [
               {
                 id: 'lead-hero',
                 name: 'Hero Vanguard',
-                maxHp: 100,
-                hp: 100,
+                maxHp: derivedCombatStats.maxHp,
+                hp: derivedCombatStats.maxHp,
                 shieldHp: 0,
               },
             ];
@@ -563,7 +598,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
       heroes: Array.from(heroesMap.values()),
       enemies: Array.from(enemiesMap.values()),
     };
-  }, [cursorIndex, dungeon.rooms, replay, party, resolvedImpactCursor]);
+  }, [cursorIndex, derivedCombatStats.maxHp, dungeon.rooms, replay, party, resolvedImpactCursor]);
 
   const leadHero = stageState.heroes[0];
   const companions = stageState.heroes.slice(1);
@@ -973,6 +1008,19 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
     return getEnemyStagePosition(floatingEnemyIndex, viewportWidth, floatingEnemy?.isBoss);
   }, [floatingEnemyIndex, viewportWidth, floatingEnemy?.isBoss]);
 
+  const replayFinished = Boolean(
+    replay && (replay.events.length === 0 || cursorIndex >= replay.events.length - 1)
+  );
+  const partySize = Math.max(1, party?.length ?? replay?.partySummaries.length ?? 1);
+  const effectiveGoldShare = useMemo(() => {
+    if (!replay) return 0;
+    if (typeof playerGoldShare === 'number') return playerGoldShare;
+    if (replay.roomsCleared > 0 && replay.totalGoldEarned > 0) {
+      return Math.round(replay.totalGoldEarned / partySize);
+    }
+    return 0;
+  }, [partySize, playerGoldShare, replay]);
+
   const progressPct =
     replay && replay.events.length > 1 ? (cursorIndex / (replay.events.length - 1)) * 100 : 100;
 
@@ -988,7 +1036,9 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
           <Text style={styles.expeditionBannerTitle}>
             {isLivePatrol
               ? '⏳ 24h Expedition Window • 🏰 Expedition Marching'
-              : `📜 24h Expedition Resolved • Outcome: ${replay?.outcome ?? 'COMPLETED'}`}
+              : replayFinished
+                ? `📜 24h Expedition Resolved • Outcome: ${replay?.outcome ?? 'COMPLETED'}`
+                : '⚔️ 24h Expedition • Auto-Battler Replay'}
           </Text>
           <Pressable
             style={styles.expeditionInfoToggleBtn}
@@ -1019,7 +1069,11 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
             </View>
           ) : (
             <Text style={styles.expeditionPromptText}>
-              Log workouts to inject live party buffs before 00:00 UTC
+              {isLivePatrol
+                ? 'Log workouts to inject live party buffs before 00:00 UTC'
+                : replayFinished
+                  ? 'Delve simulation complete — inspect or claim your spoils below.'
+                  : 'Replaying deterministic 24-hour delve combat log...'}
             </Text>
           )}
         </View>
@@ -1632,33 +1686,38 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
             </ScrollView>
           </View>
 
-          <View style={styles.lootSummaryBox}>
-            <Text style={styles.lootHeader}>
-              🏆 Expedition Spoils: +{replay.totalGoldEarned} Gold
-            </Text>
-            <View style={styles.lootWrap}>
-              {replay.lootDrops.map((drop) => (
-                <View key={drop.itemSlug} style={styles.lootPill}>
-                  <Text
-                    style={[
-                      styles.lootPillText,
-                      { color: RARITY_COLORS[drop.rarity] ?? COLORS.textPrimary },
-                    ]}
-                  >
-                    {drop.quantity}x {drop.itemName} [{drop.rarity}]
-                  </Text>
-                </View>
-              ))}
-            </View>
+          {replayFinished && (
+            <View style={styles.lootSummaryBox}>
+              <Text style={styles.lootHeader}>
+                🏆 Expedition Spoils: +{effectiveGoldShare} Gold
+                {partySize > 1 && replay.totalGoldEarned > effectiveGoldShare
+                  ? ` (your share of ${replay.totalGoldEarned}g)`
+                  : ''}
+              </Text>
+              <View style={styles.lootWrap}>
+                {replay.lootDrops.map((drop) => (
+                  <View key={drop.itemSlug} style={styles.lootPill}>
+                    <Text
+                      style={[
+                        styles.lootPillText,
+                        { color: RARITY_COLORS[drop.rarity] ?? COLORS.textPrimary },
+                      ]}
+                    >
+                      {drop.quantity}x {drop.itemName} [{drop.rarity}]
+                    </Text>
+                  </View>
+                ))}
+              </View>
 
-            <Pressable
-              style={styles.openSpoilsChestBtn}
-              onPress={() => setFanfareModalVisible(true)}
-              testID="open-expedition-spoils-chest-btn"
-            >
-              <Text style={styles.openSpoilsChestBtnText}>🎁 Open Expedition Spoils Chest</Text>
-            </Pressable>
-          </View>
+              <Pressable
+                style={styles.openSpoilsChestBtn}
+                onPress={() => setFanfareModalVisible(true)}
+                testID="open-expedition-spoils-chest-btn"
+              >
+                <Text style={styles.openSpoilsChestBtnText}>🎁 Open Expedition Spoils Chest</Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* Expedition Spoils Fanfare Modal */}
           <Modal
@@ -1759,7 +1818,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                   </View>
                 )}
 
-                {(replay.outcome === 'VICTORY' || replay.totalGoldEarned > 0) && (
+                {(replay.outcome === 'VICTORY' || effectiveGoldShare > 0) && (
                   <View
                     style={[
                       styles.fanfareGoldPill,
@@ -1775,7 +1834,11 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                         replay.outcome !== 'VICTORY' && { color: '#E5E7EB' },
                       ]}
                     >
-                      +{replay.totalGoldEarned} {replay.outcome === 'VICTORY' ? 'Gold' : 'Salvaged Gold'}
+                      +{effectiveGoldShare}{' '}
+                      {replay.outcome === 'VICTORY' ? 'Gold' : 'Salvaged Gold'}
+                      {partySize > 1 && replay.totalGoldEarned > effectiveGoldShare
+                        ? ` (share of ${replay.totalGoldEarned}g)`
+                        : ''}
                     </Text>
                   </View>
                 )}
@@ -1948,6 +2011,7 @@ export const AutoBattlerArena: React.FC<AutoBattlerArenaProps> = ({
                   ]}
                   onPress={() => {
                     setFanfareModalVisible(false);
+                    void onClaimSpoils?.();
                     onDismiss?.();
                   }}
                   testID="claim-expedition-spoils-btn"
@@ -2260,13 +2324,15 @@ const styles = StyleSheet.create({
   rosterPill: {
     backgroundColor: COLORS.bgElevated,
     borderRadius: 6,
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 4,
     borderWidth: 1,
     borderColor: COLORS.border,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
+    maxWidth: '48%',
+    flexGrow: 1,
   },
   rosterPillDefeated: {
     opacity: 0.5,
@@ -2276,9 +2342,10 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 10,
     fontWeight: '600',
+    flexShrink: 1,
   },
   rosterHpTrack: {
-    width: 40,
+    width: 30,
     height: 4,
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 2,
